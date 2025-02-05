@@ -1,0 +1,25 @@
+{
+    "version":"1.0",
+    "author":"lybbn",
+    "email":"1042594286@qq.com",
+    "home_base_url": "https://ruyi.lybbn.cn",
+    "download_base_url": "https://download.ruyi.lybbn.cn",
+    "linux":{
+        "root_path": "/ruyi",
+        "install_path": "/ruyi/server",
+        "panel_path": "/ruyi/server/ruyi",
+        "logs_path": "/ruyi/logs",
+        "backup_path":"/ruyi/backup",
+        "tmp_path":"/ruyi/tmp",
+        "wwwroot_path":"/ruyi/wwwroot"
+    },
+    "windows":{
+        "root_path": "c:/ruyi",
+        "install_path": "c:/ruyi/server",
+        "panel_path": "c:/ruyi/server/ruyi",
+        "logs_path": "c:/ruyi/logs",
+        "backup_path":"c:/ruyi/backup",
+        "tmp_path":"c:/ruyi/tmp",
+        "wwwroot_path":"c:/ruyi/wwwroot"
+    }
+}

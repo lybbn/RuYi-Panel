@@ -1,0 +1,319 @@
+{
+	"version": 1.0,
+	"authors": "lybbn",
+	"email": "1042594286@qq.com",
+	"linux": {
+		"soft": [{
+			"id": 1,
+			"sort": 1,
+			"icon": "nginx.png",
+			"title": "Nginx",
+			"name": "nginx",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "1.27",
+				"c_version": "1.27.3",
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.tar.gz"
+			}, {
+				"id": 2,
+				"version": "openresty",
+				"c_version": "1.25.3.2",
+				"hide":true,
+				"url": "https://mirrors.huaweicloud.com/openresty/v1.25.3.2/openresty-1.25.3.2.tar.gz"
+			}],
+			"author": "nginx.org",
+			"home": "https://www.nginx.org",
+			"type": 3,
+			"typename": "Web服务器",
+			"desc": "轻量级，内存占用少，并发性能强，跨平台部署",
+			"price": 0,
+			"show": 1
+		}, {
+			"id": 2,
+			"sort": 2,
+			"icon": "redis.png",
+			"title": "Redis",
+			"name": "redis",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "7.2",
+				"c_version": "7.2.6",
+				"url": "https://mirrors.huaweicloud.com/redis/redis-7.2.6.tar.gz"
+			}],
+			"author": "redis.io",
+			"home": "https://redis.io",
+			"type": 2,
+			"typename": "数据库",
+			"desc": "Redis是一个开源的高性能内存数据库，通常用作缓存系统或键值key-value存储数据库",
+			"price": 0,
+			"show": 1
+		}, {
+			"id": 3,
+			"sort": 3,
+			"icon": "mysql.png",
+			"title": "Mysql",
+			"name": "mysql",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "5.7",
+				"c_version": "5.7.38",
+				"url":"https://mirrors.huaweicloud.com/mysql/Downloads/MySQL-5.7/mysql-boost-5.7.38.tar.gz",
+				"url2": "https://mirrors.aliyun.com/mysql/MySQL-5.7/mysql-boost-5.7.38.tar.gz"
+			}, {
+				"id": 2,
+				"version": "8.0",
+				"c_version": "8.0.28",
+				"url": "https://mirrors.aliyun.com/mysql/MySQL-8.0/mysql-boost-8.0.28.tar.gz"
+			}],
+			"author": "mysql.com",
+			"home": "https://www.mysql.com",
+			"type": 2,
+			"typename": "数据库",
+			"desc": "MySQL是一个流行的开源关系型数据库管理系统，被广泛地应用在中小型网站中",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 13,
+			"sort": 13,
+			"icon": "pip.png",
+			"title": "Supervisor",
+			"name": "supervisor",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "4.2",
+				"c_version": "4.2.5",
+				"url": "https://files.pythonhosted.org/packages/2c/7a/0ad3973941590c040475046fef37a2b08a76691e61aa59540828ee235a6e/supervisor-4.2.5-py2.py3-none-any.whl"
+			}],
+			"author": "supervisord.org",
+			"home": "http://www.supervisord.org",
+			"type": 5,
+			"typename": "安全防护",
+			"desc": "Supervisor进程守护管理工具可重启崩溃或退出的进程和设置进程开机启动",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 24,
+			"sort": 24,
+			"icon": "python.png",
+			"title": "Python3.13.1",
+			"name": "python",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "3.13.1",
+				"c_version": "3.13.1",
+				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.13.1.tgz"
+			}],
+			"author": "python.org",
+			"home": "https://www.python.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Python是一种解释型、面向对象、动态数据类型的高级程序设计语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 25,
+			"sort": 25,
+			"icon": "python.png",
+			"title": "Python3.12.8",
+			"name": "python",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "3.12.8",
+				"c_version": "3.12.8",
+				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.12.8.tgz"
+			}],
+			"author": "python.org",
+			"home": "https://www.python.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Python是一种解释型、面向对象、动态数据类型的高级程序设计语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 90,
+			"sort": 90,
+			"icon": "go.png",
+			"title": "Go1.23.3",
+			"name": "go",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "1.23.3",
+				"c_version": "1.23.3",
+				"url": "https://mirrors.aliyun.com/golang/go1.23.3.linux-amd64.tar.gz"
+			}],
+			"author": "golang.google.cn",
+			"home": "https://golang.google.cn/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Go(Golang)由Google开发的静态强类型、编译型、并发型，并具有垃圾回收功能的编程语言",
+			"price": 0,
+			"show": 1
+		}]
+	},
+	"windows": {
+		"soft": [{
+			"id": 1,
+			"sort": 1,
+			"icon": "nginx.png",
+			"title": "Nginx",
+			"name": "nginx",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "1.27",
+				"c_version": "1.27.3",
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.zip"
+			}, {
+				"id": 2,
+				"version": "openresty",
+				"c_version": "1.25.3.2",
+				"hide":true,
+				"url": "https://openresty.org/download/openresty-1.25.3.2-win64.zip"
+			}],
+			"author": "nginx.org",
+			"home": "https://www.nginx.org",
+			"type": 3,
+			"typename": "Web服务器",
+			"desc": "轻量级，内存占用少，并发性能强，跨平台部署",
+			"price": 0,
+			"show": 1
+		}, {
+			"id": 2,
+			"sort": 2,
+			"icon": "redis.png",
+			"title": "Redis",
+			"name": "redis",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "3.0",
+				"c_version": "3.0.504",
+				"url": "https://github.com/microsoftarchive/redis/releases/download/win-3.0.504/Redis-x64-3.0.504.zip"
+			}, {
+				"id": 2,
+				"version": "5.0",
+				"c_version": "5.0.14.1",
+				"url": "https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip"
+			}],
+			"author": "redis.io",
+			"home": "https://redis.io",
+			"type": 2,
+			"typename": "数据库",
+			"desc": "Redis是一个开源的高性能内存数据库，通常用作缓存系统或键值key-value存储数据库",
+			"price": 0,
+			"show": 1
+		}, {
+			"id": 3,
+			"sort": 3,
+			"icon": "mysql.png",
+			"title": "Mysql",
+			"name": "mysql",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "5.7",
+				"c_version": "5.7.38",
+				"url": "https://mirrors.huaweicloud.com/mysql/Downloads/MySQL-5.7/mysql-5.7.38-winx64.zip"
+			}, {
+				"id": 2,
+				"version": "8.0",
+				"c_version": "8.0.29",
+				"url": "https://mirrors.huaweicloud.com/mysql/Downloads/MySQL-8.0/mysql-8.0.29-winx64.zip"
+			}],
+			"author": "mysql.com",
+			"home": "https://www.mysql.com",
+			"type": 2,
+			"typename": "数据库",
+			"desc": "MySQL是一个流行的开源关系型数据库管理系统，被广泛地应用在中小型网站中",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 13,
+			"sort": 13,
+			"icon": "pip.png",
+			"title": "Supervisor",
+			"name": "supervisor",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "4.7",
+				"c_version": "4.7.0",
+				"url": "https://files.pythonhosted.org/packages/69/4d/3a493f15f5b80608857ef157f382ace494f51d9031e6bee6082437dd1403/supervisor_win-4.7.0-py2.py3-none-any.whl"
+			}],
+			"author": "supervisord.org",
+			"home": "http://www.supervisord.org",
+			"type": 5,
+			"typename": "安全防护",
+			"desc": "supervisor-win进程守护管理工具可重启崩溃或退出的进程和设置进程开机启动",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 24,
+			"sort": 24,
+			"icon": "python.png",
+			"title": "Python3.13.1",
+			"name": "python",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "3.13.1",
+				"c_version": "3.13.1",
+				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.13.1-amd64.exe"
+			}],
+			"author": "python.org",
+			"home": "https://www.python.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Python是一种解释型、面向对象、动态数据类型的高级程序设计语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 25,
+			"sort": 25,
+			"icon": "python.png",
+			"title": "Python3.12.8",
+			"name": "python",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "3.12.8",
+				"c_version": "3.12.8",
+				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.12.8-amd64.exe"
+			}],
+			"author": "python.org",
+			"home": "https://www.python.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Python是一种解释型、面向对象、动态数据类型的高级程序设计语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 90,
+			"sort": 90,
+			"icon": "go.png",
+			"title": "Go1.23.3",
+			"name": "go",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "1.23.3",
+				"c_version": "1.23.3",
+				"url": "https://mirrors.aliyun.com/golang/go1.23.3.windows-amd64.zip"
+			}],
+			"author": "golang.google.cn",
+			"home": "https://golang.google.cn/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Go(Golang)由Google开发的静态强类型、编译型、并发型，并具有垃圾回收功能的编程语言",
+			"price": 0,
+			"show": 1
+		}]
+	}
+}
