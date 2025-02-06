@@ -19,7 +19,7 @@ class OperationLog(models.Model):
     module = models.CharField(max_length=255,choices=MODULE_CHOICES, verbose_name="请求模块", null=True, blank=True)
     path = models.CharField(max_length=255, verbose_name="请求地址", null=True, blank=True)
     body = models.TextField(verbose_name="请求参数", null=True, blank=True)
-    ip = models.CharField(max_length=32, verbose_name="请求ip地址", null=True, blank=True)
+    ip = models.CharField(max_length=50, verbose_name="请求ip地址", null=True, blank=True)
     ip_area = models.CharField(max_length=100, verbose_name="IP归属地", null=True, blank=True, help_text="IP归属地")
     browser = models.CharField(max_length=64, verbose_name="请求浏览器", null=True, blank=True)
     status = models.BooleanField(default=True,verbose_name="状态")

@@ -43,3 +43,29 @@
 - QQ群：
 
 1. 如意服务器运维面板群1：746326385
+
+## 功能预览
+
+### 首页
+
+<img src="https://foruda.gitee.com/images/1738813129276998940/d8beb4f2_4823422.jpeg" referrerpolicy="no-referrer" />
+
+### 网站
+
+<img src="https://foruda.gitee.com/images/1738813212161749528/6a548a53_4823422.jpeg" referrerpolicy="no-referrer" />
+
+### 计划任务
+
+<img src="https://foruda.gitee.com/images/1738813406022412860/0bb914b4_4823422.jpeg" referrerpolicy="no-referrer" />
+
+### 日志审计
+
+<img src="https://foruda.gitee.com/images/1738813428277156383/b541ac59_4823422.jpeg" referrerpolicy="no-referrer" />
+
+
+### 应用商店
+
+<img src="https://foruda.gitee.com/images/1738813465814599623/b4c983a6_4823422.jpeg" referrerpolicy="no-referrer" />
+
+[更多预览](https://gitee.com/lybbn/RuYi-Panel/wikis/pages?sort_id=13387675&doc_id=6451384)
+
