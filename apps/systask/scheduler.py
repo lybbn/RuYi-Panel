@@ -64,8 +64,8 @@ class Scheduler:
     }
 
     def __new__(cls):
-        executors = cls.task_executor()  # 获取执行器字典
         if not cls._instance:
+            executors = cls.task_executor()  # 获取执行器字典
             cls._instance = BackgroundScheduler(timezone=settings.TIME_ZONE,job_defaults=cls.job_defaults,executors=executors)
         return cls._instance
 

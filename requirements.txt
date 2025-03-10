@@ -23,3 +23,9 @@ pywin32 ; sys_platform == 'win32'
 PyMySQL
 twisted[http2,tls]
 setproctitle
+pytz
+dnspython
+cryptography
+pycryptodome
+pycryptodomex
+docker

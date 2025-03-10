@@ -26,6 +26,7 @@ import subprocess
 import importlib
 from utils.server.system import system
 from django.conf import settings
+from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
 
 def get_supervisor_path_info():
     root_path = GetInstallPath()
@@ -52,6 +53,7 @@ def get_supervisor_path_info():
 def supervisor_install_call_back(version={},call_back=None,ok=True):
     if call_back:
         job_id = version['job_id']
+        job_subprocess_del(job_id)
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -142,7 +144,8 @@ def Install_Supervisor(type=2,version={},is_windows=True,call_back=None):
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/supervisor.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/supervisor.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -150,6 +153,7 @@ def Install_Supervisor(type=2,version={},is_windows=True,call_back=None):
                     break
                 if r_output:
                     WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                time.sleep(0.1)
             # 获取标准错误
             r_stderr = r_process.stderr.read()
             if r_stderr:
@@ -216,7 +220,7 @@ def Start_Supervisor(is_windows=True):
         r_status = False
         try:
             if not is_supervisor_running(is_windows=False,simple_check=True):
-                subprocess.run(["sudo", "systemctl", "start", "rysupervisord"], check=True)
+                subprocess.run(["systemctl", "start", "rysupervisord"], check=True,timeout=15)
             else:
                 r_status = True
             time.sleep(0.5)

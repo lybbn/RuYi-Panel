@@ -25,6 +25,7 @@ from utils.install.mysql import *
 from utils.install.python import *
 from utils.install.go import *
 from utils.install.supervisor import *
+from utils.install.docker import *
 
 def Check_Soft_Running(name="",is_windows = True,simple_check=False):
     if name == 'nginx':
@@ -33,6 +34,8 @@ def Check_Soft_Running(name="",is_windows = True,simple_check=False):
         return is_redis_running(is_windows=is_windows,simple_check=simple_check)
     elif name == 'mysql':
         return is_mysql_running(is_windows=is_windows,simple_check=simple_check)
+    elif name == 'docker':
+        return is_docker_running(is_windows=is_windows,simple_check=simple_check)
     elif name == 'supervisor':
         return is_supervisor_running(is_windows=is_windows)
     return False
@@ -63,6 +66,8 @@ def Ry_Install_Soft(type=2,name="",version={},is_windows=True,call_back=None):
         Install_Redis(type=type,version=version,is_windows=is_windows,call_back=call_back)
     elif name == 'mysql':
         Install_Mysql(type=type,version=version,is_windows=is_windows,call_back=call_back)
+    elif name == 'docker':
+        Install_Docker(type=type,version=version,is_windows=is_windows,call_back=call_back)
     elif name == 'python':
         Install_Python(type=type,version=version,is_windows=is_windows,call_back=call_back)
     elif name == 'go':
@@ -78,6 +83,8 @@ def Ry_Uninstall_Soft(name="",is_windows=True,version=None):
         Uninstall_Redis(is_windows=is_windows)
     elif name == 'mysql':
         Uninstall_Mysql(is_windows=is_windows)
+    elif name == 'docker':
+        Uninstall_Docker(is_windows=is_windows)
     elif name == 'python':
         Uninstall_Python(version=version,is_windows=is_windows)
     elif name == 'go':
@@ -93,6 +100,8 @@ def Ry_Start_Soft(name="",is_windows=True):
         Start_Redis(is_windows=is_windows)
     elif name == 'mysql':
         Start_Mysql(is_windows=is_windows)
+    elif name == 'docker':
+        Start_Docker(is_windows=is_windows)
     elif name == 'supervisor':
         Start_Supervisor(is_windows=is_windows)
     return True
@@ -104,6 +113,8 @@ def Ry_Stop_Soft(name="",is_windows=True):
         Stop_Redis(is_windows=is_windows)
     elif name == 'mysql':
         Stop_Mysql(is_windows=is_windows)
+    elif name == 'docker':
+        Stop_Docker(is_windows=is_windows)
     elif name == 'supervisor':
         Stop_Supervisor(is_windows=is_windows)
     return True
@@ -115,6 +126,8 @@ def Ry_Restart_Soft(name="",is_windows=True):
         Restart_Redis(is_windows=is_windows)
     elif name == 'mysql':
         Restart_Mysql(is_windows=is_windows)
+    elif name == 'docker':
+        Restart_Docker(is_windows=is_windows)
     elif name == 'supervisor':
         Restart_Supervisor(is_windows=is_windows)
     return True
@@ -149,6 +162,10 @@ def Ry_Get_Soft_Info_Path(name="",type="all",version=None,is_windows=True):
             return allinfo['error_log_path']
         elif type == 'slow':
             return allinfo['slow_log_path']
+    elif name == 'docker':
+        allinfo = get_docker_path_info()
+        if type == 'all':
+            return allinfo
     elif name == 'python':
         allinfo = get_python_path_info(version)
         if type == 'all':
@@ -195,6 +212,8 @@ def Ry_Get_Soft_Conf(name="",is_windows=True):
         return RY_GET_REDIS_CONF(is_windows=is_windows)
     elif name == 'mysql':
         return RY_GET_MYSQL_CONF(is_windows=is_windows)
+    elif name == 'docker':
+        return RY_GET_DOCKER_CONF(is_windows=is_windows)
     elif name == 'supervisor':
         return RY_GET_SUPERVISOR_CONF(is_windows=is_windows)
     return ""
@@ -206,6 +225,17 @@ def Ry_Save_Soft_Conf(name="",conf="",is_windows=True):
         return RY_SAVE_REDIS_CONF(conf=conf,is_windows=is_windows)
     elif name == 'mysql':
         return RY_SAVE_MYSQL_CONF(conf=conf,is_windows=is_windows)
+    elif name == 'docker':
+        return RY_SAVE_DOCKER_CONF(conf=conf,is_windows=is_windows)
     elif name == 'supervisor':
         return RY_SAVE_SUPERVISOR_CONF(conf=conf,is_windows=is_windows)
     return True
+
+def Ry_Get_Soft_Port(name="",is_windows=True):
+    if name == 'nginx':
+        return RY_GET_NGINX_PORT(is_windows=is_windows)
+    elif name == 'redis':
+        return RY_GET_REDIS_PORT(is_windows=is_windows)
+    elif name == 'mysql':
+        return RY_GET_MYSQL_PORT(is_windows=is_windows)
+    return ""

@@ -22,7 +22,7 @@ from threading import Thread
 import time
 import json
 import paramiko
-from utils.common import getTimestamp13,GetLocalSSHPort,GetLocalSSHUser,SetSSHSupportKey,RunCommand,ReadFile
+from utils.common import getTimestamp13,GetLocalSSHPort,GetLocalSSHUser,SetSSHSupportKey,RunCommand,ReadFile,isSSHRunning,SetSSHServiceStatus,SetSSHSupportRootPass
 from io import BytesIO, StringIO
 from django.http.request import QueryDict
 from apps.system.models import TerminalServer
@@ -32,6 +32,10 @@ from django.conf import settings
 
 # SSH_LOG_PATH = os.path.join(settings.BASE_DIR,'logs','terminal.log')
 # paramiko.util.log_to_file(SSH_LOG_PATH)
+
+def KeepSSHRunning():
+    if not isSSHRunning():
+        SetSSHServiceStatus(action="restart")
 
 class WebSSHConsumerAsync(AsyncWebsocketConsumer):
 
@@ -73,13 +77,14 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
         if not self.ssh_conn:
             await self.send_message(message='连接ssh失败\r\n')
             await self.close()
+            return
         
         # 开启交互式终端
         self.channel = self.ssh_conn.invoke_shell(term='xterm',width=cols,height=rows)
         # 设置后端ssh通道保活时间
-        self.channel.transport.set_keepalive(30)
+        self.channel.transport.set_keepalive(40)
         # 将通道设置为非阻塞模式
-        # self.channel.setblocking(0)
+        # self.channel.setblocking(0.1)
         self.active = True
         await self.send_message(message='连接成功 \r\n')
         self.process_output_task = asyncio.create_task(self.process_output())
@@ -91,25 +96,23 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
         """
         e = str(e)
         if isinstance(e, paramiko.AuthenticationException):
-            errors = "认证失败：{}".format(e)
+            errors = f"认证失败：{e}"
         elif isinstance(e, paramiko.SSHException):
-            errors = "SSH连接错误：{}".format(e)
+            errors = f"SSH连接错误：{e}"
         elif isinstance(e, paramiko.BadHostKeyException):
-            errors = "无效的主机密钥：{}".format(e)
+            errors = f"无效的主机密钥：{e}"
         elif e.find('Connection reset by peer') != -1:
             errors = '目标服务器主动拒绝连接'
         elif e.find('Error reading SSH protocol banner') != -1:
             errors = '协议头响应超时'
         elif e.find('Authentication failed') != -1:
-            errors = 'SSH认证失败{}'.format(e)
+            errors = f'SSH认证失败：{e}'
         elif not e:
             errors = 'SSH协议握手超时'
         elif e.find('Unable to connect to port') != -1:
-            errors = '连接失败{}'.format(e)
+            errors = f'连接失败：{e}'
         else:
-            import traceback
-            errorMsg = traceback.format_exc()
-            errors = '未知错误: {}'.format(errorMsg)
+            errors = f'未知错误: {e}'
 
         await self.send_message(message='Exception: %s\r\n' % errors)
         await self.close()
@@ -161,7 +164,8 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
         @author lybbn<2024-01-13>
         """
         # 将客户端输入的命令发送给SSH服务器
-        self.channel.send(data)
+        if self.channel:
+            self.channel.send(data)
 
     async def process_output(self):
         """
@@ -232,14 +236,24 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
             if not ssh_info:
                 self.send_message(message='无此主机信息\r\n')
                 self.close()
+            targethost = ssh_info.host
+            if targethost in ["127.0.0.1","localhost"]:
+                KeepSSHRunning()
+                if ssh_info.type == 0 and ssh_info.username=="root":
+                    SetSSHSupportRootPass()
             # 连接到SSH服务器
             if ssh_info.type == 0:
                 self.ssh_conn.connect(
-                    ssh_info.host,
+                    hostname=targethost,
                     username=ssh_info.username,
                     password=ssh_info.password,
-                    port=ssh_info.port
+                    port=ssh_info.port,
+                    timeout=30,
+                    banner_timeout=30,
+                    allow_agent=False,
+                    look_for_keys=False
                 )
+                    
             else:
                 tmppkey = ssh_info.pkey.encode('utf-8')
                 if sys.version_info[0] == 2:
@@ -256,6 +270,8 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
                     port=self.ssh_info.port,
                     username=self.ssh_info.username,
                     pkey=pkey,
+                    timeout=30,
+                    banner_timeout=30
                 )
         else:#直连本机
             ssh_host = "127.0.0.1"
@@ -267,14 +283,17 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
             SetSSHSupportKey()
             authorized_keys_path = f"{home_path}/.ssh/authorized_keys"
             id_rsa_file = f"{home_path}/.ssh/id_rsa"
-            if not os.path.exists(id_rsa_file):
+            if not os.path.exists(id_rsa_file) or not os.path.exists(authorized_keys_path):
                 self.generate_key(authorized_keys_path,id_rsa_file)
             pkey = paramiko.RSAKey.from_private_key_file(id_rsa_file)
+            KeepSSHRunning()
             self.ssh_conn.connect(
                 hostname=ssh_host,
                 port=ssh_port,
                 username=ssh_user,
                 pkey=pkey,
+                timeout=30,
+                banner_timeout=30
             )
     
     def generate_key(self,authorized_keys_path,key_path):
@@ -283,6 +302,10 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
         @key_path 私钥路径
         @author lybbn<2024-01-13>
         """
+        # 确保 .ssh 目录存在
+        ssh_dir = os.path.dirname(key_path)
+        if not os.path.exists(ssh_dir):
+            os.makedirs(ssh_dir, mode=0o700)  # 创建目录并设置权限
         # 创建 RSA 密钥
         key = paramiko.RSAKey.generate(4096)
         # 保存私钥

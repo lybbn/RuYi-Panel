@@ -13,12 +13,13 @@
 			"versions": [{
 				"id": 1,
 				"version": "1.27",
-				"c_version": "1.27.2",
-				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.2.tar.gz"
+				"c_version": "1.27.3",
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.tar.gz"
 			}, {
 				"id": 2,
 				"version": "openresty",
 				"c_version": "1.25.3.2",
+				"hide":true,
 				"url": "https://mirrors.huaweicloud.com/openresty/v1.25.3.2/openresty-1.25.3.2.tar.gz"
 			}],
 			"author": "nginx.org",
@@ -59,7 +60,8 @@
 				"id": 1,
 				"version": "5.7",
 				"c_version": "5.7.38",
-				"url": "https://mirrors.aliyun.com/mysql/MySQL-5.7/mysql-boost-5.7.38.tar.gz"
+				"url":"https://mirrors.huaweicloud.com/mysql/Downloads/MySQL-5.7/mysql-boost-5.7.38.tar.gz",
+				"url2": "https://mirrors.aliyun.com/mysql/MySQL-5.7/mysql-boost-5.7.38.tar.gz"
 			}, {
 				"id": 2,
 				"version": "8.0",
@@ -71,6 +73,26 @@
 			"type": 2,
 			"typename": "数据库",
 			"desc": "MySQL是一个流行的开源关系型数据库管理系统，被广泛地应用在中小型网站中",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 4,
+			"sort": 4,
+			"icon": "docker.png",
+			"title": "Docker",
+			"name": "docker",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "27.5",
+				"c_version": "27.5.1",
+				"url":""
+			}],
+			"author": "docker.com",
+			"home": "https://www.docker.com",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Docker是一个开源的平台，是基于操作系统层级的虚拟化技术",
 			"price": 0,
 			"show": 1
 		},{
@@ -97,14 +119,14 @@
 			"id": 24,
 			"sort": 24,
 			"icon": "python.png",
-			"title": "Python3.13.1",
+			"title": "Python3.13.2",
 			"name": "python",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "3.13.1",
-				"c_version": "3.13.1",
-				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.13.1.tgz"
+				"version": "3.13.2",
+				"c_version": "3.13.2",
+				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.13.2.tgz"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -117,14 +139,14 @@
 			"id": 25,
 			"sort": 25,
 			"icon": "python.png",
-			"title": "Python3.12.8",
+			"title": "Python3.12.9",
 			"name": "python",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "3.12.8",
-				"c_version": "3.12.8",
-				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.12.8.tgz"
+				"version": "3.12.9",
+				"c_version": "3.12.9",
+				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.12.9.tgz"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -137,14 +159,14 @@
 			"id": 90,
 			"sort": 90,
 			"icon": "go.png",
-			"title": "Go1.23.3",
+			"title": "Go1.23.6",
 			"name": "go",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "1.23.3",
-				"c_version": "1.23.3",
-				"url": "https://mirrors.aliyun.com/golang/go1.23.3.linux-amd64.tar.gz"
+				"version": "1.23.6",
+				"c_version": "1.23.6",
+				"url": "https://mirrors.aliyun.com/golang/go1.23.6.linux-amd64.tar.gz"
 			}],
 			"author": "golang.google.cn",
 			"home": "https://golang.google.cn/",
@@ -153,6 +175,26 @@
 			"desc": "Go(Golang)由Google开发的静态强类型、编译型、并发型，并具有垃圾回收功能的编程语言",
 			"price": 0,
 			"show": 1
+		},{
+			"id": 199,
+			"sort": 199,
+			"icon": "php.png",
+			"title": "PHP8.4.4",
+			"name": "php",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "8.4.4",
+				"c_version": "8.4.4",
+				"url": "https://www.php.net/distributions/php-8.4.4.tar.gz"
+			}],
+			"author": "php.net",
+			"home": "https://www.php.net/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "PHP是一种广泛用于Web开发的开源服务器端脚本语言",
+			"price": 0,
+			"show": 0
 		}]
 	},
 	"windows": {
@@ -166,12 +208,13 @@
 			"versions": [{
 				"id": 1,
 				"version": "1.27",
-				"c_version": "1.27.2",
-				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.2.zip"
+				"c_version": "1.27.3",
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.zip"
 			}, {
 				"id": 2,
 				"version": "openresty",
 				"c_version": "1.25.3.2",
+				"hide":true,
 				"url": "https://openresty.org/download/openresty-1.25.3.2-win64.zip"
 			}],
 			"author": "nginx.org",
@@ -232,6 +275,26 @@
 			"price": 0,
 			"show": 1
 		},{
+			"id": 4,
+			"sort": 4,
+			"icon": "docker.png",
+			"title": "Docker",
+			"name": "docker",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "27.5",
+				"c_version": "27.5.1",
+				"url":"https://mirrors.aliyun.com/docker-ce/win/static/stable/x86_64/docker-27.5.1.zip"
+			}],
+			"author": "docker.com",
+			"home": "https://www.docker.com",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Docker是一个开源的平台，是基于操作系统层级的虚拟化技术",
+			"price": 0,
+			"show": 0
+		},{
 			"id": 13,
 			"sort": 13,
 			"icon": "pip.png",
@@ -255,14 +318,14 @@
 			"id": 24,
 			"sort": 24,
 			"icon": "python.png",
-			"title": "Python3.13.1",
+			"title": "Python3.13.2",
 			"name": "python",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "3.13.1",
-				"c_version": "3.13.1",
-				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.13.1-amd64.exe"
+				"version": "3.13.2",
+				"c_version": "3.13.2",
+				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.13.2-amd64.exe"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -275,14 +338,14 @@
 			"id": 25,
 			"sort": 25,
 			"icon": "python.png",
-			"title": "Python3.12.8",
+			"title": "Python3.12.9",
 			"name": "python",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "3.12.8",
-				"c_version": "3.12.8",
-				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.12.8-amd64.exe"
+				"version": "3.12.9",
+				"c_version": "3.12.9",
+				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.12.9-amd64.exe"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -295,14 +358,14 @@
 			"id": 90,
 			"sort": 90,
 			"icon": "go.png",
-			"title": "Go1.23.3",
+			"title": "Go1.23.6",
 			"name": "go",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "1.23.3",
-				"c_version": "1.23.3",
-				"url": "https://mirrors.aliyun.com/golang/go1.23.3.windows-amd64.zip"
+				"version": "1.23.6",
+				"c_version": "1.23.6",
+				"url": "https://mirrors.aliyun.com/golang/go1.23.6.windows-amd64.zip"
 			}],
 			"author": "golang.google.cn",
 			"home": "https://golang.google.cn/",

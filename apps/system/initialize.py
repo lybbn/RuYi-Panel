@@ -8,6 +8,7 @@ django.setup()
 import platform
 from apps.system.models import Users,Config,SiteGroup
 from apps.systask.models import CrontabTask
+from apps.sysdocker.models import RyDockerRepo
 from django.contrib.auth.hashers import make_password
 from utils.common import GetRandomSet
 
@@ -160,12 +161,25 @@ if object.{key}:
             },
         ]
         self.save(CrontabTask, data, "计划任务表")
+        
+    def init_dockers_repo(self):
+        """
+        初始化容器仓库表
+        """
+        data = [{
+            "id": 1,
+            "name":"Docker Hub",
+            "url":"docker.io",
+            "protocol":"https"
+        }]
+        self.save(RyDockerRepo, data, "初始化容器仓库表")
 
     def run(self):
         self.init_users()
         self.init_config()
         self.init_site_group()
         self.init_task()
+        self.init_dockers_repo()
 
 
 def main(delete=True,username=None,password=None):

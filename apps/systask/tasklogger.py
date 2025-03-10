@@ -40,9 +40,11 @@ def tasklogger(job_id):
     if not os.path.exists(task_log_path):
         with open(task_log_path, 'w', encoding="utf-8") as f:
             pass
-    # tasklogger = logging.getLogger(job_id)
-    tasklogger = logging.getLogger("apscheduler.scheduler")
+    tasklogger = logging.getLogger(job_id)
+    # tasklogger = logging.getLogger("apscheduler.scheduler")#可能出现互相记录情况
     tasklogger.setLevel(logging.INFO)
+    # 设置 'propagate' 为 False，防止日志传播到父日志记录器
+    tasklogger.propagate = False
     file_handler = RotatingFileHandler(
         task_log_path,
         maxBytes=1024 * 1024 * 50,  # 每个日志文件的最大大小
@@ -53,6 +55,12 @@ def tasklogger(job_id):
     formatter = logging.Formatter('[%(asctime)s] - %(message)s')
     file_handler.setFormatter(formatter)
     tasklogger.addHandler(file_handler)
+    
+    # 获取 'apscheduler.scheduler' 记录器并将其 handler 添加到当前 tasklogger（在apscheduler.scheduler也记录一份）
+    apscheduler_logger = logging.getLogger('apscheduler.scheduler')
+    if apscheduler_logger:
+        tasklogger.addHandler(apscheduler_logger.handlers[0])  # 将 'apscheduler.scheduler' 的 handler 添加到当前日志记录器
+    
     settings.TASK_LOGGERS_DIC[job_id] = tasklogger
     return tasklogger
 

@@ -424,7 +424,7 @@ def backupSite(site_id=None,backup_path=None,exclude_dirs=[],job_id=None):
     
     
 def run_task(data,job_id=""):
-    job = scheduler.get_job(job_id) 
+    job = scheduler.get_job(job_id)
     job.func(data,job_id)
 
 def remove_task(job_id):
@@ -440,7 +440,13 @@ def start_scheduler():
     scheduler.add_jobstore(DjangoJobStore(), 'default')
     scheduler._logger = logger
     scheduler.start()
-    executeNextTask()
+    scheduler.add_job(
+        executeNextTask,
+        trigger=DateTrigger(run_date=datetime.datetime.now() + datetime.timedelta(seconds=1)),  # 1 秒后执行
+        args=[True],
+        id='initialization_ruyi_task_001',
+        replace_existing=True,
+    )
 
 def stop_scheduler():
     scheduler.shutdown(wait=False)

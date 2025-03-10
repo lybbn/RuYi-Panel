@@ -1,5 +1,5 @@
 #!/bin/bash
-#go环境安装
+#supervisor环境安装
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 LANG=en_US.UTF-8
@@ -17,7 +17,7 @@ cpu_core=$(cat /proc/cpuinfo|grep processor|wc -l)
 
 # 检查是否以 root 用户运行
 if [ "$(id -u)" -ne 0 ]; then
-    echo "请以 root 用户运行此脚本"
+    echo "请以 root 用户运行此脚本" >&2
     exit 1
 fi
 
@@ -232,7 +232,7 @@ Install_Soft() {
     echo "==================================================="
 	if [ -z "$Install_SRC_Path" ];then
 		rm -rf ${SOFT_INSTALL_PATH}
-		echo "ERROR: Install supervisor fielded." "ERROR: 安装supervisor失败，请尝试重新安装！" 
+		echo "ERROR: Install supervisor fielded." "ERROR: 安装supervisor失败，请尝试重新安装！" >&2
         exit 1
 	fi
     echo "supervisor 安装完成"
@@ -247,6 +247,7 @@ Uninstall_soft() {
 
 if [ "$action_type" == 'install' ];then
     if [ -z "${soft_version}" ] || [ -z "${soft_file_name}" ]; then
+        echo "参数错误" >&2
         exit 1
     fi
 	Install_Soft

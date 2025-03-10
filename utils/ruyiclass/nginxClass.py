@@ -342,7 +342,7 @@ class NginxClient:
         """
         local_conf = ReadFile(self.confPath)
         if not local_conf:return ""
-        rep = "\s+index\s+(.+);"
+        rep = r"\s+index\s+(.+);"
         if re.search(rep, local_conf):
             tmp = re.search(rep, local_conf).groups()
             return tmp[0].replace(' ', ',')
@@ -1067,6 +1067,7 @@ location ^~ {proxyPath} {{
         # 找到目标行
         target_index = None
         for i, line in enumerate(lines):
+            # if target_line_pattern in line.strip():
             if re.search(target_line_pattern, line):
                 target_index = i
                 break
@@ -1074,7 +1075,8 @@ location ^~ {proxyPath} {{
         if target_index is None:return False
         
         # 在目标行后添加内容
-        addline = addline if '\n' in addline else (addline + '\n')
+        if not addline.endswith("\n"):
+            addline += "\n"
         lines.insert(target_index + 1, addline)
         
         # 写回文件

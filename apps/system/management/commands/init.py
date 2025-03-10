@@ -77,6 +77,7 @@ class Command(BaseCommand):
         call_command('migrate', database='tasks')
         call_command('migrate', database='shop')
         call_command('migrate', database='backup')
+        call_command('migrate', database='docker')
         print("正在初始化数据...")
         try:
             if not username:username = "ry"+GetRandomSet(6)

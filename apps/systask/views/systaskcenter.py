@@ -16,6 +16,7 @@
 # 应用商店
 # ------------------------------
 import os,json
+from datetime import datetime
 from rest_framework.views import APIView
 from utils.customView import CustomAPIView
 from utils.jsonResponse import ErrorResponse,DetailResponse
@@ -26,6 +27,10 @@ from apps.systask.models import SysTaskCenter
 from utils.pagination import CustomPagination
 from apps.systask.scheduler import scheduler
 from apps.syslogs.logutil import RuyiAddOpLog
+from apps.systask.subprocessMg import job_subprocess_kill
+from apps.system.views.common import executeNextTask
+import logging
+logger = logging.getLogger('apscheduler.scheduler')
     
 class RYSystemTaskCenterView(CustomAPIView):
     """
@@ -80,23 +85,56 @@ class RYSystemTaskCenterView(CustomAPIView):
             if not ins:return ErrorResponse(msg="无此任务")
             job_id = ins.job_id
             try:
-                scheduler.remove_job(job_id)
-                scheduler.pause_job(job_id)
-            except:
-                pass
+                job_subprocess_kill(job_id)
+                try:
+                    scheduler.remove_job(job_id)
+                except:
+                    pass
+            except Exception as e:
+                logger.info(f"删除任务 {ins.name}:{job_id} 错误: {str(e)}")
             finally:
                 try:
                     params = ins.params
-                    if params:
-                        json_params = json.loads(params)
-                        name = json_params['name']
-                        log = job_id+".log"
-                        logpath = os.path.join(os.path.abspath(GetLogsPath()),name,log)
-                        DeleteFile(logpath,empty_tips=False)
+                    if job_id:
+                        if params:
+                            json_params = json.loads(params)
+                            name = json_params['name']
+                            log = job_id+".log"
+                            logpath = os.path.join(os.path.abspath(GetLogsPath()),name,log)
+                            DeleteFile(logpath,empty_tips=False)
                     ins.delete()
+                    #执行下一个任务
+                    executeNextTask()
                 except Exception as e:
                     return ErrorResponse(msg=str(e))
             RuyiAddOpLog(request,msg="【任务中心】-【删除】=>"+ins.name,module="softmg")
             return DetailResponse(msg="删除成功")
+        elif action == "stop_task":
+            id = reqData.get("id","")
+            if not id:return ErrorResponse(msg="参数错误")
+            ins = SysTaskCenter.objects.filter(id=id).first()
+            if not ins:return ErrorResponse(msg="无此任务")
+            job_id = ins.job_id
+            try:
+                job_subprocess_kill(job_id)
+                try:
+                    scheduler.remove_job(job_id)
+                except:
+                    pass
+            except Exception as e:
+                logger.info(f"停止任务 {ins.name}:{job_id} 错误: {str(e)}")
+            finally:
+                try:
+                    end_time = datetime.now()  # 记录任务结束时间
+                    if ins.exec_at:
+                        ins.duration = (end_time - ins.exec_at).total_seconds()
+                    ins.status = 2
+                    ins.save()
+                    #执行下一个任务
+                    executeNextTask()
+                except Exception as e:
+                    return ErrorResponse(msg=str(e))
+            RuyiAddOpLog(request,msg="【任务中心】-【停止】=>"+ins.name,module="softmg")
+            return DetailResponse(msg="停止成功")
         else:
             return ErrorResponse(msg="类型错误")

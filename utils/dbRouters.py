@@ -28,6 +28,8 @@ class RuyiDatabasesRouter:
             return 'shop'
         elif model._meta.app_label == 'sysbak':
             return 'backup'
+        elif model._meta.app_label == 'sysdocker':
+            return 'docker'
         return 'default'
 
     def db_for_write(self, model, **hints):
@@ -39,6 +41,8 @@ class RuyiDatabasesRouter:
             return 'shop'
         elif model._meta.app_label == 'sysbak':
             return 'backup'
+        elif model._meta.app_label == 'sysdocker':
+            return 'docker'
         return 'default'
 
     def allow_migrate(self, db, app_label, model_name=None, **hints):
@@ -51,6 +55,8 @@ class RuyiDatabasesRouter:
         elif app_label == 'sysshop':
             return db == 'shop'
         elif app_label == 'sysbak':
-            return 'backup'
+            return db == 'backup'
+        elif app_label == 'sysdocker':
+            return db == 'docker'
         else:
             return db == 'default'

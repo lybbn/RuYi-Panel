@@ -90,6 +90,11 @@ class system:
         return data
     
     @classmethod
+    def GetFirewallStatus(self):
+        isok = myos.GetFirewallStatus()
+        return isok
+    
+    @classmethod
     def GetFileLastNumsLines(cls,path,num=1000):
         data = myos.GetFileLastNumsLines(path=path,num=num)
         return data

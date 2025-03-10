@@ -35,6 +35,7 @@ from apps.sysshop.models import RySoftShop
 from utils.ruyiclass.mysqlClass import MysqlClient
 from apps.sysbak.models import RuyiBackup
 from django.conf import settings
+from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
 
 def is_sql_result_error(result):
     result = str(result)
@@ -79,6 +80,7 @@ def get_mysql_path_info():
 def mysql_install_call_back(version={},call_back=None,ok=True):
     if call_back:
         job_id = version['job_id']
+        job_subprocess_del(job_id)
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -86,6 +88,7 @@ def mysql_install_call_back(version={},call_back=None,ok=True):
     
 def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
     """
+    @type 1 编译安装 、 2快速安装
     @name 安装mysql
     @parma call_back 为执行回调函数的方法路径
     @author lybbn<2024-08-20>
@@ -105,7 +108,8 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
             WriteFile(log_path,error_msg+'\n',mode='a',write=is_write_log)
             raise ValueError(error_msg)
         download_url = version.get('url',None)
-        WriteFile(log_path,"开始下载【%s】安装文件,文件地址：%s\n"%(name,download_url),mode='a',write=is_write_log)
+        if not type == 2:
+            WriteFile(log_path,"开始下载【%s】安装文件,文件地址：%s\n"%(name,download_url),mode='a',write=is_write_log)
         filename = get_file_name_from_url(download_url)
         save_directory = os.path.abspath(GetTmpPath())
         soft_paths = get_mysql_path_info()
@@ -114,11 +118,12 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
         if not os.path.exists(save_directory):
             os.makedirs(save_directory)
         save_path = os.path.join(save_directory, filename)
-        #开始下载
-        ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
-        if not ok:
-            WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
-            raise ValueError(msg)
+        if not type == 2:
+            #开始下载
+            ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
+            if not ok:
+                WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
+                raise ValueError(msg)
         if is_windows:
             WriteFile(log_path,"【%s】下载完成\n"%filename,mode='a',write=is_write_log)
             src_folder = os.path.join(install_base_directory,Path(filename).stem)
@@ -140,7 +145,8 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
             WriteFile(mysql_error_log_file_path,"")
             WriteFile(mysql_slow_file_path,"")
         else:
-            r_process = subprocess.Popen(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","mysql.sh"),'install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            r_process = subprocess.Popen(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","mysql.sh"),'install',version['c_version'], str(type)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -148,6 +154,7 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
                     break
                 if r_output:
                     WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                time.sleep(0.1)
 
             # 获取标准错误
             r_stderr = r_process.stderr.read()
@@ -262,11 +269,11 @@ def Start_Mysql(is_windows=True):
         if os.path.exists(exe_path):
             try:
                 if not is_mysql_running(is_windows=False):
-                    subprocess.run(["sudo", "systemctl", "start", "mysql"], check=True)
+                    subprocess.run(["systemctl", "start", "mysql"], check=True,timeout=30)
                 else:
                     r_status = True
                 time.sleep(1)
-                if not r_status and is_mysql_running(is_windows=False):
+                if is_mysql_running(is_windows=False):
                     r_status = True
             except Exception as e:
                 raise ValueError(f"启动Mysql时发生错误: {e}")
@@ -411,6 +418,18 @@ def RY_GET_MYSQL_CONF(is_windows=True):
     soft_paths = get_mysql_path_info()
     conf_path = soft_paths['windows_abspath_conf_path'] if is_windows else soft_paths['linux_conf_path']
     return ReadFile(conf_path)
+
+def RY_GET_MYSQL_PORT(is_windows=True):
+    conf = RY_GET_MYSQL_CONF(is_windows=is_windows)
+    port_rep = r"port\s*=\s*([0-9]+)"
+    match = re.search(port_rep, conf)
+    if match:
+        try:
+            port = int(match.group(1))
+            return port
+        except (ValueError, IndexError):
+            pass
+    return 3306
 
 def RY_SAVE_MYSQL_CONF(conf="",is_windows=True):
     soft_paths = get_mysql_path_info()
@@ -621,12 +640,24 @@ def RY_IMPORT_MYSQL_SQL(db_info={},is_windows=True):
                 is_zip_file = True
             env = os.environ.copy()
             env['MYSQL_PWD'] = db_pass#避免命令行直接使用密码
-            command = f"{mysql_exec} --force --default-character-set={charset} --host={db_host} --port={db_port} -u {db_user} {db_name}"
+            #command = f"{mysql_exec} --force --default-character-set={charset} --host={db_host} --port={db_port} -u {db_user} {db_name}"
+            # 修改命令构建方式为参数列表，并移除shell=True,避免文件名含特殊符号被shell转义导致导入失败
+            command_args = [
+                mysql_exec,
+                '--force',
+                f'--default-character-set={charset}',
+                f'--host={db_host}',
+                f'--port={db_port}',
+                '-u', db_user,
+                db_name
+            ]
             for i in import_path_list:
                 i = i.replace("\\",'/')
-                result = subprocess.run(f'{command} < {i}',shell=True, text=True, capture_output=True,env=env)
-                if result.returncode != 0:
-                    raise ValueError(result.stderr)
+                # result = subprocess.run(f'{command} < {i}',shell=True, text=True, capture_output=True,env=env)
+                with open(i, 'r') as sql_file:
+                    result = subprocess.run(command_args,stdin=sql_file, text=True, capture_output=True,env=env)
+                    if result.returncode != 0:
+                        raise ValueError(result.stderr)
             # 清理临时目录
             if is_zip_file:
                 system.ForceRemoveDir(extract_tmp_path)
@@ -940,6 +971,7 @@ innodb_flush_log_at_trx_commit = 1
 innodb_io_capacity = 200
 {"query_cache_size = " + str(query_cache_size) + "M\n" if not is_version_8_or_higher else ""}
 {"query_cache_type = OFF\n" if not is_version_8_or_higher else ""}
+{"skip-mysqlx\n" if not is_version_8_or_higher else ""}
 tmp_table_size = {tmp_table_size}M
 max_heap_table_size = 64M
 
@@ -975,6 +1007,7 @@ myisam_sort_buffer_size = 4M
 thread_cache_size = {thread_cache_size}
 {"query_cache_size = " + str(query_cache_size) + "M\n" if not is_version_8_or_higher else ""}
 {"query_cache_type = OFF\n" if not is_version_8_or_higher else ""}
+{"skip-mysqlx\n" if not is_version_8_or_higher else ""}
 tmp_table_size = {tmp_table_size}M
 sql-mode = {sqlmode}
 

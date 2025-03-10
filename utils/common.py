@@ -36,6 +36,39 @@ import xml.etree.ElementTree as EleT
 # 获取当前操作系统
 current_os = platform.system().lower()
 
+def ProgramRootPath():
+    """
+    @name 取项目真实根目录
+    @author lybbn<2025-01-23>
+    """
+    return str(settings.BASE_DIR).replace("\\","/")
+
+def compare_versions(version1, version2):
+    """
+    @name 比较两个版本号
+    @author lybbn<2025-01-13>
+    return 0 相同、1 version1大 、-1 version1 小
+    """
+    # 将版本号按"."分割成数字列表
+    v1_parts = [int(part) for part in version1.split('.')]
+    v2_parts = [int(part) for part in version2.split('.')]
+    
+    # 比较对应位置的数字
+    length = max(len(v1_parts), len(v2_parts))
+    
+    # 如果版本号长度不一致，补充零
+    v1_parts.extend([0] * (length - len(v1_parts)))
+    v2_parts.extend([0] * (length - len(v2_parts)))
+    
+    # 比较各个部分
+    for i in range(length):
+        if v1_parts[i] < v2_parts[i]:
+            return -1  # version1 更旧
+        elif v1_parts[i] > v2_parts[i]:
+            return 1   # version1 更新
+    
+    return 0  # 两个版本相同
+
 def get_python_pip():
     """
     @name 取系统python、pip
@@ -120,6 +153,31 @@ def check_is_email(email):
         r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     )
     return bool(pattern.match(email))
+
+def check_is_url(url_str):
+    """
+    @name 是否url地址
+    @author lybbn<2024-03-16>
+    """
+    url_pattern = re.compile(r'^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$', re.IGNORECASE)
+    return bool(url_pattern.match(url_str))
+
+def check_contains_chinese(data):
+    """
+    @name 检查字符串是否包含中文
+    """
+    return bool(re.search(r'[\u4e00-\u9fa5]', data))
+
+def check_url_site_canuse(url):
+    """
+    @name 检测目标url网站是否可用
+    @author lybbn<2024-12-16>
+    """
+    try:
+        response = requests.get(url, timeout=5)
+        return response.status_code == 200
+    except:
+        return False
 
 def map_to_list(mapobj):
     """
@@ -337,7 +395,7 @@ def GetSoftConfig():
     config_json = json.loads(content)
     return config_json
 
-def GetSoftList():
+def GetSoftList(all=False):
     """
     @name 读取软件商店列表
     @author lybbn<2024-02-07>
@@ -349,6 +407,12 @@ def GetSoftList():
         softlist = config_json['windows']['soft']
     else:
         softlist = config_json['linux']['soft']
+    if not all:
+        data=[]
+        for sftlsit in softlist:
+            if sftlsit.get("show",None):
+                data.append(sftlsit)
+        softlist=data
     return softlist
 
 def GetConfig():
@@ -412,6 +476,18 @@ def GetInstallPath():
         install_path = config['linux']['install_path']
     return install_path
 
+def GetDataPath():
+    """
+    @name 读取如意程序数据目录
+    @author lybbn<2025-03-01>
+    """
+    config = GetConfig()
+    if current_os == 'windows':
+        data_path = config['windows']['data_path']
+    else:
+        data_path = config['linux']['data_path']
+    return data_path
+
 def GetLogsPath():
     """
     @name 读取日志文件路径
@@ -456,6 +532,18 @@ def GetTmpPath():
         tmp_path = config['windows']['tmp_path']
     else:
         tmp_path = config['linux']['tmp_path']
+    return tmp_path
+
+def GetPanelPath():
+    """
+    @name 读取面板目录路径
+    @author lybbn<2024-02-07>
+    """
+    config = GetConfig()
+    if current_os == 'windows':
+        tmp_path = config['windows']['panel_path']
+    else:
+        tmp_path = config['linux']['panel_path']
     return tmp_path
 
 def GetPanelPort():
@@ -803,7 +891,7 @@ def GetLinuxLocalUserlist():
         userlist.append(info)
     return userlist
 
-def SetSSHServcieStatus(action="reload"):
+def SetSSHServiceStatus(action="reload"):
     """
     @name 设置SSH服务状态 reload、restart、start、stop
     @author lybbn<2024-08-18>
@@ -851,7 +939,7 @@ def SetSSHSupportRootPass():
     else:
         newconf = re.sub(pass_str, '\nPasswordAuthentication yes', newconf)
     WriteFile('/etc/ssh/sshd_config', newconf)
-    SetSSHServcieStatus()
+    SetSSHServiceStatus()
     return True
 
 def SetSSHSupportKey():
@@ -867,13 +955,14 @@ def SetSSHSupportKey():
         newconf = conf + '\nPubkeyAuthentication yes'
     else:
         newconf = re.sub(pub_key,'\nPubkeyAuthentication yes',conf)
-    rsa_str = r'\n#?RSAAuthentication\s\w+'
-    if len(re.findall(rsa_str, newconf)) == 0:
-        newconf = newconf + '\nRSAAuthentication yes'
-    else:
-        newconf = re.sub(rsa_str,'\nRSAAuthentication yes',newconf)
+    #新版ssh已弃用RSAAuthentication
+    # rsa_str = r'\n#?RSAAuthentication\s\w+'
+    # if len(re.findall(rsa_str, newconf)) == 0:
+    #     newconf = newconf + '\nRSAAuthentication yes'
+    # else:
+    #     newconf = re.sub(rsa_str,'\nRSAAuthentication yes',newconf)
     WriteFile('/etc/ssh/sshd_config', newconf)
-    SetSSHServcieStatus()
+    SetSSHServiceStatus()
     return True
 
 def GetLinuxFirewallStatus():
@@ -935,3 +1024,11 @@ def format_size(byte_size):
     
     # 返回转换后的大小，保留 2 位小数
     return f"{byte_size:.2f} {units[i]}"
+
+def is_admin():
+    try:
+        import ctypes
+        return ctypes.windll.shell32.IsUserAnAdmin()
+        return True
+    except:
+        return False

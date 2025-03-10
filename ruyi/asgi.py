@@ -8,11 +8,13 @@ https://docs.djangoproject.com/en/4.1/howto/deployment/asgi/
 """
 
 import os
+import logging
 import django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ruyi.settings')
 django.setup()
 
-from apps.systask.tasks import start_scheduler
+import atexit
+from apps.systask.tasks import start_scheduler,stop_scheduler
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
 from apps.system.ws_routing import websocket_urlpatterns
@@ -22,16 +24,101 @@ from django.core.asgi import get_asgi_application
 
 start_scheduler()
 
-#application = get_asgi_application()
+# 关闭调度器（在 Django 关闭时）
+atexit.register(lambda: stop_scheduler())
 
-application = ProtocolTypeRouter({
-    "http": get_asgi_application(),# 也可以不需要此项，普通的HTTP请求不需要我们手动在这里添加，框架会自动加载
+# 获取日志记录器
+logger = logging.getLogger(__name__)
+
+##application = get_asgi_application()
+
+# application = ProtocolTypeRouter({
+#     "http": get_asgi_application(),# 也可以不需要此项，普通的HTTP请求不需要我们手动在这里添加，框架会自动加载
+#     "websocket": JWTChannelsAuthMiddleware(
+#         AuthMiddlewareStack(
+#             # 多个url合并一起使用，多个子路由列表相加:a+b
+#             URLRouter(
+#                 websocket_urlpatterns
+#             )
+#         )
+#     ),
+# })
+
+class ErrorHandlingMiddleware:
+    """
+    全局异常处理中间件，区分HTTP和WebSocket协议进行错误响应
+    """
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await self.app(scope, receive, send)
+        except Exception as e:
+            logger.exception(f"全局 ASGI application error occurred：{e}")
+            if scope['type'] == 'http':
+                await self.handle_http_error(send, e)
+            elif scope['type'] == 'websocket':
+                await self.handle_websocket_error(send, e)
+            else:
+                # 其他协议类型不处理，直接抛出
+                raise Exception(e)
+
+    async def handle_http_error(self, send, error):
+        """
+        处理HTTP协议错误响应
+        """
+        error_page = """
+        <html>
+            <head><title>500 Internal Server Error</title></head>
+            <body>
+                <h1>500 Internal Server Error</h1>
+                <p>Please try again later.</p>
+            </body>
+        </html>
+        """
+        try:
+            # 发送500错误响应
+            await send({
+                "type": "http.response.start",
+                "status": 500,
+                "headers": [(b"content-type", b"text/html; charset=utf-8")],
+            })
+            await send({
+                "type": "http.response.body",
+                "body": error_page.encode("utf-8"),
+                "more_body": False,
+            })
+        except Exception as send_error:
+            logger.error(f"[Global] Failed to send error response: {send_error}")
+
+    async def handle_websocket_error(self, send, error):
+        """
+        处理WebSocket协议错误响应
+        """
+        try:
+            # 发送关闭帧
+            # await send({
+            #     "type": "websocket.close",
+            #     "code": 1000,
+            #     "reason": str(error)[:125]  # 原因字符串最多125字节
+            # })
+            logger.error(f"[Global] websocket Error: {str(error)}")
+        except Exception as send_error:
+            # logger.error(f"Failed to send websocket close frame: {send_error}")
+            pass
+
+# 构建基础ASGI应用
+base_application = ProtocolTypeRouter({
+    "http": get_asgi_application(),
     "websocket": JWTChannelsAuthMiddleware(
         AuthMiddlewareStack(
-            # 多个url合并一起使用，多个子路由列表相加:a+b
             URLRouter(
                 websocket_urlpatterns
             )
         )
     ),
 })
+
+# 添加全局异常处理中间件
+application = ErrorHandlingMiddleware(base_application)

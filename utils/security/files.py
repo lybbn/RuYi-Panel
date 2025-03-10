@@ -24,6 +24,7 @@ from natsort import natsorted, ns
 from utils.server.system import system
 from utils.security.no_delete_list import check_no_delete,check_in_black_list
 from utils.common import ast_convert,GetTmpPath,WriteFile,RunCommand,current_os
+from itertools import chain
 
 def get_file_name_from_url(url):
     """
@@ -112,7 +113,13 @@ def auto_detect_file_language(file_path):
     ext = get_file_extension(file_path)
     if ext in ['.readme','.md']:
         return "markdown"
-    if ext in ['.js','.ts','.sh']:
+    elif ext in ['.sh']:
+        return "shell"
+    elif ext in ['.lua']:
+        return "lua"
+    elif ext in ['.rb']:
+        return "ruby"
+    elif ext in ['.js','.ts']:
         return "javascript"
     elif ext in ['.html','htm']:
         return "html"
@@ -122,10 +129,12 @@ def auto_detect_file_language(file_path):
         return "json"
     elif ext in ['.py']:
         return "python"
-    elif ext in ['.yaml','yml']:
+    elif ext in ['.yaml','.yml']:
         return "yaml"
     elif ext in ['.conf','.ini']:
-        return "json"
+        if 'nginx' in file_path:
+            return "nginx"
+        return "properties"
     elif ext in ['.vue']:
         return "vue"
     elif ext in ['.php']:
@@ -218,8 +227,144 @@ def windows_path_replace(path,is_windows = True):
     if is_windows:
         path = path.replace("\\", "/")
     return path
-    
+
 def list_files_in_directory(dst_path,sort="name",is_reverse=False,is_windows=False,search=None,containSub=False,isDir=False):
+    """
+    @name 列出指定目录下文件\目录名列表，包含文件\目录属性（大小、路径、权限、所属者）
+    目录size大小默认不计算为0
+    owner所属者为空可能为文件/目录无权限查看或被占用等
+    @author lybbn<2024-02-22>
+    @param sort 排序
+    @param is_reverse True 降序(desc) 、False 升序(asc)
+    @param search 搜索名称
+    @param containSub 搜索内容是否包含所有子目录
+    @param isDir 是否只列出目录
+    """
+    def get_file_info(entry):
+        """获取文件信息的内部函数"""
+        file_info = entry.stat()
+        modified_time = datetime.datetime.fromtimestamp(file_info.st_mtime)
+        formatted_time = modified_time.strftime("%Y-%m-%d %H:%M:%S")
+        gid = file_info.st_gid
+        group_name = "" if is_windows else system.GetGroupidName(entry.path, gid)
+        
+        return {
+            "name": entry.name,
+            "type": "file" if entry.is_file() else "dir",
+            "path": windows_path_replace(entry.path, is_windows=is_windows),
+            "size": file_info.st_size if entry.is_file() else None,
+            "permissions": oct(file_info.st_mode)[-3:],
+            "owner_uid": file_info.st_uid,
+            "owner": system.GetUidName(entry.path, file_info.st_uid),
+            "gid": gid,
+            "group": group_name,
+            "modified": formatted_time
+        }
+
+    def process_entry(entry):
+        """处理单个目录项"""
+        if search and search.lower() not in entry.name.lower():
+            return None
+        if isDir and entry.is_file():
+            return None
+        return get_file_info(entry)
+
+    # 处理Windows磁盘根目录情况
+    if is_windows and not dst_path:
+        disk_paths = system().GetDiskInfo()
+        datainfo = {
+            'data':[],
+            'file_nums':0,
+            'dir_nums':0,
+            'total_nums':0
+        }
+        for d in disk_paths:
+            if search and d['path'].lower().find(search) == -1:
+                continue
+            datainfo['data'].append({
+                "name": d['path'].lower(),
+                "type": "pan",
+                "path": windows_path_replace(d['path'].lower(), is_windows=is_windows),
+                "size": d['size'][0],
+                "permissions": "",
+                "owner_uid": None,
+                "owner": "",
+                "modified": ""
+            })
+        datainfo['total_nums'] = len(disk_paths)
+        return datainfo
+
+    # 检查路径有效性
+    if not os.path.exists(dst_path):
+        return {
+            'data': [],
+            'file_nums': 0,
+            'dir_nums': 0,
+            'total_nums': 0
+        }
+    if not os.path.isdir(dst_path):
+        raise ValueError("错误：非目录")
+
+    # 处理不包含子目录的情况
+    if not containSub:
+        dirData = []
+        fileData = []
+        for entry in os.scandir(dst_path):
+            item = process_entry(entry)
+            if item:
+                if item["type"] == "dir":
+                    dirData.append(item)
+                else:
+                    fileData.append(item)
+
+        # 对目录和文件分别排序
+        if sort == "name":
+            dirData = natsorted(dirData, key=lambda x: x["name"], alg=ns.PATH, reverse=is_reverse)
+            fileData = natsorted(fileData, key=lambda x: x["name"], alg=ns.PATH, reverse=is_reverse)
+        elif sort == "modified":
+            dirData = sorted(dirData, key=lambda x: x["modified"], reverse=is_reverse)
+            fileData = sorted(fileData, key=lambda x: x["modified"], reverse=is_reverse)
+        elif sort == "size":
+            dirData = sorted(dirData, key=lambda x: x["size"] if x["size"] is not None else 0, reverse=is_reverse)
+            fileData = sorted(fileData, key=lambda x: x["size"] if x["size"] is not None else 0, reverse=is_reverse)
+
+        data = dirData + fileData
+    else:
+        # 处理包含子目录的情况
+        data = []
+        count_limit = 0
+        max_limit = 3000
+        for root, dirs, files in os.walk(dst_path):
+            if count_limit >= max_limit:
+                break
+            for entry in chain((os.path.join(root, f) for f in files), 
+                             (os.path.join(root, d) for d in dirs)):
+                if count_limit >= max_limit:
+                    break
+                info = process_entry(os.DirEntry(entry))
+                if info:
+                    data.append(info)
+                    count_limit += 1
+
+        # 对结果进行排序
+        if sort == "name":
+            data = natsorted(data, key=lambda x: x["name"], alg=ns.PATH, reverse=is_reverse)
+        elif sort == "modified":
+            data = sorted(data, key=lambda x: x["modified"], reverse=is_reverse)
+        elif sort == "size":
+            data = sorted(data, key=lambda x: x["size"] if x["size"] is not None else 0, reverse=is_reverse)
+
+    # 统计文件数量
+    file_nums = sum(1 for item in data if item["type"] == "file")
+    dir_nums = sum(1 for item in data if item["type"] == "dir")
+
+    return {
+        'data': data,
+        'file_nums': file_nums,
+        'dir_nums': dir_nums,
+        'total_nums': file_nums + dir_nums
+    }
+def list_files_in_directory_old(dst_path,sort="name",is_reverse=False,is_windows=False,search=None,containSub=False,isDir=False):
     """
     @name 列出指定目录下文件\目录名列表，包含文件\目录属性（大小、路径、权限、所属者）
     目录size大小默认不计算为0
@@ -665,6 +810,3 @@ def batch_operate(param,is_windows=False):
         return True,"批量删除成功",2000,None
     else:
         return False,"类型错误",4000,None
-
-
-

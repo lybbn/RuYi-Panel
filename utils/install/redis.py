@@ -29,6 +29,7 @@ import importlib
 from utils.server.system import system
 from utils.ruyiclass.redisClass import RedisClient
 from django.conf import settings
+from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
 
 def get_redis_path_info():
     root_path = GetInstallPath()
@@ -55,6 +56,7 @@ def get_redis_path_info():
 def redis_install_call_back(version={},call_back=None,ok=True):
     if call_back:
         job_id = version['job_id']
+        job_subprocess_del(job_id)
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -110,7 +112,8 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
             WriteFile(version_file,version['c_version'])
             WriteFile(log_path,"正在配置redis...\n",mode='a',write=is_write_log)
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/redis.sh','install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/redis.sh','install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -118,6 +121,7 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
                     break
                 if r_output:
                     WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                time.sleep(0.1)
 
             # 获取标准错误
             r_stderr = r_process.stderr.read()
@@ -220,7 +224,7 @@ def Start_Redis(is_windows=True):
         if os.path.exists(exe_path):
             try:
                 if not is_redis_running(is_windows=False,simple_check=True):
-                    subprocess.run(["sudo", "systemctl", "start", "redis"], check=True)
+                    subprocess.run(["systemctl", "start", "redis"], check=True,timeout=15)
                 else:
                     r_status = True
                 time.sleep(1)
@@ -270,6 +274,10 @@ def RY_GET_REDIS_CONF(is_windows=True):
     conf_path = soft_paths['abspath_conf_path']
     return ReadFile(conf_path)
 
+def RY_GET_REDIS_PORT(is_windows=True):
+    conf_options = RY_GET_REDIS_CONF_OPTIONS(is_windows=is_windows)
+    return conf_options['port']
+
 def RY_SAVE_REDIS_CONF(conf="",is_windows=True):
     soft_paths = get_redis_path_info()
     conf_path = soft_paths['abspath_conf_path']
@@ -283,7 +291,7 @@ def RY_GET_REDIS_CONF_OPTIONS(is_windows=True):
     get_keys = ["bind", "port", "timeout", "maxclients", "databases", "requirepass", "maxmemory"]
     for k in get_keys:
         val = ""
-        rep = "\n%s\s+(.+)" % k
+        rep = r"\n%s\s+(.+)" % k
         re_res = re.search(rep, conf)
         if not re_res:
             if k == "maxmemory":

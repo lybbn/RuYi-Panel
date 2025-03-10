@@ -13,6 +13,7 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.conf.urls import handler500
 from django.urls import path,re_path,include
 from apps.system.views.login import *
 from apps.system.views.file_manage import RYFileMediaView,RYGetFileDownloadView
@@ -33,6 +34,7 @@ urlpatterns = [
     path('api/logs/', include('apps.syslogs.urls')),
     path('api/task/', include('apps.systask.urls')),
     path('api/bak/', include('apps.sysbak.urls')),
+    path('api/docker/', include('apps.sysdocker.urls')),
     path('static/<path:path>', streamingmedia_serve, {'document_root': os.path.join(settings.STATIC_ROOT, "static") },),  # 处理静态文件
     path('media/<path:path>', streamingmedia_serve, {'document_root': os.path.join(settings.STATIC_ROOT, "static") },),  # 处理媒体文件
     re_path(r'^(logo\.png|favicon\.ico)$', streamingmedia_serve, {'document_root': settings.STATIC_ROOT},),

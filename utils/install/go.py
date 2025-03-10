@@ -21,12 +21,13 @@
 import os,platform,re
 import time
 from pathlib import Path
-from utils.common import DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand
+from utils.common import DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand,ReadFile
 from utils.security.files import download_url_file,get_file_name_from_url
 import subprocess
 import importlib
 from utils.server.system import system
 from django.conf import settings
+from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
 
 def get_go_path_info(version):
     root_path = GetInstallPath()+"/go"
@@ -53,6 +54,7 @@ def get_go_path_info(version):
 def go_install_call_back(version={},call_back=None,ok=True):
     if call_back:
         job_id = version['job_id']
+        job_subprocess_del(job_id)
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -60,8 +62,8 @@ def go_install_call_back(version={},call_back=None,ok=True):
 
 def isSupportSys():
     if platform.architecture()[0] == '64bit':
-        arch = platform.machine()
-        if 'x86_64' in arch or 'AMD64' in arch:
+        arch = platform.machine().lower()
+        if arch in ['x86_64','amd64','aarch64']:
             return True
         return False
     return False
@@ -95,8 +97,8 @@ def create_default_env(version,version_path,is_windows=True):
     bin_path = soft_paths['public_abspath_bin_path']
     if not is_windows:
         if os.path.exists("/etc/profile"):
-            res,err = RunCommand(f"echo $GOROOT | grep {p_path}")
-            if not res:
+            pcont = ReadFile("/etc/profile")
+            if not f"export GOROOT={p_path}" in pcont:
                 RunCommand(f"echo 'export GOROOT={p_path}' >> /etc/profile")
                 RunCommand("source /etc/profile")
     system.AddBinToPath(bin_path)
@@ -119,23 +121,23 @@ def Install_Go(type=2,version={},is_windows=True,call_back=None):
         if isSupportSys():
             WriteFile(log_path,"检测系统为64位，环境检测通过 ✔\n",mode='a',write=is_write_log)
         else:
-            raise Exception("暂不支持非amd64和x86_64系统，环境检测不通过 ✖")
+            raise Exception("暂不支持非arm64、amd64和x86_64系统，环境检测不通过 ✖")
         download_url = version.get('url',None)
-        WriteFile(log_path,"开始下载【%s】安装文件,文件地址：%s\n"%(name,download_url),mode='a',write=is_write_log)
-        filename = get_file_name_from_url(download_url)
         save_directory = os.path.abspath(GetTmpPath())
         soft_paths = get_go_path_info(version['c_version'])
         install_base_directory = soft_paths['root_abspath_path']
         install_directory = soft_paths['install_abspath_path']
         if not os.path.exists(save_directory):
             os.makedirs(save_directory)
+        filename = get_file_name_from_url(download_url)
         save_path = os.path.join(save_directory, filename)
-        #开始下载
-        ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
-        if not ok:
-            WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
-            raise ValueError(msg)
         if is_windows:
+            WriteFile(log_path,"开始下载【%s】安装文件,文件地址：%s\n"%(name,download_url),mode='a',write=is_write_log)
+            #开始下载
+            ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
+            if not ok:
+                WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
+                raise ValueError(msg)
             WriteFile(log_path,"【%s】下载完成\n"%filename,mode='a',write=is_write_log)
             src_folder = os.path.join(install_base_directory,Path(filename).stem)
             WriteFile(log_path,"正在解压安装文件到%s\n"%install_directory,mode='a',write=is_write_log)
@@ -157,8 +159,12 @@ def Install_Go(type=2,version={},is_windows=True,call_back=None):
             # 新建版本文件
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
+            # 删除下载的文件
+            DeleteFile(save_path,empty_tips=False)
+            WriteFile(log_path,"已删除下载的临时安装文件，并回调\n",mode='a',write=is_write_log)
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/go.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/go.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -166,19 +172,17 @@ def Install_Go(type=2,version={},is_windows=True,call_back=None):
                     break
                 if r_output:
                     WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                time.sleep(0.1)
             # 获取标准错误
             r_stderr = r_process.stderr.read()
             if r_stderr:
-                if not os.path.exists(soft_paths['linux_abspath_exe_path']):
+                if not os.path.exists(soft_paths['linux_abspath_exe_path']) or "ERROR: Install go fielded" in str(r_stderr):
                     raise Exception(r_stderr.strip())
             WriteFile(log_path,f"开始创建默认GO环境...\n",mode='a',write=is_write_log)
             create_default_env(version['c_version'],soft_paths['install_abspath_path'],is_windows=is_windows)#创建默认go环境
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
         
-        # 删除下载的文件
-        DeleteFile(save_path,empty_tips=False)
-        WriteFile(log_path,"已删除下载的临时安装文件，并回调\n",mode='a',write=is_write_log)
         WriteFile(log_path,"安装成功，安装目录：%s\n"%install_directory,mode='a',write=is_write_log)
         version['install_path'] = install_directory
         go_install_call_back(version=version,call_back=call_back,ok=True)

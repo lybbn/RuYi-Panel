@@ -20,4 +20,5 @@ class Command(BaseCommand):
         call_command('migrate', database='tasks')
         call_command('migrate', database='shop')
         call_command('migrate', database='backup')
+        call_command('migrate', database='docker')
         print("同步models到数据库完成！")

@@ -130,6 +130,8 @@ class RYSoftShopListView(CustomAPIView):
                 if p['versions']:
                     for v in p['versions']:
                         v['url'] = None
+                        hidev = v.get("hide",None)
+                        v['hide'] = True if hidev else False
                 if p['name'] in ["python","go"]:
                     p['status']=True
                     if p['name'] == "go":

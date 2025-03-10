@@ -197,29 +197,29 @@ class RYFileManageView(CustomAPIView):
             RuyiAddOpLog(request,msg="【文件管理】-【重命名】源：%s，目标：%s"%(sPath,dPath),module="filemg")
             return DetailResponse(msg="重命名成功")
         elif action == "copy_file":
-            spath = reqData.get("spath","")
+            sPath = reqData.get("spath","")
             name = reqData.get("name","")
             cover = reqData.get("cover",False)
-            if not spath or not name:
+            if not sPath or not name:
                 return ErrorResponse(msg="参数错误")
             dPath = path+"/"+name
             if not cover:
                 if os.path.exists(dPath):
                     return ErrorResponse(code=4050,msg="目标存在相同文件")
-            copy_file(sPath=spath,dPath=dPath,is_windows=is_windows)
-            RuyiAddOpLog(request,msg="【文件管理】-【复制文件】源：%s，目标：%s"%(sPath,dPath),module="filemg")
+            copy_file(sPath=sPath,dPath=dPath,is_windows=is_windows)
+            RuyiAddOpLog(request,msg=f"【文件管理】-【复制文件】源：{sPath}，目标：{dPath}",module="filemg")
             return DetailResponse(msg="复制成功")
         elif action == "copy_dir":
-            spath = reqData.get("spath","")
+            sPath = reqData.get("spath","")
             name = reqData.get("name","")
             cover = reqData.get("cover",False)
-            if not spath or not name:
+            if not sPath or not name:
                 return ErrorResponse(msg="参数错误")
             dPath = path+"/"+name
             if not cover:
                 if os.path.exists(dPath):
                     return ErrorResponse(code=4050,msg="目标存在相同目录")
-            copy_dir(sPath=spath,dPath=dPath,is_windows=is_windows,cover=cover)
+            copy_dir(sPath=sPath,dPath=dPath,is_windows=is_windows,cover=cover)
             RuyiAddOpLog(request,msg="【文件管理】-【复制目录】源：%s，目标：%s"%(sPath,dPath),module="filemg")
             return DetailResponse(msg="复制成功")
         elif action == "move_file":
@@ -448,6 +448,7 @@ class RYFileUploadView(CustomAPIView):
     """
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
+    throttle_classes=[]
 
     def post(self, request):
         reqData = get_parameter_dic(request)

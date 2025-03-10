@@ -15,18 +15,33 @@ def get_client_info(request):
     """
     获取请求用户的客户端信息
     """
-    ip = get_request_ip(request)
-    body = getattr(request, 'request_data', {})
-    return {
-        'username':request.user.username,
-        'ip':ip,
-        'ip_area':get_ip_area(ip),
-        'path':get_request_path(request),
-        'body':body,
-        'request_os': get_os(request),
-        'browser': get_browser(request),
-        'request_msg': request.session.get('request_msg'),
-    }
+    
+    if hasattr(request, 'ruyi_ws_request_flag') and request.ruyi_ws_request_flag == 'ruyi_request_flag':
+        user = request.scope.get("user",None)
+        ip = request.scope.get('client', ('', ''))[0] # 获取客户端的 IP 地址
+        return {
+            'username': user.username if user else "",
+            'ip': ip,
+            'ip_area':get_ip_area(ip),
+            'path': request.scope.get('path', ''),
+            'body': {},  # WebSocket 没有 HTTP 请求的 body
+            'request_os': 'Unknown',  # WebSocket 通常不携带操作系统信息
+            'browser': 'WebSocket Client',  # 浏览器可以设置为 'WebSocket Client'
+            'request_msg':  getattr(request, 'client_data', None),
+        }
+    else:
+        ip = get_request_ip(request)
+        body = getattr(request, 'request_data', {})
+        return {
+            'username':request.user.username,
+            'ip':ip,
+            'ip_area':get_ip_area(ip),
+            'path':get_request_path(request),
+            'body':body,
+            'request_os': get_os(request),
+            'browser': get_browser(request),
+            'request_msg': request.session.get('request_msg'),
+        }
 
 def get_ip_area(ip):
     """

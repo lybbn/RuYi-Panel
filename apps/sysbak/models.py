@@ -9,6 +9,7 @@ class RuyiBackup(models.Model):
         (1, "数据库备份"),
         (2, "网站备份"),
         (3, "目录备份"),
+        (4, "应用备份"),#dkapps
     )
     STORETYPE_CHOICE = (
         ("local", "本地"),

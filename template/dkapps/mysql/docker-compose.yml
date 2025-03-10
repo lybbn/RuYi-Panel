@@ -1,0 +1,30 @@
+services:
+  RUYI_DKAPP:
+    image: mysql:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - ${HOST_IP}:${MYSQL_PORT}:3306
+    volumes:
+      - ${APP_PATH}/data/:/var/lib/mysql
+      - ${APP_PATH}/my.cnf:/etc/my.cnf
+      - ${APP_PATH}/log:/var/log/mysql
+      - ${APP_PATH}/mysql-conf-d:/etc/mysql/mysql.conf.d:ro
+      - ${APP_PATH}/mysql-files:/var/lib/mysql-files
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    labels:
+      createdBy: "ruyi_apps"
+    command: ${COMMAND}
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

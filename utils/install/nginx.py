@@ -29,6 +29,7 @@ from django.conf import settings
 import subprocess
 import importlib
 from utils.server.system import system
+from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
 
 def get_nginx_path_info():
     root_path = GetInstallPath()
@@ -54,6 +55,7 @@ def get_nginx_path_info():
 def nginx_install_call_back(version={},call_back=None,ok=True):
     if call_back:
         job_id = version['job_id']
+        job_subprocess_del(job_id)
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -112,7 +114,8 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
             WriteFile(soft_paths['abspath_conf_path'],RY_GET_NGINX_CONFIG(is_windows=True))
             WriteFile(soft_paths['install_path']+'/html/index.html',RY_GET_NGINX_INDEX_HTML())
         else:
-            r_process = subprocess.Popen(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","nginx.sh"),'install',version['c_version'],version['version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            r_process = subprocess.Popen(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","nginx.sh"),'install',version['c_version'],version['version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -120,6 +123,7 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
                     break
                 if r_output:
                     WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                time.sleep(0.1)
 
             # 获取标准错误
             r_stderr = r_process.stderr.read()
@@ -218,8 +222,12 @@ def check_nginx_config(conf_path = None,is_windows=True):
         # 确保路径存在
         if os.path.exists(exe_path):
             try:
-                code = RunCommandReturnCode([exe_path,"-t", "-c",conf_path],cwd=soft_paths['install_path'])
-                return True if code == 0 else False
+                if is_windows:
+                    code = RunCommandReturnCode([exe_path,"-t", "-c",conf_path],cwd=soft_paths['install_path'])
+                    return True if code == 0 else False
+                else:
+                    result = subprocess.run([exe_path,"-t", "-c",conf_path],capture_output=True, text=True, check=True)
+                    return result.returncode == 0
             except Exception as e:
                 raise ValueError(f"重载Nginx时发生错误: {e}")
         else:
@@ -254,7 +262,7 @@ def Start_Nginx(is_windows=True):
         if os.path.exists(exe_path):
             try:
                 if not is_nginx_running(is_windows=False,simple_check=True):
-                    subprocess.run(["sudo", "systemctl", "start", "nginx"], check=True)
+                    subprocess.run(["systemctl", "start", "nginx"], check=True,timeout=15)
                 else:
                     r_status = True
                 time.sleep(1)
@@ -317,7 +325,11 @@ def Restart_Nginx(is_windows=True):
         time.sleep(0.1)
         Start_Nginx(is_windows=is_windows)
     else:
-        RunCommand("systemctl restart nginx")
+        result,err,code = RunCommand("systemctl restart nginx", returncode=True)
+        if code == 0 or not err:
+            pass
+        else:
+            raise Exception(err)
 
 def Reload_Nginx(is_windows=True):
     """
@@ -347,6 +359,9 @@ def RY_GET_NGINX_CONF(is_windows=True):
     conf_path = soft_paths['abspath_conf_path']
     return ReadFile(conf_path)
 
+def RY_GET_NGINX_PORT(is_windows=True):
+    return 80
+    
 def RY_SAVE_NGINX_CONF(conf="",is_windows=True):
     soft_paths = get_nginx_path_info()
     conf_path = soft_paths['abspath_conf_path']
@@ -510,6 +525,11 @@ def RY_GET_NGINX_CONFIG(is_windows=True):
     vhost_path = settings.RUYI_VHOST_PATH.replace("\\", "/")
     vhost_nginx_path = vhost_path+'/nginx/*.conf'
     proxy_cache_path = soft_paths['install_path']+'/temp/proxy_cache_dir'
+    
+    lua_package_path=""
+    if not is_windows:
+        lua_package_path='lua_package_path "/ruyi/server/nginx/lib/lua/?.lua;;";'
+    
     conf = f"""user www www;
 worker_processes  auto;
 pid        {pid_path};
@@ -563,6 +583,9 @@ http {{
     proxy_temp_file_write_size 128k;
     proxy_next_upstream error timeout invalid_header http_500 http_503 http_404;
     proxy_cache cache_one;
+    
+    {lua_package_path}
+    #ruyi_waf_line please do not delete
     
     server {{
         listen 80;

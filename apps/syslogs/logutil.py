@@ -1,5 +1,10 @@
 from apps.syslogs.models import OperationLog
 from utils.request_util import get_client_info
+from asgiref.sync import sync_to_async
+
+@sync_to_async
+def asyncRuyiAddOpLog(request,msg="",module="",status=True):
+    RuyiAddOpLog(request,msg=msg,module=module,status=status)
 
 def RuyiAddOpLog(request,msg="",module="",status=True):
     c_info = get_client_info(request)

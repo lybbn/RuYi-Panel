@@ -52,6 +52,19 @@ def ResponseNginx404(state = 404):
 </html>'''
     return HttpResponse(html_content, content_type='text/html',status=state,charset='utf-8')
 
+def ResponseRUYI500(state = 500):
+    html_content = '''<html>
+<head><title>500 Internal Server Error</title></head>
+<body>
+<h1>500 Internal Server Error</h1>
+<p>Exception inside application.</p>
+</body>
+</html>'''
+    return HttpResponse(html_content, content_type='text/html',status=state,charset='utf-8')
+
 #404 Return 接口
 def response_404_view(request):
     return ResponseNginx404()
+
+def response_500_RUYI_view(request):
+    return ResponseRUYI500()

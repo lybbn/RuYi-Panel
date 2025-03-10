@@ -1,0 +1,22 @@
+services:
+  RUYI_DKAPP:
+    image: ollama/ollama:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: unless-stopped
+    tty: true
+    ports:
+      - ${HOST_IP}:${OLLAMA_PORT}:11434
+    volumes:
+      - ${APP_PATH}/data:/root/.ollama
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

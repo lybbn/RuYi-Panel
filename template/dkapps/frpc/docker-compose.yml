@@ -1,0 +1,15 @@
+services:
+  RUYI_DKAPP:
+    image: snowdreamtech/frpc:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    network_mode: host
+    restart: always
+    volumes:
+      - ${APP_PATH}/frpc.toml:/etc/frp/frpc.toml
+      - ${APP_PATH}/data/ssl:/etc/frp/ssl
+    labels:
+      createdBy: "ruyi_apps"

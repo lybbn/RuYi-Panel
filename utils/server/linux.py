@@ -60,13 +60,23 @@ def GetSystemVersion():
     version = cache.get(key)
     if version: return version
     try:
-        # Python 3.8 已移除 此方法 "linux_distribution()"
-        platform_dist = platform.linux_distribution()
-        version = platform_dist[0] + " " + platform_dist[1]
+        with open("/etc/os-release", "r", encoding="utf-8") as f:
+            os_release = {}
+            for line in f:
+                line = line.strip()
+                if line and "=" in line:
+                    key, value = line.split("=", 1)
+                    os_release[key] = value.strip('"')
+            VERSION_ID = os_release.get('VERSION_ID', '')
+            NAME = os_release.get('NAME', '').replace('GNU/Linux', '').strip()
+            version = f"{NAME} {VERSION_ID}"
     except:
-        with os.popen("cat /etc/redhat-release", "r") as p:
-            release = p.read()
-        version = release.replace('release ', '').replace('Linux', '').replace('(Core)', '').strip()
+        if os.path.exists("/etc/redhat-release"):
+            with os.popen("cat /etc/redhat-release", "r") as p:
+                release = p.read()
+            version = release.replace('release ', '').replace('Linux', '').replace('(Core)', '').strip()
+        else:
+            pass
 
     pyv_info = sys.version_info
     version = "{} {}(Py{}.{}.{})".format(version, os.uname().machine, pyv_info.major, pyv_info.minor, pyv_info.micro)
@@ -82,9 +92,16 @@ def GetSimpleSystemVersion():
     version = cache.get(key)
     if version: return version
     try:
-        # Python 3.8 已移除 此方法 "linux_distribution()"
-        platform_dist = platform.linux_distribution()
-        version = platform_dist[0] + " " + platform_dist[1]
+        with open("/etc/os-release", "r", encoding="utf-8") as f:
+            os_release = {}
+            for line in f:
+                line = line.strip()
+                if line and "=" in line:
+                    key, value = line.split("=", 1)
+                    os_release[key] = value.strip('"')
+            VERSION_ID = os_release.get('VERSION_ID', '')
+            NAME = os_release.get('NAME', '').replace('GNU/Linux', '').strip()
+            version = f"{NAME} {VERSION_ID}"
     except:
         with os.popen("cat /etc/redhat-release", "r") as p:
             release = p.read()
@@ -309,6 +326,7 @@ def GetCpuInfo(interval=1):
     cpuW = cache.get('lybbn_cpu_cpuW')
     if not cpuW:
         cpuW = int(subprocess.check_output('cat /proc/cpuinfo | grep "physical id" | sort -u | wc -l', shell=True))
+        if not cpuW:cpuW=1
         cache.set('lybbn_cpu_cpuW', cpuW, 86400)
 
     used = psutil.cpu_percent(interval)
@@ -320,7 +338,10 @@ def GetCpuInfo(interval=1):
         cpu_name = ""
         try:
             cpuinfo = getCpuInfoDict()
-            cpu_name = cpuinfo['proc0']['model name'] + " * {}".format(cpuW)
+            if 'model name' in cpuinfo['proc0']:
+                cpu_name = cpuinfo['proc0']['model name'] + " * {}".format(cpuW)
+            else:
+                cpu_name=os.popen('lscpu | grep "Model name" | cut -d ":" -f 2 | sed "s/^ *//"').read().strip()
         except:
             pass
         cache.set('lybbn_cpu_cpu_name', cpu_name, 86400)
@@ -522,6 +543,30 @@ def getFirewalldRuleList(param = {"dir":"in"}):
             })
     return data
 
+def get_pid_by_port(port):
+    """
+    取端口的pid（其中一个）
+    """
+    for conn in psutil.net_connections(kind='inet'):
+        # 检查是否为 LISTEN 状态，且本地端口为指定的端口
+        if conn.status == 'LISTEN' and str(conn.laddr.port) == str(port):
+            return conn.pid  # 返回匹配的进程 PID
+    return None  # 如果没有找到匹配的连接
+
+def convert_to_hashable(obj):
+    if isinstance(obj, dict):
+        # 将字典按键排序，并递归处理值
+        return tuple(sorted((k, convert_to_hashable(v)) for k, v in obj.items()))
+    elif isinstance(obj, list):
+        # 将列表转换为元组，并递归处理元素
+        return tuple(convert_to_hashable(elem) for elem in obj)
+    elif isinstance(obj, set):
+        # 处理集合（如有需要）
+        return tuple(sorted(convert_to_hashable(elem) for elem in obj))
+    else:
+        # 基础类型直接返回
+        return obj
+
 def GetFirewallRules(param = {"dir":"in"}):
     """
     获取防火墙规则列表
@@ -616,7 +661,7 @@ def GetFirewallRules(param = {"dir":"in"}):
                 'desc':''
             })
 
-        unique_set = set(tuple(sorted(item.items())) for item in data)
+        unique_set = set(convert_to_hashable(item) for item in data)
         data = [dict(item) for item in unique_set]
     else:
         return []
@@ -627,11 +672,13 @@ def GetFirewallRules(param = {"dir":"in"}):
         else:
             if is_service_running(int(d['port'])):
                 d['status'] = True
-                pid,err = RunCommand(f"lsof -t -i :{d['port']}")
+                #pid,err = RunCommand(f"lsof -t -i :{d['port']}")
+                pid,err = RunCommand(f"ss -ltunp | grep :{d['port']} | awk -F'pid=' '{{for(i=2;i<=NF;i++) print $i}}' | awk -F',' '{{print $1}}'")
                 if pid:
-                    pid = int(pid.split('\n')[0])
+                    pid_arr = sorted(list(filter(None, pid.split('\n'))))
+                    one_pid = int(pid_arr[0])
                     try:
-                        process = psutil.Process(pid)
+                        process = psutil.Process(one_pid)
                         process_name = process.name()
                         if process_name == "RuYi-Panel":
                             process_cmd = "/usr/local/ruyi/python/bin/python3 start.py"
@@ -639,7 +686,7 @@ def GetFirewallRules(param = {"dir":"in"}):
                             process_cmd = process.cmdline()
                             process_cmd = " ".join(process_cmd)
                         d['status_info']={
-                            'pid': pid,
+                            'pid': ', '.join(pid_arr),
                             'name': process_name,
                             'cmd': process_cmd
                         }
@@ -1216,8 +1263,7 @@ def RestartRuyi():
     重启如意
     """
     try:
-        import subprocess
-        subprocess.run(["systemctl","restart", "ruyi"], check=True)
+        os.system("systemctl stop ruyi;systemctl start ruyi")
     except:
         pass
 
@@ -1258,10 +1304,13 @@ def AddBinToPath(bin_dir):
     添加命令到系统路径（环境变量）
     """
     if os.path.exists("/etc/profile"):
-        current_path = os.environ.get('PATH', '')
-        if bin_dir not in current_path:
+        # current_path = os.environ.get('PATH', '')
+        # if bin_dir not in current_path:
+        pcont = ReadFile("/etc/profile")
+        if not f"export PATH={bin_dir}:$PATH" in pcont:
             RunCommand(f"echo 'export PATH={bin_dir}:$PATH' >> /etc/profile")
             RunCommand("source /etc/profile")
         return True
     else:
         raise Exception("无/etc/profile文件")
+    

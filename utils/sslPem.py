@@ -21,15 +21,18 @@
 from ipaddress import IPv4Address
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.x509 import OID_SUBJECT_ALTERNATIVE_NAME,KeyUsage,IPAddress,BasicConstraints,random_serial_number,NameOID, Name,NameAttribute, CertificateSigningRequestBuilder, CertificateBuilder,SubjectAlternativeName,DNSName,load_pem_x509_certificate
 from cryptography.hazmat.primitives.serialization import BestAvailableEncryption,pkcs12,Encoding,PrivateFormat,NoEncryption
 import ipaddress
 from django.conf import settings
-from utils.common import WriteFile,ReadFile
+from utils.common import WriteFile,ReadFile,get_online_public_ip
 import socket
 import datetime
 from zoneinfo import ZoneInfo
+import logging
+logger = logging.getLogger()
 
 # 生成私钥
 def generatePrivatekey():
@@ -39,6 +42,7 @@ def generatePrivatekey():
     private_key = rsa.generate_private_key(
         public_exponent=65537,
         key_size=2048,
+        backend=default_backend()
     )
     return private_key
 
@@ -122,14 +126,14 @@ def create_signed_certificate(root_cert=None, root_key=None, hosts=[],days=365*1
     @author lybbn<2024-09-05>
     """
     key = generatePrivatekey()
+    common_name = str(hosts[0]) if hosts else "default"
     subject = Name([
         NameAttribute(NameOID.COUNTRY_NAME, u"CN"),
         NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"HENAN"),
         NameAttribute(NameOID.LOCALITY_NAME, u"ruyi"),
         NameAttribute(NameOID.ORGANIZATION_NAME, u"如意面板"),
-        NameAttribute(NameOID.COMMON_NAME, u"%s"%(', '.join(hosts))),
+        NameAttribute(NameOID.COMMON_NAME, common_name),
     ])
-    
     san_entries = []
     for host in hosts:
         try:
@@ -138,8 +142,9 @@ def create_signed_certificate(root_cert=None, root_key=None, hosts=[],days=365*1
             san_entries.append(IPAddress(ip))
         except:
             # 如果 host 不是有效的 IP 地址，则尝试将其作为 DNS 名称
+            if not host.strip():
+                continue
             san_entries.append(DNSName(host))
-    
     cert = CertificateBuilder().subject_name(
         subject
     ).issuer_name(
@@ -167,16 +172,16 @@ def create_signed_certificate(root_cert=None, root_key=None, hosts=[],days=365*1
     ).add_extension(
         SubjectAlternativeName(san_entries),
         critical=False,
-    ).sign(root_key, hashes.SHA256())
+    ).sign(root_key, hashes.SHA256(),backend=default_backend())
     
-    cert = cert.public_bytes(Encoding.PEM)
-    key = key.private_bytes(
+    cert_pem = cert.public_bytes(Encoding.PEM)
+    key_pem = key.private_bytes(
         encoding=Encoding.PEM,
         format=PrivateFormat.TraditionalOpenSSL,
         encryption_algorithm = NoEncryption()
     )
 
-    return cert, key
+    return cert_pem, key_pem
 
 def getDefaultRuyiSSLPem(mode="rb"):
     """
@@ -190,7 +195,42 @@ def getDefaultRuyiSSLPem(mode="rb"):
         return ruyi_root_password,ruyi_root,private_key,certificate
     return None,None,None,None
 
-def generateRuyiSSLPem(hosts=[]):
+def forceCreateRuyiSSLPem():
+    """
+    强制生成默认如意面板SSL
+    @author lybbn<2025-03-01>
+    """
+    hosts = []
+    host = ReadFile(settings.RUYI_PUBLICIP_FILE)
+    if not host:
+        print("正在获取服务器公网IP地址...")
+        logger.info("正在获取服务器公网IP地址...")
+        host = get_online_public_ip()
+        if host:
+            print("获取服务器公网IP地址：%s"%host)
+            logger.info("获取服务器公网IP地址：%s"%host)
+            WriteFile(settings.RUYI_PUBLICIP_FILE,host)
+        else:
+            print("获取服务器公网IP失败!!!")
+            logger.info("获取服务器公网IP失败!!!")
+    hostname = socket.gethostname()
+    ip_addresses = socket.gethostbyname_ex(hostname)[2]
+    hosts = [ip for ip in ip_addresses if not ip.startswith("127.")]
+    hosts.append('127.0.0.1')
+    if host:
+        hosts.insert(0, host)
+    print("正在生成如意面板SSL证书信息...")
+    logger.info("正在生成如意面板SSL证书信息...")
+    ruyi_root_password,ruyi_root,private_key,certificate = generateRuyiSSLPem(hosts=hosts,force=True)
+    if certificate:
+        print("SSL证书信息生成成功")
+        logger.info("SSL证书信息生成成功")
+    else:
+        print("SSL证书信息生成失败!!!")
+        logger.info("SSL证书信息生成失败!!!")
+    return True
+
+def generateRuyiSSLPem(hosts=[],force=False):
     """
     @author lybbn<2024-09-05>
     """
@@ -200,18 +240,21 @@ def generateRuyiSSLPem(hosts=[]):
             ip_addresses = socket.gethostbyname_ex(hostname)[2]
             hosts = [ip for ip in ip_addresses if not ip.startswith("127.")]
             hosts.append('127.0.0.1')
-        ruyi_root_password,ruyi_root,private_key,certificate = getDefaultRuyiSSLPem()
-        if ruyi_root_password and ruyi_root and private_key and certificate:
-            return ruyi_root_password,ruyi_root,private_key,certificate
+        if not force:
+            ruyi_root_password,ruyi_root,private_key,certificate = getDefaultRuyiSSLPem()
+            if ruyi_root_password and ruyi_root and private_key and certificate:
+                return ruyi_root_password,ruyi_root,private_key,certificate
         ruyi_root_password = "ruyi.lybbn.cn"
         WriteFile(settings.RUYI_ROOTPFX_PASSWORD_PATH_FILE,ruyi_root_password)
         ruyi_root,root_key,root_cert = create_root_certificate(password=ruyi_root_password)
         WriteFile(settings.RUYI_ROOTPFX_PATH_FILE,ruyi_root,mode='wb')
+        
         certificate, private_key = create_signed_certificate(root_cert=root_cert,root_key=root_key,hosts=hosts)
         WriteFile(settings.RUYI_PRIVATEKEY_PATH_FILE,private_key,mode='wb')
         WriteFile(settings.RUYI_CERTKEY_PATH_FILE,certificate,mode='wb')
         return ruyi_root_password,ruyi_root,private_key,certificate
     except Exception as e:
+        print(f"生成面板证书SSL错误：{e}")
         return None,None,None,None
 
 def extract_organization_name(subject):

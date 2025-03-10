@@ -16,6 +16,7 @@
 # 系统配置
 # ------------------------------
 import os,re
+import requests
 import socket
 import datetime
 from math import ceil
@@ -25,17 +26,21 @@ from django.contrib.auth.hashers import make_password
 from utils.jsonResponse import SuccessResponse,ErrorResponse,DetailResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
-from utils.common import current_os,DeleteFile,ReadFile,GetSecurityPath,GetPanelBindAddress,get_parameter_dic,ast_convert,GetPanelPort,isSSLEnable,WriteFile,GetWebRootPath,GetBackupPath,formatdatetime
+from utils.common import compare_versions,current_os,DeleteFile,ReadFile,GetSecurityPath,GetPanelBindAddress,get_parameter_dic,ast_convert,GetPanelPort,isSSLEnable,WriteFile,GetWebRootPath,GetBackupPath,formatdatetime
 from apps.system.models import Users,Sites,Databases
 from apps.sysshop.models import RySoftShop
 from apps.syslogs.logutil import RuyiAddOpLog
 from utils.ip_util import is_valid_ipv4
 from utils.security.security_path import security_path_authed_key
 from utils.customView import CustomAPIView
-from utils.sslPem import getCertInfo,getDefaultRuyiSSLPem
+from utils.sslPem import getCertInfo,getDefaultRuyiSSLPem,forceCreateRuyiSSLPem
 from django.http import FileResponse
 from django.utils.encoding import escape_uri_path
-from utils_pro.proFuncLoader import proFuncLoader
+from utils.upgrade_panel import update_ruyi_panel
+from utils_pro.RyProLoader import load_ryprofunc_extension as proFuncLoader
+from apps.sysdocker.models import RyDockerApps
+from utils.install.install_soft import Ry_Get_Soft_Port
+from utils.ruyiclass.dockerClass import DockerClient
 
 def ruyiPathDirHandle(p):
     """
@@ -63,7 +68,7 @@ class RYSysLicenseView(CustomAPIView):
     authentication_classes = [JWTAuthentication]
     
     def get(self,request):
-        data = proFuncLoader(settings=settings).get_license()
+        data = proFuncLoader().get_license()
         return DetailResponse(data=data)
 
 class RYSysconfigManageView(CustomAPIView):
@@ -192,6 +197,8 @@ class RYSysconfigManageView(CustomAPIView):
             return DetailResponse(msg="设置成功")
         elif action == "get_ruyi_sslinfo":
             certinfo = getCertInfo()
+            if not certinfo:
+                forceCreateRuyiSSLPem()
             ruyi_root_password,ruyi_root,private_key,certificate = getDefaultRuyiSSLPem(mode="r")
             data = {
                 'certinfo':certinfo,
@@ -267,3 +274,101 @@ class RYGetInterfacesView(CustomAPIView):
         for h in hosts:
             data.append(h)
         return DetailResponse(data=data)
+    
+class RYUpdateSysManageView(CustomAPIView):
+    """
+    get:
+    获取新版本
+    post:
+    更新系统
+    """
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    
+    def get(self,request):
+        s_url = "https://download.lybbn.cn/ruyi/install/version.json"
+        resp = requests.get(url=s_url,timeout=5)
+        ver = ""
+        if resp.status_code == 200:
+            ver = resp.text
+        c_ver = ReadFile(settings.RUYI_SYSVERSION_FILE)
+        has_new_version = False
+        if ver:
+            res_v = compare_versions(ver,c_ver)
+            if res_v >0:
+                has_new_version = True
+        else:
+            ver = c_ver
+        data = {
+            'c_ver':c_ver,
+            'can_update':has_new_version,
+            'n_ver':ver
+        }
+        return DetailResponse(data=data)
+    
+    def post(self, request):
+        reqData = get_parameter_dic(request)
+        action = reqData.get("action","")
+        if action == "update":
+            isok,msg = update_ruyi_panel()
+            if not isok:
+                return ErrorResponse(msg=msg)
+            RuyiAddOpLog(request,msg="【面板设置】=> 更新面板",module="panelst")
+            return DetailResponse(msg="更新成功，请重启面板！！！")
+        elif action == "fix":
+            isok,msg = update_ruyi_panel()
+            if not isok:
+                return ErrorResponse(msg=msg)
+            RuyiAddOpLog(request,msg="【面板设置】=> 修复面板",module="panelst")
+            return DetailResponse(msg="修复成功，请重启面板！！！")
+        return ErrorResponse(msg="类型错误")
+    
+class RYGetSysLocalAndAppsServiceView(CustomAPIView):
+    """
+    get:
+    获取本地和dkapp的服务列表（如：mysql等）
+    """
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    
+    def get(self,request):
+        reqData = get_parameter_dic(request)
+        type = reqData.get("type","")
+        if not type in ["mysql"]:
+           return ErrorResponse(msg="类型错误")
+        soft_ins = RySoftShop.objects.filter(name=type,installed=True).order_by("create_at")
+        dk_ins = RyDockerApps.objects.filter(appname=type).order_by("create_at")
+        data = []
+        is_windows = True if current_os == "windows" else False
+        lport = Ry_Get_Soft_Port(name=type,is_windows=is_windows)
+        DockerClientIns = DockerClient()
+        docker_ruyi_network_gateway = DockerClientIns.get_network_gateway("ruyi-network")
+        docker_ruyi_network_gateway = docker_ruyi_network_gateway if docker_ruyi_network_gateway else "127.0.0.1"
+        for s in soft_ins:
+            name = s.name
+            if type == 'mysql':
+                name = f"{docker_ruyi_network_gateway}:{lport}"
+            data.append({
+                'id':s.id,
+                "label": f"{s.name}({s.install_version})",
+                "value": name,
+                'from':'local',
+            })
+        for d in dk_ins:
+            params = ast_convert(d.params)
+            ports = []
+            for key, value in params.items():
+                if "_port" in key.lower():
+                    ports.append(value)
+            port = ports[0] if len(ports)>0 else ""
+            name = d.name
+            if type == 'mysql':
+                name = f"{docker_ruyi_network_gateway}:{port}"
+            data.append({
+                'id':d.id,
+                "label": f"{d.name}({d.version})",
+                "value": name,
+                'from':'dkapp',
+            })
+        return DetailResponse(data=data)
+        

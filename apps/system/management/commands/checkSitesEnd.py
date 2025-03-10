@@ -4,9 +4,10 @@ from utils.ruyiclass.webClass import WebClient
 from apps.sysshop.models import RySoftShop
 from utils.common import ast_convert
 
-current_static_webServer = ""
+current_static_webServer = None
 
 def get_type_name(type):
+    global current_static_webServer
     if type == 0:
         if not current_static_webServer:
             webServerIns = RySoftShop.objects.filter(type=3).first()

@@ -25,8 +25,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
 RUYI_DATA_BASE_PATH = os.path.join(BASE_DIR, 'data')
 RUYI_VHOST_PATH = os.path.join(RUYI_DATA_BASE_PATH,'vhost')
-if not os.path.exists(RUYI_VHOST_PATH):os.mkdir(RUYI_VHOST_PATH)
-if not os.path.exists(GetBackupPath()):os.mkdir(GetBackupPath())
+if not os.path.exists(RUYI_VHOST_PATH):os.makedirs(RUYI_VHOST_PATH)
+if not os.path.exists(GetBackupPath()):os.makedirs(GetBackupPath())
 # ruyi Data
 RUYI_SECRET_KEY = 'django-insecure-%^ycfl@-_wpr#=hz*7n%#@c0d6!mlt_l#6ruyi*=+3$(y7-ky'
 RUYI_SECRET_KEY_FILE = os.path.join(RUYI_DATA_BASE_PATH,'secret_key.ry')
@@ -35,7 +35,7 @@ if os.path.exists(RUYI_SECRET_KEY_FILE):
 RUYI_SECURITY_PATH = '/'
 RUYI_SECURITY_PATH_FILE = os.path.join(RUYI_DATA_BASE_PATH,'security_path.ry')
 RUYI_SYSTEM_PATH_LIST = [
-    '/', '/login/', '/api', '/api/','/api/captcha/','/static/','/media/','/ry/','/ry','/settings','/home','/websites','/databases','/databases','/terminal',
+    '/', '/login/', '/api', '/api/','/api/captcha/','/static/','/media/','/dockers/','/dockers','/settings','/home','/websites','/databases','/databases','/terminal',
     '/files','/crontab','/logs','/appstore','/firewall',"/monitors"
 ]
 if os.path.exists(RUYI_SECURITY_PATH_FILE):
@@ -100,6 +100,7 @@ INSTALLED_APPS = [
     'apps.systask',
     'apps.sysshop',
     'apps.sysbak',
+    'apps.sysdocker',
 ]
 
 MIDDLEWARE = [
@@ -166,6 +167,10 @@ DATABASES = {
     'backup': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': os.path.join(BASE_DIR,'data','db','ruyi_backup.db'),
+    },
+    'docker': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(BASE_DIR,'data','db','ruyi_docker.db'),
     }
 }
 
@@ -255,7 +260,14 @@ CORS_ALLOW_ALL_ORIGINS = True #新版 ACCESS_CONTROL_ALLOW_ORIGIN = '*' ,不能�
 SECURE_CROSS_ORIGIN_OPENER_POLICY = 'None'
 
 X_FRAME_OPTIONS = 'SAMEORIGIN'#SAMEORIGIN允许同源iframe嵌套、 DENY不允许iframe、ALLOW-FROM http://xxx.com指定uri嵌套、ALLOWALL 允许所有域名嵌套
-
+CORS_EXPOSE_HEADERS = ['Content-Disposition'] # Content-Disposition 头部添加到 Access-Control-Expose-Headers 中，允许客户端 JavaScript 访问该头部
+#解决开发环境csrf问题
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:8680',
+]
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:8680',
+]
 # ================================================= #
 # *************** REST_FRAMEWORK配置 *************** #
 # ================================================= #
@@ -403,3 +415,6 @@ LOGGING = {
 
 # 存储 任务Logger 实例的字典
 TASK_LOGGERS_DIC = {}
+
+# 存储 task job的 子进程
+TASK_JOB_PROCESSES = {}
