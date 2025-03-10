@@ -522,16 +522,6 @@ def getFirewalldRuleList(param = {"dir":"in"}):
             })
     return data
 
-def get_pid_by_port(port):
-    """
-    取端口的pid（其中一个）
-    """
-    for conn in psutil.net_connections(kind='inet'):
-        # 检查是否为 LISTEN 状态，且本地端口为指定的端口
-        if conn.status == 'LISTEN' and str(conn.laddr.port) == str(port):
-            return conn.pid  # 返回匹配的进程 PID
-    return None  # 如果没有找到匹配的连接
-
 def GetFirewallRules(param = {"dir":"in"}):
     """
     获取防火墙规则列表
@@ -637,13 +627,11 @@ def GetFirewallRules(param = {"dir":"in"}):
         else:
             if is_service_running(int(d['port'])):
                 d['status'] = True
-                #pid,err = RunCommand(f"lsof -t -i :{d['port']}")
-                pid,err = RunCommand(f"ss -ltunp | grep :{d['port']} | awk -F'pid=' '{{for(i=2;i<=NF;i++) print $i}}' | awk -F',' '{{print $1}}'")
+                pid,err = RunCommand(f"lsof -t -i :{d['port']}")
                 if pid:
-                    pid_arr = sorted(list(filter(None, pid.split('\n'))))
-                    one_pid = int(pid_arr[0])
+                    pid = int(pid.split('\n')[0])
                     try:
-                        process = psutil.Process(one_pid)
+                        process = psutil.Process(pid)
                         process_name = process.name()
                         if process_name == "RuYi-Panel":
                             process_cmd = "/usr/local/ruyi/python/bin/python3 start.py"
@@ -651,7 +639,7 @@ def GetFirewallRules(param = {"dir":"in"}):
                             process_cmd = process.cmdline()
                             process_cmd = " ".join(process_cmd)
                         d['status_info']={
-                            'pid': ', '.join(pid_arr),
+                            'pid': pid,
                             'name': process_name,
                             'cmd': process_cmd
                         }
@@ -1228,7 +1216,8 @@ def RestartRuyi():
     重启如意
     """
     try:
-        os.system("systemctl stop ruyi;systemctl start ruyi")
+        import subprocess
+        subprocess.run(["systemctl","restart", "ruyi"], check=True)
     except:
         pass
 
@@ -1269,10 +1258,8 @@ def AddBinToPath(bin_dir):
     添加命令到系统路径（环境变量）
     """
     if os.path.exists("/etc/profile"):
-        # current_path = os.environ.get('PATH', '')
-        # if bin_dir not in current_path:
-        pcont = ReadFile("/etc/profile")
-        if not f"export PATH={bin_dir}:$PATH" in pcont:
+        current_path = os.environ.get('PATH', '')
+        if bin_dir not in current_path:
             RunCommand(f"echo 'export PATH={bin_dir}:$PATH' >> /etc/profile")
             RunCommand("source /etc/profile")
         return True

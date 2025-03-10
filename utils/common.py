@@ -36,39 +36,6 @@ import xml.etree.ElementTree as EleT
 # 获取当前操作系统
 current_os = platform.system().lower()
 
-def ProgramRootPath():
-    """
-    @name 取项目真实根目录
-    @author lybbn<2025-01-23>
-    """
-    return str(settings.BASE_DIR).replace("\\","/")
-
-def compare_versions(version1, version2):
-    """
-    @name 比较两个版本号
-    @author lybbn<2025-01-13>
-    return 0 相同、1 version1大 、-1 version1 小
-    """
-    # 将版本号按"."分割成数字列表
-    v1_parts = [int(part) for part in version1.split('.')]
-    v2_parts = [int(part) for part in version2.split('.')]
-    
-    # 比较对应位置的数字
-    length = max(len(v1_parts), len(v2_parts))
-    
-    # 如果版本号长度不一致，补充零
-    v1_parts.extend([0] * (length - len(v1_parts)))
-    v2_parts.extend([0] * (length - len(v2_parts)))
-    
-    # 比较各个部分
-    for i in range(length):
-        if v1_parts[i] < v2_parts[i]:
-            return -1  # version1 更旧
-        elif v1_parts[i] > v2_parts[i]:
-            return 1   # version1 更新
-    
-    return 0  # 两个版本相同
-
 def get_python_pip():
     """
     @name 取系统python、pip
@@ -489,18 +456,6 @@ def GetTmpPath():
         tmp_path = config['windows']['tmp_path']
     else:
         tmp_path = config['linux']['tmp_path']
-    return tmp_path
-
-def GetPanelPath():
-    """
-    @name 读取面板目录路径
-    @author lybbn<2024-02-07>
-    """
-    config = GetConfig()
-    if current_os == 'windows':
-        tmp_path = config['windows']['panel_path']
-    else:
-        tmp_path = config['linux']['panel_path']
     return tmp_path
 
 def GetPanelPort():

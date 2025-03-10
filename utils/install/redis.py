@@ -110,7 +110,7 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
             WriteFile(version_file,version['c_version'])
             WriteFile(log_path,"正在配置redis...\n",mode='a',write=is_write_log)
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/redis.sh','install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=4096)
+            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/redis.sh','install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -283,7 +283,7 @@ def RY_GET_REDIS_CONF_OPTIONS(is_windows=True):
     get_keys = ["bind", "port", "timeout", "maxclients", "databases", "requirepass", "maxmemory"]
     for k in get_keys:
         val = ""
-        rep = r"\n%s\s+(.+)" % k
+        rep = "\n%s\s+(.+)" % k
         re_res = re.search(rep, conf)
         if not re_res:
             if k == "maxmemory":

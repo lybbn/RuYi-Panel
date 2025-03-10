@@ -16,7 +16,6 @@
 # 系统配置
 # ------------------------------
 import os,re
-import requests
 import socket
 import datetime
 from math import ceil
@@ -26,7 +25,7 @@ from django.contrib.auth.hashers import make_password
 from utils.jsonResponse import SuccessResponse,ErrorResponse,DetailResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
-from utils.common import compare_versions,current_os,DeleteFile,ReadFile,GetSecurityPath,GetPanelBindAddress,get_parameter_dic,ast_convert,GetPanelPort,isSSLEnable,WriteFile,GetWebRootPath,GetBackupPath,formatdatetime
+from utils.common import current_os,DeleteFile,ReadFile,GetSecurityPath,GetPanelBindAddress,get_parameter_dic,ast_convert,GetPanelPort,isSSLEnable,WriteFile,GetWebRootPath,GetBackupPath,formatdatetime
 from apps.system.models import Users,Sites,Databases
 from apps.sysshop.models import RySoftShop
 from apps.syslogs.logutil import RuyiAddOpLog
@@ -36,7 +35,6 @@ from utils.customView import CustomAPIView
 from utils.sslPem import getCertInfo,getDefaultRuyiSSLPem
 from django.http import FileResponse
 from django.utils.encoding import escape_uri_path
-from utils.upgrade_panel import update_ruyi_panel
 from utils_pro.proFuncLoader import proFuncLoader
 
 def ruyiPathDirHandle(p):
@@ -269,46 +267,3 @@ class RYGetInterfacesView(CustomAPIView):
         for h in hosts:
             data.append(h)
         return DetailResponse(data=data)
-    
-class RYUpdateSysManageView(CustomAPIView):
-    """
-    get:
-    获取新版本
-    post:
-    更新系统
-    """
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
-    
-    def get(self,request):
-        s_url = "https://download.lybbn.cn/ruyi/install/version.json"
-        resp = requests.get(url=s_url,timeout=5)
-        ver = ""
-        if resp.status_code == 200:
-            ver = resp.text
-        c_ver = ReadFile(settings.RUYI_SYSVERSION_FILE)
-        has_new_version = False
-        if ver:
-            res_v = compare_versions(ver,c_ver)
-            if res_v >0:
-                has_new_version = True
-        else:
-            ver = c_ver
-        data = {
-            'c_ver':c_ver,
-            'can_update':has_new_version,
-            'n_ver':ver
-        }
-        return DetailResponse(data=data)
-    
-    def post(self, request):
-        reqData = get_parameter_dic(request)
-        action = reqData.get("action","")
-        if action == "update":
-            isok,msg = update_ruyi_panel()
-            if not isok:
-                return ErrorResponse(msg=msg)
-            return DetailResponse(msg="更新成功，请重启面板！！！")
-        elif action == "fix":
-            pass
-        return ErrorResponse(msg="类型错误")

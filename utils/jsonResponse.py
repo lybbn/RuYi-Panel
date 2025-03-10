@@ -36,9 +36,9 @@ class DetailResponse(Response):
     """
 
     def __init__(self, data=None, msg='success', status=None, template_name=None, headers=None, exception=False,
-                 content_type=None,code=2000):
+                 content_type=None,):
         std_data = {
-            "code": code,
+            "code": 2000,
             "data": data,
             "msg": msg
         }

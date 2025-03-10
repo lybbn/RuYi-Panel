@@ -11,7 +11,7 @@ from apps.system.views.common_commands import CommonCommandsViewSet
 from apps.system.views.monitor import *
 from apps.system.views.file_manage import RYFileManageView,RYFileDownloadView,RYFileTokenView,RYFileUploadView
 from apps.system.views.SiteGroupViews import SiteGroupViewSet
-from apps.system.views.sysconfigViews import RYSysconfigManageView,RYGetInterfacesView,RYSysLicenseView,RYUpdateSysManageView
+from apps.system.views.sysconfigViews import RYSysconfigManageView,RYGetInterfacesView,RYSysLicenseView
 from apps.system.views.soft_shop import RYSoftShopListView,RYSoftShopManageView,RYSoftInstallLogsView,RYSoftInfoManageView
 from apps.system.views.serv_manage import RYServManageView
 from apps.system.views.databases_manage import DatabasesViewSet
@@ -20,7 +20,6 @@ from apps.system.views.sys_firewall import RYSysFirewallView
 from apps.system.views.python_manage import RYPythonManageView,RYPythonSiteManageView
 from apps.system.views.go_manage import RYGoManageView
 from apps.system.views.supervisor_manage import RYSupervisorManageView
-from apps.system.views.sysLicenseView import RYSysImportLicenseView,RYSysUnBindLicenseView
 
 system_url = routers.SimpleRouter()
 system_url.register(r'terminal', TerminalServerViewSet)
@@ -40,9 +39,6 @@ urlpatterns = [
     path('fileManage/upload/', RYFileUploadView.as_view(), name='文件上传'),
     path('settings/', RYSysconfigManageView.as_view(), name='面板设置'),
     path('licenses/', RYSysLicenseView.as_view(), name='license'),
-    path('licensesImport/', RYSysImportLicenseView.as_view(), name='license导入'),
-    path('unbindLicenses/', RYSysUnBindLicenseView.as_view(), name='解除license绑定'),
-    path('sysupdate/', RYUpdateSysManageView.as_view(), name='系统更新'),
     path('interfaces/', RYGetInterfacesView.as_view(), name='获取本机ipv4地址列表'),
     path('softlist/', RYSoftShopListView.as_view(), name='应用列表'),
     path('softmanage/', RYSoftShopManageView.as_view(), name='应用管理'),

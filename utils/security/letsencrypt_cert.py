@@ -38,16 +38,11 @@ import base64
 import hashlib
 import requests
 import portalocker
+import OpenSSL
 import binascii
 from utils.common import DeleteDir,GetLetsencryptPath,md5,WriteFile,GetLetsencryptLogPath,GetLetsencryptRootPath,ReadFile
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization,hashes
-
-from cryptography.hazmat.primitives.asymmetric import rsa,padding
-from cryptography.x509 import Name, NameAttribute, CertificateSigningRequestBuilder,load_pem_x509_certificate
-from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.x509 import SubjectAlternativeName, DNSName
+from cryptography.hazmat.primitives import serialization
 from utils.ruyiclass.webClass import WebClient
 from apps.sysshop.models import RySoftShop
 from apps.system.models import Sites
@@ -61,6 +56,7 @@ class letsencryptTool:
     _cert_save_path = GetLetsencryptRootPath()
     _user_agent = "ruyi"
     _ssl_verify = False
+    _digest = "sha256"
     _alg = "RS256"
     _bits = 2048
     _kid = None
@@ -75,17 +71,11 @@ class letsencryptTool:
         utc_date = datetime.datetime.strptime(utcstr, "%Y-%m-%dT%H:%M:%SZ")
         return int(time.mktime(utc_date.timetuple())) + (3600 * 8)# 北京时间
     
-    def trans_cert_timeout_to_bj(self,cert_datetime):
-        """
-        将证书的 UTC 时间转换为北京时间
-        cert_datetime: 直接从证书获取的 datetime 对象
-        """
+    def trans_cert_timeout_to_bj(self,utc_time):
         from zoneinfo import ZoneInfo
-        # 确保时间对象是 UTC 时区
-        if not cert_datetime.tzinfo:
-            cert_datetime = cert_datetime.replace(tzinfo=ZoneInfo("UTC"))
-        # 转换为北京时间
-        beijing_dt = cert_datetime.astimezone(ZoneInfo("Asia/Shanghai"))
+        utc_time = datetime.datetime.strptime(utc_time, '%Y%m%d%H%M%SZ')
+        utc_dt = utc_time.replace(tzinfo=ZoneInfo("UTC"))
+        beijing_dt = utc_dt.astimezone(ZoneInfo("Asia/Shanghai"))
         return beijing_dt.strftime("%Y-%m-%d %H:%M:%S")
     
     def write_log(self,logstr,mode="ab+",is_error=False):
@@ -159,7 +149,7 @@ class letsencryptTool:
             return self._config
         self._config = json.loads(file_content)
         self._apis = self._config["apis"]['directory']
-        # self.save_to_config_file()
+        self.save_to_config_file()
         return self._config
         
     def save_to_config_file(self):
@@ -168,34 +158,21 @@ class letsencryptTool:
         """
         if not os.path.exists(self._config_file_path):
             WriteFile(self._config_file_path,"")
-        WriteFile(self._config_file_path,json.dumps(self._config))
-        #with open(self._config_file_path, "w") as f:
-            # portalocker.lock(f, portalocker.LOCK_EX)
-            #f.write(json.dumps(self._config))
-            # portalocker.unlock(f)
+        #WriteFile(self._config_file_path,json.dumps(self._config))
+        with open(self._config_file_path, "w") as file:
+            portalocker.lock(file, portalocker.LOCK_EX)
+            file.write(json.dumps(self._config))
+            portalocker.unlock(file)
 
-    def _safe_base64(self,data):
-        return base64.urlsafe_b64encode(data).decode('utf8').rstrip("=")
+    def _safe_base64(self,b):
+        return base64.urlsafe_b64encode(b).decode('utf8').replace("=", "")
     
     def sign_data(self, data):
         """
         计算signature
         """
-        # 加载私钥
-        private_key = serialization.load_pem_private_key(
-            self.get_account_key().encode(), 
-            password=None,  # 如果私钥有密码，可以提供密码
-            backend=default_backend()
-        )
-        
-        # 使用私钥进行签名
-        signature = private_key.sign(
-            data.encode("utf-8"),  # 数据转换为字节
-            padding.PKCS1v15(),  # 使用 PKCS1v15 填充
-            hashes.SHA256()  # 使用 SHA-256 哈希算法
-        )
-        
-        return signature
+        da = OpenSSL.crypto.load_privatekey(OpenSSL.crypto.FILETYPE_PEM, self.get_account_key().encode())
+        return OpenSSL.crypto.sign(da, data.encode("utf8"), self._digest)
 
     def get_newNonce(self,timeout = 40):
         """
@@ -208,19 +185,11 @@ class letsencryptTool:
         except:
             return None
     
-    def create_account_key(self):
-        # 生成 RSA 私钥
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=self._bits,
-        )
-        # 将私钥序列化为 PEM 格式
-        pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-        return pem.decode('utf-8')
+    def create_account_key(self, key_type=OpenSSL.crypto.TYPE_RSA):
+        key = OpenSSL.crypto.PKey()
+        key.generate_key(key_type, self._bits)
+        private_key = OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM, key)
+        return private_key
     
     def get_account_key(self):
         if not 'account' in self._config:
@@ -453,24 +422,14 @@ class letsencryptTool:
     def create_certificate_key(self,order_no):
         if 'private_key' in self._config['orders'][order_no]:
             return self._config['orders'][order_no]['private_key']
-        # 生成 RSA 私钥
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=self._bits,
-            backend=default_backend()
-        )
-
-        # 将私钥序列化为 PEM 格式
-        private_pem = private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-        )
-        if isinstance(private_pem, bytes):
-            private_pem = private_pem.decode("utf8")
-        self._config['orders'][order_no]['private_key'] = private_pem
+        key = OpenSSL.crypto.PKey()
+        key.generate_key(OpenSSL.crypto.TYPE_RSA, self._bits)
+        private_key = OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM, key)
+        if type(private_key) == bytes:
+            private_key = private_key.decode()
+        self._config['orders'][order_no]['private_key'] = private_key
         self.save_to_config_file()
-        return private_pem
+        return private_key
 
     def get_certificate(self,order_no):
         """
@@ -481,34 +440,29 @@ class letsencryptTool:
         else:
             domain_list = self._config['orders'][order_no]["domain_list"]
             domain_str = ",".join([f"DNS:{d}" for d in domain_list]).encode("utf8")
-            
-            # 生成私钥
-            private_key_pem = self.create_certificate_key(order_no).encode("utf8")
-            private_key = serialization.load_pem_private_key(private_key_pem, password=None, backend=default_backend())
-            
-            # 创建证书签名请求（CSR）
-            subject = Name([NameAttribute(NameOID.COMMON_NAME, domain_list[0])])
-            csr = CertificateSigningRequestBuilder().subject_name(subject)
-            
-            # 添加 subjectAltName 扩展
-            csr = csr.add_extension(
-                SubjectAlternativeName([DNSName(d) for d in domain_list]),
-                critical=False
+            csr = OpenSSL.crypto.X509Req()
+            # 设置证书主题信息
+            subject = csr.get_subject()
+            subject.CN = domain_list[0]
+            # 添加其他证书扩展（可选）
+            csr_extensions = [
+                OpenSSL.crypto.X509Extension(b"subjectAltName", False, domain_str)
+            ]
+            csr.add_extensions(csr_extensions)
+            # 使用私钥签名证书
+            private_key = OpenSSL.crypto.load_privatekey(
+                OpenSSL.crypto.FILETYPE_PEM, self.create_certificate_key(order_no).encode()
             )
-            
-            # 使用私钥签名 CSR
-            csr = csr.sign(private_key, hashes.SHA256(), default_backend())
-            
-            # 序列化 CSR 为 PEM 格式
-            csr_pem = csr.public_bytes(serialization.Encoding.DER)
-            
+            csr.set_pubkey(private_key)
+            csr.sign(private_key, self._digest)
+            csr_pem = OpenSSL.crypto.dump_certificate_request(OpenSSL.crypto.FILETYPE_ASN1, csr)
         payload = {
             "csr": self._safe_base64(csr_pem)
         }
         order_url = self._config['orders'][order_no]["finalize"]
         response = self.do_requests(order_url, payload)
         if response.status_code not in [200, 201]:
-            raise Exception(f"获取证书错误：{response.json()}")
+            raise Exception("获取证书错误：%s"%response.json())
         response_json = response.json()
         self.write_log(f"----- 获取证书信息：{response_json}")
         certificate_url = response_json["certificate"]
@@ -532,8 +486,9 @@ class letsencryptTool:
         data_list = certificate_content.split(split_str)
         cret_data = {"cert": data_list[0] + split_str, "root": split_str.join(data_list[1:])}
         try:
-            cert = load_pem_x509_certificate(cret_data["cert"].encode('utf-8'),default_backend())
-            cert_timeout = self.trans_cert_timeout_to_bj(cert.not_valid_after_utc)
+            x509 = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_PEM, cret_data["cert"])
+            cert_timeout = x509.get_notAfter().decode('utf-8')
+            cert_timeout = self.trans_cert_timeout_to_bj(cert_timeout)
             self.write_log(f"----- 获取证书过期时间：{cert_timeout}")
         except Exception as e:
             self.write_log(f"获取证书时间报错信息：{e}")

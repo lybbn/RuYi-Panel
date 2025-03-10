@@ -21,7 +21,7 @@
 import os,platform,re
 import time
 from pathlib import Path
-from utils.common import DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand,ReadFile
+from utils.common import DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand
 from utils.security.files import download_url_file,get_file_name_from_url
 import subprocess
 import importlib
@@ -95,8 +95,8 @@ def create_default_env(version,version_path,is_windows=True):
     bin_path = soft_paths['public_abspath_bin_path']
     if not is_windows:
         if os.path.exists("/etc/profile"):
-            pcont = ReadFile("/etc/profile")
-            if not f"export GOROOT={p_path}" in pcont:
+            res,err = RunCommand(f"echo $GOROOT | grep {p_path}")
+            if not res:
                 RunCommand(f"echo 'export GOROOT={p_path}' >> /etc/profile")
                 RunCommand("source /etc/profile")
     system.AddBinToPath(bin_path)
@@ -158,7 +158,7 @@ def Install_Go(type=2,version={},is_windows=True,call_back=None):
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/go.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=4096)
+            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/go.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -169,7 +169,7 @@ def Install_Go(type=2,version={},is_windows=True,call_back=None):
             # 获取标准错误
             r_stderr = r_process.stderr.read()
             if r_stderr:
-                if not os.path.exists(soft_paths['linux_abspath_exe_path']) or "ERROR: Install go fielded" in str(r_stderr):
+                if not os.path.exists(soft_paths['linux_abspath_exe_path']):
                     raise Exception(r_stderr.strip())
             WriteFile(log_path,f"开始创建默认GO环境...\n",mode='a',write=is_write_log)
             create_default_env(version['c_version'],soft_paths['install_abspath_path'],is_windows=is_windows)#创建默认go环境

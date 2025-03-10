@@ -112,7 +112,7 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
             WriteFile(soft_paths['abspath_conf_path'],RY_GET_NGINX_CONFIG(is_windows=True))
             WriteFile(soft_paths['install_path']+'/html/index.html',RY_GET_NGINX_INDEX_HTML())
         else:
-            r_process = subprocess.Popen(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","nginx.sh"),'install',version['c_version'],version['version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=8192)
+            r_process = subprocess.Popen(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","nginx.sh"),'install',version['c_version'],version['version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -218,12 +218,8 @@ def check_nginx_config(conf_path = None,is_windows=True):
         # 确保路径存在
         if os.path.exists(exe_path):
             try:
-                if is_windows:
-                    code = RunCommandReturnCode([exe_path,"-t", "-c",conf_path],cwd=soft_paths['install_path'])
-                    return True if code == 0 else False
-                else:
-                    result = subprocess.run([exe_path,"-t", "-c",conf_path],capture_output=True, text=True, check=True)
-                    return result.returncode == 0
+                code = RunCommandReturnCode([exe_path,"-t", "-c",conf_path],cwd=soft_paths['install_path'])
+                return True if code == 0 else False
             except Exception as e:
                 raise ValueError(f"重载Nginx时发生错误: {e}")
         else:
@@ -514,11 +510,6 @@ def RY_GET_NGINX_CONFIG(is_windows=True):
     vhost_path = settings.RUYI_VHOST_PATH.replace("\\", "/")
     vhost_nginx_path = vhost_path+'/nginx/*.conf'
     proxy_cache_path = soft_paths['install_path']+'/temp/proxy_cache_dir'
-    
-    lua_package_path=""
-    if not is_windows:
-        lua_package_path='lua_package_path "/ruyi/server/nginx/lib/lua/?.lua;;";'
-    
     conf = f"""user www www;
 worker_processes  auto;
 pid        {pid_path};
@@ -572,8 +563,6 @@ http {{
     proxy_temp_file_write_size 128k;
     proxy_next_upstream error timeout invalid_header http_500 http_503 http_404;
     proxy_cache cache_one;
-    
-    {lua_package_path}
     
     server {{
         listen 80;

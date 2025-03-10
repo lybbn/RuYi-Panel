@@ -7,7 +7,6 @@
     "linux":{
         "root_path": "/ruyi",
         "install_path": "/ruyi/server",
-        "panel_path": "/ruyi/server/ruyi",
         "logs_path": "/ruyi/logs",
         "backup_path":"/ruyi/backup",
         "tmp_path":"/ruyi/tmp",
@@ -16,7 +15,6 @@
     "windows":{
         "root_path": "c:/ruyi",
         "install_path": "c:/ruyi/server",
-        "panel_path": "c:/ruyi/server/ruyi",
         "logs_path": "c:/ruyi/logs",
         "backup_path":"c:/ruyi/backup",
         "tmp_path":"c:/ruyi/tmp",

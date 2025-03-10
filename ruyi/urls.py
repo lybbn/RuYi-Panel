@@ -13,7 +13,6 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-from django.conf.urls import handler500
 from django.urls import path,re_path,include
 from apps.system.views.login import *
 from apps.system.views.file_manage import RYFileMediaView,RYGetFileDownloadView

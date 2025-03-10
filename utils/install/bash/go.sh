@@ -19,7 +19,7 @@ fi
 
 Install_Soft() {
     echo "==================================================="
-    echo "正在解压：$go_file_name"
+    echo "正在配置..."
     echo "==================================================="
     cd ${RUYI_TEMP_PATH}
     tar -zxf $go_file_name
@@ -27,16 +27,13 @@ Install_Soft() {
     # go_unzip_file_name=$(basename "$go_file_name" .tar.gz)
     go_path=/ruyi/server/go/${go_version}
     rm -rf $go_path
-    mkdir -p ${go_path}
-	mv ${go_unzip_file_name}/* ${go_path}/
-    rm -rf ${go_unzip_file_name}
+	mv ${go_unzip_file_name} ${go_path}
     echo "==================================================="
     echo "正在检测是否安装成功..."
     echo "==================================================="
 	if [ ! -e ${go_path}/bin/go ];then
-		# rm -rf ${go_path}
-        # 其中 >&2 用于重定向错误到stderr ，让subprocess.Popen捕获
-		echo "ERROR: Install go fielded . 安装go环境失败，请尝试重新安装！" >&2
+		rm -rf ${go_path}
+		echo "ERROR: Install go fielded." "ERROR: 安装go环境失败，请尝试重新安装！" 
         exit 1
 	fi
     echo "==================================================="

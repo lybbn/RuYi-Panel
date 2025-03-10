@@ -87,13 +87,12 @@ class RYSystemTaskCenterView(CustomAPIView):
             finally:
                 try:
                     params = ins.params
-                    if job_id:
-                        if params:
-                            json_params = json.loads(params)
-                            name = json_params['name']
-                            log = job_id+".log"
-                            logpath = os.path.join(os.path.abspath(GetLogsPath()),name,log)
-                            DeleteFile(logpath,empty_tips=False)
+                    if params:
+                        json_params = json.loads(params)
+                        name = json_params['name']
+                        log = job_id+".log"
+                        logpath = os.path.join(os.path.abspath(GetLogsPath()),name,log)
+                        DeleteFile(logpath,empty_tips=False)
                     ins.delete()
                 except Exception as e:
                     return ErrorResponse(msg=str(e))

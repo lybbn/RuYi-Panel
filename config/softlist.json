@@ -13,13 +13,12 @@
 			"versions": [{
 				"id": 1,
 				"version": "1.27",
-				"c_version": "1.27.3",
-				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.tar.gz"
+				"c_version": "1.27.2",
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.2.tar.gz"
 			}, {
 				"id": 2,
 				"version": "openresty",
 				"c_version": "1.25.3.2",
-				"hide":true,
 				"url": "https://mirrors.huaweicloud.com/openresty/v1.25.3.2/openresty-1.25.3.2.tar.gz"
 			}],
 			"author": "nginx.org",
@@ -60,8 +59,7 @@
 				"id": 1,
 				"version": "5.7",
 				"c_version": "5.7.38",
-				"url":"https://mirrors.huaweicloud.com/mysql/Downloads/MySQL-5.7/mysql-boost-5.7.38.tar.gz",
-				"url2": "https://mirrors.aliyun.com/mysql/MySQL-5.7/mysql-boost-5.7.38.tar.gz"
+				"url": "https://mirrors.aliyun.com/mysql/MySQL-5.7/mysql-boost-5.7.38.tar.gz"
 			}, {
 				"id": 2,
 				"version": "8.0",
@@ -168,13 +166,12 @@
 			"versions": [{
 				"id": 1,
 				"version": "1.27",
-				"c_version": "1.27.3",
-				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.zip"
+				"c_version": "1.27.2",
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.2.zip"
 			}, {
 				"id": 2,
 				"version": "openresty",
 				"c_version": "1.25.3.2",
-				"hide":true,
 				"url": "https://openresty.org/download/openresty-1.25.3.2-win64.zip"
 			}],
 			"author": "nginx.org",

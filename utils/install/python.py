@@ -120,7 +120,7 @@ def Install_Python(type=2,version={},is_windows=True,call_back=None):
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/python.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=4096)
+            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/python.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()

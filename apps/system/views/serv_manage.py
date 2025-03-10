@@ -16,7 +16,6 @@
 # 服务器/面板管理
 # ------------------------------
 
-import threading
 from rest_framework.views import APIView
 from utils.jsonResponse import SuccessResponse,ErrorResponse,DetailResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -41,18 +40,12 @@ class RYServManageView(CustomAPIView):
             type = reqData.get("type","")
             if type == "server":
                 RuyiAddOpLog(request,msg="【安全】 => 重启服务器",module="safe")
-                # 异步执行重启操作
-                def restart_server_async():
-                    system.RestartServer()
-                threading.Thread(target=restart_server_async).start()
-                return DetailResponse(msg="重启中...")
+                system.RestartServer()
+                return DetailResponse(msg="重启成功")
             elif type == "panel":
                 RuyiAddOpLog(request,msg="【安全】 => 重启面板",module="safe")
-                # 异步执行重启操作
-                def restart_ruyi_async():
-                    system.RestartRuyi()
-                threading.Thread(target=restart_ruyi_async).start()
-                return DetailResponse(msg="重启中...")
+                system.RestartRuyi()
+                return DetailResponse(msg="重启成功")
             else:
                 return ErrorResponse(msg="参数错误")
         return ErrorResponse(msg="参数错误")

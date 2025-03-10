@@ -140,7 +140,7 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
             WriteFile(mysql_error_log_file_path,"")
             WriteFile(mysql_slow_file_path,"")
         else:
-            r_process = subprocess.Popen(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","mysql.sh"),'install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=4096)
+            r_process = subprocess.Popen(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","mysql.sh"),'install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -621,24 +621,12 @@ def RY_IMPORT_MYSQL_SQL(db_info={},is_windows=True):
                 is_zip_file = True
             env = os.environ.copy()
             env['MYSQL_PWD'] = db_pass#避免命令行直接使用密码
-            #command = f"{mysql_exec} --force --default-character-set={charset} --host={db_host} --port={db_port} -u {db_user} {db_name}"
-            # 修改命令构建方式为参数列表，并移除shell=True,避免文件名含特殊符号被shell转义导致导入失败
-            command_args = [
-                mysql_exec,
-                '--force',
-                f'--default-character-set={charset}',
-                f'--host={db_host}',
-                f'--port={db_port}',
-                '-u', db_user,
-                db_name
-            ]
+            command = f"{mysql_exec} --force --default-character-set={charset} --host={db_host} --port={db_port} -u {db_user} {db_name}"
             for i in import_path_list:
                 i = i.replace("\\",'/')
-                # result = subprocess.run(f'{command} < {i}',shell=True, text=True, capture_output=True,env=env)
-                with open(i, 'r') as sql_file:
-                    result = subprocess.run(command_args,stdin=sql_file, text=True, capture_output=True,env=env)
-                    if result.returncode != 0:
-                        raise ValueError(result.stderr)
+                result = subprocess.run(f'{command} < {i}',shell=True, text=True, capture_output=True,env=env)
+                if result.returncode != 0:
+                    raise ValueError(result.stderr)
             # 清理临时目录
             if is_zip_file:
                 system.ForceRemoveDir(extract_tmp_path)

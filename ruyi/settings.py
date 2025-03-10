@@ -255,14 +255,7 @@ CORS_ALLOW_ALL_ORIGINS = True #新版 ACCESS_CONTROL_ALLOW_ORIGIN = '*' ,不能�
 SECURE_CROSS_ORIGIN_OPENER_POLICY = 'None'
 
 X_FRAME_OPTIONS = 'SAMEORIGIN'#SAMEORIGIN允许同源iframe嵌套、 DENY不允许iframe、ALLOW-FROM http://xxx.com指定uri嵌套、ALLOWALL 允许所有域名嵌套
-CORS_EXPOSE_HEADERS = ['Content-Disposition'] # Content-Disposition 头部添加到 Access-Control-Expose-Headers 中，允许客户端 JavaScript 访问该头部
-#解决开发环境csrf问题
-CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:8680',
-]
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:8680',
-]
+
 # ================================================= #
 # *************** REST_FRAMEWORK配置 *************** #
 # ================================================= #

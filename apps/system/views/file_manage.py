@@ -448,7 +448,6 @@ class RYFileUploadView(CustomAPIView):
     """
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]
-    throttle_classes=[]
 
     def post(self, request):
         reqData = get_parameter_dic(request)

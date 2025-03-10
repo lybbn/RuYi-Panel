@@ -17,21 +17,8 @@ WITH_SSL=""
 
 # 检查是否以 root 用户运行
 if [ "$(id -u)" -ne 0 ]; then
-    echo "请以 root 用户运行此脚本" >&2
+    echo "请以 root 用户运行此脚本"
     exit 1
-fi
-
-if [ -z "${cpu_core}" ]; then
-    cpu_core="1"
-fi
-
-MEM_G=$(free -m|grep Mem|awk '{printf("%.f",($2)/1024)}')
-if [ "${cpu_core}" != "1" ] && [ "${MEM_G}" != "0" ];then
-    if [ "${cpu_core}" -gt "${MEM_G}" ];then
-        cpu_core="${MEM_G}"
-    fi
-else
-    cpu_core="1"
 fi
 
 Install_Openssl() {
@@ -57,18 +44,11 @@ Install_Openssl() {
 	tar -zxf openssl-${opensslVersion}.tar.gz
     rm -f openssl-${opensslVersion}.tar.gz
 	cd openssl-${opensslVersion}
-    if [ "${IsAliYunOS}" ];then
-        ./config --prefix=${py_path}/openssl --openssldir=${py_path}/openssl zlib-dynamic -Wl,-rpath,${py_path}/openssl/lib
-        make -j${cpu_core}
-        make install
-    else
-        ./config --prefix=${install_sys_path}/openssl zlib-dynamic
-        make -j${cpu_core}
-        make install
-        echo "$install_sys_path/openssl/lib" >>/etc/ld.so.conf.d/ryopenssl111.conf
-        ldconfig
-        ldconfig /lib64
-    fi
+	./config --prefix=${install_sys_path}/openssl zlib-dynamic shared
+	make
+	make install
+    echo "$install_sys_path/openssl/lib" > /etc/ld.so.conf.d/ryopenssl111.conf
+	ldconfig
 	cd ..
 	rm -rf openssl-${opensslVersion}
     echo "=============================================="
@@ -100,11 +80,10 @@ Install_Openssl34() {
     rm -f openssl-${opensslVersion}.tar.gz
 	cd openssl-${opensslVersion}
 	./config --prefix=${install_sys_path}/openssl34 zlib shared
-	make -j${cpu_core}
+	make
 	make install
-    echo "$install_sys_path/openssl34/lib64" >>/etc/ld.so.conf.d/ryopenssl34.conf
+    echo "$install_sys_path/openssl34/lib64" > /etc/ld.so.conf.d/ryopenssl34.conf
 	ldconfig
-    ldconfig /lib64
 	cd ..
 	rm -rf openssl-${opensslVersion}
     echo "=============================================="
@@ -121,7 +100,7 @@ Install_Soft() {
 	mkdir -p ${py_path}
 	echo "True" > ${py_path}/disk.ry
 	if [ ! -w ${py_path}/disk.ry ];then
-		echo "ERROR: Install python fielded." "ERROR: $py_path 目录无法写入，请检查目录/用户/磁盘权限！" >&2
+		echo "ERROR: Install python fielded." "ERROR: $py_path 目录无法写入，请检查目录/用户/磁盘权限！"
         exit 1
 	fi
 	cd ${python_unzip_file_name}
@@ -132,7 +111,7 @@ Install_Soft() {
         if [ -f ${OPENSSL_DIR}/bin/openssl ];then
             echo "检测到OpenSSL版本符合要求，无需再安装"
             echo "=============================================="
-            WITH_SSL="--with-openssl=${OPENSSL_DIR} --with-openssl-rpath=auto"
+            WITH_SSL="--with-openssl=${OPENSSL_DIR}"
 		elif command -v openssl >/dev/null 2>&1; then
             local openssl_version
             openssl_version=$(openssl version | awk '{print $2}' | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
@@ -143,7 +122,7 @@ Install_Soft() {
             else
                 echo "当前OpenSSL为${openssl_version}，不符合要求，尝试安装指定版本OpenSSL"
                 Install_Openssl
-                WITH_SSL="--with-openssl=${OPENSSL_DIR} --with-openssl-rpath=auto"
+                WITH_SSL="--with-openssl=${OPENSSL_DIR}"
             fi
             
         else
@@ -151,10 +130,10 @@ Install_Soft() {
             Install_Openssl
         fi
 
-        if [ ${python_version:2:2} -ge 12 ]; then
-            ./configure --prefix=${py_path} ${WITH_SSL} --without-pgo
+        if [ ${python_version:2:2} -ge 13 ]; then
+            ./configure --prefix=${py_path} ${WITH_SSL} --with-openssl-rpath=auto
         else
-            ./configure --prefix=${py_path} ${WITH_SSL} --with-sqlite3=${Sqlite3_Env_Path}
+            ./configure --prefix=${py_path} ${WITH_SSL} --with-openssl-rpath=auto --with-sqlite3=${Sqlite3_Env_Path}
         fi
 
 	else
@@ -172,7 +151,7 @@ Install_Soft() {
 	make install
 	if [ ! -e ${py_path}/bin/python3 ];then
 		rm -rf ${python_unzip_file_name}
-		echo "ERROR: Install python fielded." "ERROR: 安装python环境失败，请尝试重新安装！" >&2
+		echo "ERROR: Install python fielded." "ERROR: 安装python环境失败，请尝试重新安装！" 
         exit 1
 	fi
     cd ..
@@ -188,13 +167,11 @@ Uninstall_soft() {
 
 if [ "$action_type" == 'install' ];then
     if [ -z "${python_version}" ] || [ -z "${python_file_name}" ]; then
-        echo "参数错误" >&2
         exit 1
     fi
 	Install_Soft
 elif [ "$action_type" == 'uninstall' ];then
     if [ -z "${python_version}" ];then
-        echo "参数错误" >&2
         exit 1
     fi
 	Uninstall_soft

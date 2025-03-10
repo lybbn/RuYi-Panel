@@ -915,9 +915,6 @@ workers = 4
 # 设置线程数
 threads = 2
 
-# 调整请求缓冲区大小（默认4KB）
-buffer-size = 65536 
-
 # 设置进程和线程的超时
 harakiri = 60
 

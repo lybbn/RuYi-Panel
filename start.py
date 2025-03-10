@@ -33,7 +33,6 @@ from django.conf import settings
 from utils.common import GetPanelPort,isSSLEnable,GetPanelBindAddress,ReadFile,current_os
 from daphne.server import Server as DaphneServer
 from daphne.endpoints import build_endpoint_description_strings
-
 from django.core.exceptions import ImproperlyConfigured
 from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler
 
@@ -61,18 +60,18 @@ def get_default_application():
     return value
 
 def get_application(options):
-    """
-    Returns the static files serving application wrapping the default application,
-    if static files should be served. Otherwise just returns the default
-    handler.
-    """
-    staticfiles_installed = apps.is_installed("django.contrib.staticfiles")
-    use_static_handler = options.get("use_static_handler", staticfiles_installed)
-    insecure_serving = options.get("insecure_serving", False)
-    if use_static_handler and (settings.DEBUG or insecure_serving):
-        return ASGIStaticFilesHandler(get_default_application())
-    else:
-        return get_default_application()
+        """
+        Returns the static files serving application wrapping the default application,
+        if static files should be served. Otherwise just returns the default
+        handler.
+        """
+        staticfiles_installed = apps.is_installed("django.contrib.staticfiles")
+        use_static_handler = options.get("use_static_handler", staticfiles_installed)
+        insecure_serving = options.get("insecure_serving", False)
+        if use_static_handler and (settings.DEBUG or insecure_serving):
+            return ASGIStaticFilesHandler(get_default_application())
+        else:
+            return get_default_application()
 
 class Server(DaphneServer):
     def log_action(self, protocol, action, details):
