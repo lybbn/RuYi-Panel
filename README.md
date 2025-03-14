@@ -3,7 +3,7 @@
 
 [![img](https://img.shields.io/badge/python-%3E=3.12.x-green.svg)](https://python.org/)  [![PyPI - Django Version badge](https://img.shields.io/badge/django%20versions-4.x-blue)](https://docs.djangoproject.com/zh-hans/4.0/) [![img](https://img.shields.io/badge/node-%3E%3D%2014.0.0-brightgreen)](https://nodejs.org/zh-cn/)
 
-[ 官方文档 ](https://ruyi.lybbn.cn/) | 演示（暂无）| [捐赠](https://gitee.com/lybbn/django-vue-lyadmin/wikis/pages?sort_id=5264497&doc_id=2214316) 
+[ 官方文档 ](https://ruyi.lybbn.cn/) | [ 演示 ](http://demoruyi.lybbn.cn/)| [捐赠](https://gitee.com/lybbn/django-vue-lyadmin/wikis/pages?sort_id=5264497&doc_id=2214316) 
 
 ## 如意服务器面板介绍
 
@@ -39,6 +39,13 @@ Vue3 + Vite + Python3 + Django
 - centos7-8-9 debian11-12 ubuntu22-24 alinux 树莓派(x64)
 - 其他系统暂未测试安装调试
 
+## 查看演示
+
+[点击查看](http://demoruyi.lybbn.cn/)
+
+- 账号：demo
+- 密码：ruyi123456
+
 ## 立即安装
 
  - [点击安装](https://ruyi.lybbn.cn/doc/ruyi/onlineInstall.html)
@@ -59,6 +66,10 @@ Vue3 + Vite + Python3 + Django
 ### 网站
 
 <img src="https://foruda.gitee.com/images/1738813212161749528/6a548a53_4823422.jpeg" referrerpolicy="no-referrer" />
+
+### 容器
+
+<img src="https://foruda.gitee.com/images/1741523756230508106/12ebab70_4823422.png" referrerpolicy="no-referrer" />
 
 ### 计划任务
 
