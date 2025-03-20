@@ -119,13 +119,13 @@ class Command(BaseCommand):
         if not re.match("^[A-Za-z0-9]+$", data):
             self.stdout.write(self.style.ERROR('安全入口只能为字母、数字'))
             return
-        if len(data)<5 or len(data)>16:
-            self.stdout.write(self.style.ERROR('安全入口长度5-16位'))
+        if len(data)<2 or len(data)>16:
+            self.stdout.write(self.style.ERROR('安全入口长度2-16位'))
             return
         sec_file_path = "/"+data
         RUYI_SYSTEM_PATH_LIST = [
-            '/', '/login/', '/api', '/api/','/api/captcha/','/static/','/media/','/ry/','/ry','/settings','/home','/websites','/databases','/databases','/terminal',
-            '/files','/crontab','/logs','/appstore','/firewall',"/monitors"
+            '/', '/login/', '/api', '/api/','/api/captcha/','/static/','/media/','/settings','/home','/websites','/databases','/databases','/terminal',
+            '/files','/crontab','/logs','/appstore','/firewall',"/monitors","/dockers"
         ]
         if sec_file_path in RUYI_SYSTEM_PATH_LIST:
             self.stdout.write(self.style.ERROR('安全入口不能包含系统路径'))

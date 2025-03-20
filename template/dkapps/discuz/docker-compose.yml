@@ -1,0 +1,22 @@
+services:
+  RUYI_DKAPP:
+    image: tencentci/discuz:latest
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    ports:
+      - ${HOST_IP}:${WEB_HTTP_PORT}:80
+      - ${HOST_IP}:${WEB_HTTPS_PORT}:443
+    volumes:
+      - ${APP_PATH}/data:/var/www/html
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

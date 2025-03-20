@@ -13,7 +13,7 @@
 # +-------------------------------------------------------------------
 
 # ------------------------------
-# 系统防火墙
+# 安全 进程管理
 # ------------------------------
 
 import re
@@ -24,7 +24,6 @@ from utils.jsonResponse import SuccessResponse,ErrorResponse,DetailResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
 from utils.pagination import CustomPagination
-from utils.customView import CustomAPIView
 from utils.common import get_parameter_dic,current_os,formatdatetime,RunCommand,ast_convert
 from apps.syslogs.logutil import RuyiAddOpLog
 from utils.process import ProcessMonitor
@@ -130,8 +129,8 @@ class RYSysProcessListView(CustomAPIView):
 
 class RYSysProcessOperateView(CustomAPIView):
     """
-    get:
-    系统进程列表
+    post:
+    系统进程操作
     """
     permission_classes = [IsAuthenticated]
     authentication_classes = [JWTAuthentication]

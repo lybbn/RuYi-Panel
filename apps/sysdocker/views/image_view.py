@@ -51,4 +51,10 @@ class RYDockerImageManageView(CustomAPIView):
             if not isok:return ErrorResponse(msg=msg)
             RuyiAddOpLog(request,msg=f"【容器】-【镜像】=> 删除：{name}",module="dockermg")
             return DetailResponse(msg=msg)
+        elif action == "prune":
+            reqData['action_type']="image"
+            isok,msg = docker_client.prune(reqData)
+            if not isok:return ErrorResponse(msg=msg)
+            RuyiAddOpLog(request,msg=f"【容器】-【镜像】=> 清理未使用镜像",module="dockermg")
+            return DetailResponse(msg=msg)
         return ErrorResponse(msg="类型错误")

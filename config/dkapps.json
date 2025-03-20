@@ -114,6 +114,34 @@
         ]
     },
     {
+        "appid": 17,
+        "sort":17,
+        "icon":"openwebui.png",
+        "title": "OpenWebUI",
+        "appname": "openwebui",
+        "desc": "开源的、对用户友好的LLM对话WebUI，支持Ollama",
+        "home": "https://openwebui.com/",
+        "help": "https://openwebui.com/",
+        "cpu": 0,
+        "mem": 0,
+        "show":1,
+        "status":1,
+        "multiple":false,
+        "installed":0,
+        "installedCount":0,
+        "update":false,
+        "ignoreUpgrade":false,
+        "type": "16",
+        "typename": "AI/大模型",
+        "versions":["main"],
+        "downloadUrl:":"http://download.lybbn.cn/ruyi/dkapps/openwebui.zip",
+        "formFields":[
+            {"label":"Web端口","required":true,"random":false,"outport":true,"rule":"ryportrule","type":"number","envkey":"webui_port","default":3000,"tips":""},
+            {"label":"Ollama地址","required":true,"random":false,"rule":"ryurlrule","type":"text","envkey":"ollama_base_url","default":"ollama服务地址如: http://x.x.x.x:11434","tips":""},
+            {"label":"SecretKey","required":true,"random":true,"rule":"rycommonrule","type":"password","envkey":"webui_secret_key","default":"ollama","tips":""}
+        ]
+    },
+    {
         "appid": 26,
         "sort":26,
         "icon":"dify.png",
@@ -226,6 +254,33 @@
         "downloadUrl:":"http://download.lybbn.cn/ruyi/dkapps/phpmyadmin.zip",
         "formFields":[
             {"label":"端口","required":true,"random":false,"outport":true,"rule":"ryportrule","type":"number","envkey":"web_http_port","default":18016,"tips":""}
+        ]
+    },
+    {
+        "appid":130,
+        "sort":130,
+        "icon":"discuz.png",
+        "title": "Discuz!",
+        "appname": "discuz",
+        "desc": "开源的社区论坛系统",
+        "home": "https://www.discuz.vip/",
+        "help": "https://www.discuz.vip/",
+        "cpu": 0,
+        "mem": 0,
+        "show":1,
+        "status":1,
+        "multiple":true,
+        "installed":0,
+        "installedCount":0,
+        "update":false,
+        "ignoreUpgrade":false,
+        "type": "10",
+        "typename": "建站",
+        "versions":["v3.5"],
+        "downloadUrl:":"http://download.lybbn.cn/ruyi/dkapps/discuz.zip",
+        "formFields":[
+            {"label":"HTTP端口","required":true,"random":false,"outport":true,"rule":"ryportrule","type":"number","envkey":"web_http_port","default":21180,"tips":""},
+            {"label":"HTTPS端口","required":true,"random":false,"outport":true,"rule":"ryportrule","type":"number","envkey":"web_https_port","default":21443,"tips":""}
         ]
     }
 ]

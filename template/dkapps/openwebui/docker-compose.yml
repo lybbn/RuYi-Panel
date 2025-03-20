@@ -1,0 +1,25 @@
+services:
+  RUYI_DKAPP:
+    image: ghcr.io/open-webui/open-webui:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    environment:
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - HF_HUB_OFFLINE=1
+    ports:
+      - ${HOST_IP}:${WEBUI_PORT}:8080
+    volumes:
+      - ${APP_PATH}/data:/app/backend/data
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

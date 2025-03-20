@@ -124,7 +124,7 @@ class RYPythonSiteManageView(CustomAPIView):
         if action == "create_site":
             name = reqData.get("name","")
             if not name:return ErrorResponse(msg="请输入项目名称")
-            if Sites.objects.filter(type=0,name=name).exists():
+            if Sites.objects.filter(name=name).exists():
                 return ErrorResponse("已存在同名站点：%s，请更换项目名称！"%name)
             project_cfg = ast_convert(reqData.get("project_cfg",{}))
             port = project_cfg.get("port")

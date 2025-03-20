@@ -43,9 +43,11 @@ Install_Lib() {
     echo "安装系统依赖..."
     if [ -f "/usr/bin/yum" ];then
         yum install readline-devel -y
+        yum install libffi-devel -y
     elif [ -f "/usr/bin/apt-get" ];then
         apt-get install -y libnss3-dev > /dev/null
         apt-get install libreadline-dev -y
+        apt-get install libffi-dev -y
     fi
 }
 

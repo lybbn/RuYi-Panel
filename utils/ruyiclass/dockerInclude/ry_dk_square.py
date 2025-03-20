@@ -26,11 +26,14 @@ import subprocess
 import asyncio
 from django.conf import settings
 from utils.common import ReadFile,WriteFile,DeleteFile,GetTmpPath,RunCommand,GetDataPath,check_contains_chinese,DeleteDir,current_os,ast_convert,is_service_running,check_is_port,GetBackupPath,GetRandomSet
-from utils.security.files import download_url_file
+import requests
 import zipfile
 import tarfile
 from utils.server.system import system
 from apps.sysbak.models import RuyiBackup
+from utils.ruyiclass.dockerInclude.ry_dk_gpu import GPUMain
+import logging
+logger = logging.getLogger()
 
 def calculate_total_pages(total_nums, limit):
     return math.ceil(int(total_nums) / int(limit))
@@ -38,7 +41,7 @@ def calculate_total_pages(total_nums, limit):
 class main:
     docker_url="unix:///var/run/docker.sock"
     tmppath = GetTmpPath()
-    download_base_url = "https://download.lybbn.cn/ruyi" 
+    download_base_url = "http://download.lybbn.cn/ruyi" 
     apps_file = os.path.join(settings.BASE_DIR,"config", "dkapps.json")
     app_tags_file = os.path.join(settings.BASE_DIR,"config", "dkapptags.json")
     dk_app_base_path = GetDataPath().replace("\\", "/")+"/dkapps"
@@ -120,6 +123,37 @@ class main:
         except:
             return []
     
+    def download_url_file(self,url,save_path,chunk_size=8192):
+        """
+        从指定的 URL 下载文件并保存到本地。
+
+        :param url: 文件的下载链接
+        :param save_path: 文件保存的本地路径
+        :param chunk_size: 每次下载的数据块大小（默认 8KB）
+        :return: 下载成功返回 True 和保存路径，失败返回 False 和错误信息
+        """
+        try:
+            # 发起 HTTP GET 请求
+            response = requests.get(url, stream=True)
+            response.raise_for_status()  # 检查请求是否成功
+
+            # 确保保存路径的目录存在
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+            # 分块下载文件并写入本地
+            with open(save_path, 'wb') as file:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    file.write(chunk)  # 写入文件
+
+            return True, save_path
+
+        except requests.exceptions.RequestException as e:
+            # 捕获请求相关的异常
+            return False, f"下载失败: {str(e)}"
+        except Exception as e:
+            # 捕获其他异常
+            return False, f"发生错误: {str(e)}"
+
     def update_dk_apps_and_tags(self):
         """
         拉取最新广场应用和标签列表
@@ -137,14 +171,19 @@ class main:
             DeleteFile(self.apps_file,empty_tips=False)
             DeleteFile(self.app_tags_file,empty_tips=False)
             
-            download_url_file(apps_url,self.apps_file)
-            download_url_file(app_tags_url,self.app_tags_file)
+            isok,msg = self.download_url_file(apps_url,self.apps_file)
+            if not isok:
+                return False,msg
+            isok,msg = self.download_url_file(app_tags_url,self.app_tags_file)
+            if not isok:
+                return False,msg
             return True,"更新成功"
         except Exception as e:
             if os.path.exists(bk_apps_file):
                 shutil.copy(bk_apps_file,self.apps_file)
             if os.path.exists(bk_app_tags_file):
                 shutil.copy(bk_app_tags_file,self.app_tags_file)
+            logger.error(f"更新容器广场列表错误：{e}")
             return False,e
         finally:
             DeleteFile(bk_apps_file,empty_tips=False)
@@ -212,7 +251,7 @@ class main:
                     break
             if not compose_url:
                 return False,f"无{appname}的配置信息"
-            isok,msg = download_url_file(compose_url,dlfilename)
+            isok,msg = self.download_url_file(compose_url,dlfilename)
             if not isok:return False,f"无{appname}的配置信息下载失败"
             save_directory = os.path.dirname(dlfilename)
             isok2,msg2 = self.__func_unzip(dlfilename,save_directory)
@@ -226,6 +265,52 @@ class main:
         appname = cont.get("appname","")
         if appname in ["frpc","frps"]:
             return self.set_frp_conf(cont=cont)
+        elif appname == "discuz":
+            return self.set_discuz_conf(cont=cont)
+        return True,"ok"
+
+    def chmod_recursive(self,path, mode):
+        """
+        递归修改目录及其子目录和文件的权限
+        :param path: 目标路径
+        :param mode: 权限模式（如 0o766）
+        """
+        if not os.path.exists(path):
+            return
+        os.chmod(path, mode)
+        for root, dirs, files in os.walk(path):
+            for dir_name in dirs:
+                dir_path = os.path.join(root, dir_name)
+                os.chmod(dir_path, mode)
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+                os.chmod(file_path, mode)
+
+    def set_discuz_conf(self,cont={}):
+        #官网Discuz! 最新下载地址 https://www.discuz.vip/download
+        app_path = self.get_dkapp_path(cont=cont)
+        app_data_path = f"{app_path}/data"
+        app_data_temp_path = f"{app_path}/tmp"
+        app_data_upload_path = f"{app_path}/tmp/upload"
+        version = cont.get("version","")
+        dlfilename = app_path+"discuz.zip"
+        dl_url = "https://gitee.com/Discuz/DiscuzX/attach_files/2044572/download"
+        if version in ["v3.5","latest"]:
+            dl_url = "https://gitee.com/Discuz/DiscuzX/attach_files/2044572/download"
+        isok,msg = self.download_url_file(dl_url,dlfilename)
+        if not isok:return False,msg
+        isok,msg = self.__func_unzip(dlfilename,app_data_temp_path)
+        if not isok:return False,msg
+        DeleteDir(app_data_path)
+        shutil.copytree(app_data_upload_path, app_data_path)
+        DeleteDir(app_data_temp_path)
+        DeleteFile(dlfilename,empty_tips=False)
+        self.chmod_recursive(app_data_path+'/install', 0o777)
+        self.chmod_recursive(app_data_path+'/uc_server/install', 0o777)
+        self.chmod_recursive(app_data_path+'/data', 0o777)
+        self.chmod_recursive(app_data_path+'/config', 0o777)
+        self.chmod_recursive(app_data_path+'/uc_client/data', 0o777)
+        self.chmod_recursive(app_data_path+'/uc_server/data', 0o777)
         return True,"ok"
 
     def set_frp_conf(self,cont={}):
@@ -477,6 +562,10 @@ class main:
         
         if not self.is_docker_running():return False,"docker服务未运行，请先安装或启动"
         
+        install_log_file = self.get_dkapp_install_logpath(cont=cont)
+        
+        runcommand_str = "nohup"
+        
         #依赖服务和端口检查
         appid = cont.get("appid","")
         app_json_detail = self.get_app_json_detail(appid)
@@ -484,8 +573,11 @@ class main:
         if not app_json_detail:return False,"应用广场无此应用"
         params = ast_convert(cont.get("params",{}))
         ports = []#对外放通的端口
+        gpu = False
         for key, value in params.items():
             for a in formFields:
+                if a["envkey"] == "gpu":
+                    gpu = value
                 if a["envkey"] == key and a["type"] == "selectapps" and a["required"]: #检查如果是依赖服务则检查是否选择
                     if not params[a["child"]['envkey']]:
                         return False,a['tips']
@@ -493,7 +585,14 @@ class main:
                     isport,pmsg = self.check_port(value)
                     if not isport:return False,pmsg
                     ports.append(value)
-                
+        
+        #GPU检查
+        if gpu and not GPUMain.is_installed_ctk():
+            gpu_instance = GPUMain()
+            issupport,gpu_env_install_cmd = gpu_instance.get_install_gpu_command(install_log_file)
+            if not issupport:return False,"您开启了GPU选项，但系统不支持！！！"
+            runcommand_str = f"{runcommand_str} {gpu_env_install_cmd};"
+        
         #放通防火墙
         allowport = cont.get("allowport",False)
         if allowport:
@@ -508,8 +607,9 @@ class main:
         isok2,msg2 = self.__check_compose_config(compose_conf_path)
         if not isok2:return False,msg2
 
-        install_log_file = self.get_dkapp_install_logpath(cont=cont)
-        RunCommand(f"nohup {self.compose_bin} -f {compose_conf_path} up -d >> {install_log_file} 2>&1 &")
+        runcommand_str = f"{runcommand_str} {self.compose_bin} -f {compose_conf_path} up -d >> {install_log_file} 2>&1 && echo 'ruyi_successful_flag' >> {install_log_file} || echo 'ruyi_failed_flag' >> {install_log_file}"
+        runcommand_str = f"{runcommand_str} &"
+        subprocess.Popen(runcommand_str, shell=True)
         return True,"创建并启动中，初次使用应用镜像可能需等待几分钟..."
 
     async def get_ws_logs(self,cont):

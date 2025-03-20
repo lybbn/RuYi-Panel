@@ -238,6 +238,19 @@ class main:
                 return False, "镜像正在使用中，请先删除容器再执行删除镜像"
             return False,f"删除镜像失败：{e}"
     
+    def prune(self,cont={}):
+        """
+        清除未使用镜像
+        """
+        dangling = cont.get('dangling',False)
+        try:
+            prune_result = self.client.images.prune(filters={'dangling': dangling})
+            if not prune_result['ImagesDeleted']:
+                return True, "没有无用镜像可清理"
+            return True, "清除成功！"
+        except Exception as e:
+            return False,f"清除失败: {e}"
+    
     def local_images_list(self,all=False):
         if not self.client:
             return []

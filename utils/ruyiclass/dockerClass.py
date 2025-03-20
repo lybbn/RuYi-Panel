@@ -398,6 +398,8 @@ class DockerClient:
             res,msg = dk_network.main(client=self.client).prune()
         elif action_type == "volumes":
             res,msg = dk_volumes.main(client=self.client).prune()
+        elif action_type == "image":
+            res,msg = dk_image.main(client=self.client).prune()
         return res,msg
     
     def add(self,cont={}):

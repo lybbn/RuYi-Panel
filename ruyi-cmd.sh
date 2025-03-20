@@ -47,7 +47,7 @@ usage() {
     echo "  restart    重启面板服务          |        info         查看面板信息"
     echo "  uninstall  卸载面板服务          |        setuser      修改面板用户名"             
     echo "  version    查看版本信息          |        setpass      修改面板密码"
-    echo "  repair     修复如意面板          |"
+    echo "  repair     修复如意面板          |        clearcache   清理面板缓存"
     echo "================================================================================"
 }
 
@@ -172,6 +172,15 @@ setkey() {
     $Python_Bin manage.py panelcli set_secretkey -d $newsecretkey
 }
 
+clearcache() {
+    read -p "此操作会清理如意面板的所有Cache缓存数据，是否继续 [y/n] : " ynstr
+    if [ "$ynstr" == "Y" ] || [ "$ynstr" == "y" ]; then
+        $Python_Bin manage.py clearCache
+    else
+        exit 0
+    fi
+}
+
 uninstall() {
     read -p "卸载将会完全清除 RuYi 服务和数据目录，是否继续 [y/n] : " ynstr
     if [ "$ynstr" == "Y" ] || [ "$ynstr" == "y" ]; then
@@ -237,6 +246,9 @@ main() {
             ;;
         repair)
             repair
+            ;;
+        clearcache)
+            clearcache
             ;;
         help)
             usage

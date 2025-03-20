@@ -131,13 +131,13 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             await self.send_message(action='error',message=str(e))
             
-    async def run_command(self,cmd):
-        WHITE_CMDS = ["docker","tail","cat"]
+    async def run_command(self, cmd):
+        WHITE_CMDS = ["docker", "tail", "cat"]
         DANGEROUS_ENDINGS = [';', '&&', '||', '|', '`', '>', '<', '>>']
         process = None
         try:
             if not cmd:
-                await self.send_message(action='error',message="请输入命令")
+                await self.send_message(action='error', message="请输入命令")
                 return
             cmd = cmd.strip()
             # 检查命令是否在白名单中
@@ -146,66 +146,57 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
                 if cmd.startswith(w):
                     is_white_cmd = True
                     break
-                    
+
             if not is_white_cmd:
-                await self.send_message(action='error',message="不支持此命令(有需要请联系如意面板作者)")
+                await self.send_message(action='error', message="不支持此命令(有需要请联系如意面板作者)")
                 return
-                
+
             # 检查危险命令结尾
             if any(cmd.endswith(ending) for ending in DANGEROUS_ENDINGS):
-                await self.send_message(action='error',message="危险的命令结尾(有需要请联系如意面板作者)")
+                await self.send_message(action='error', message="危险的命令结尾(有需要请联系如意面板作者)")
                 return
-                
+
             # 启动子进程
-            process = subprocess.Popen(
-                cmd, 
-                shell=True, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE, 
-                bufsize=1,  # 行缓冲
-                universal_newlines=True  # 文本模式
+            process = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
-            
+
             # 异步读取输出
             async def stream_output():
                 try:
                     while True:
-                        output = await asyncio.get_event_loop().run_in_executor(
-                            None, 
-                            process.stdout.readline
-                        )
-                        if output == '' and process.poll() is not None:
+                        output = await process.stdout.readline()
+                        if output == b'' and process.returncode is not None:
                             break
                         if output:
-                            await self.send_message(message=output.strip())
+                            await self.send_message(message=output.decode().strip())
                 except Exception as e:
                     await self.send_message(action='error', message=f"输出读取错误: {str(e)}")
-                    
+
                 # 处理错误输出
-                error_output = await asyncio.get_event_loop().run_in_executor(
-                    None, 
-                    process.stderr.read
-                )
-                
+                error_output = await process.stderr.read()
                 if error_output:
-                    await self.send_message(action='error', message=error_output.strip())
+                    await self.send_message(action='error', message=error_output.decode().strip())
                 else:
                     await self.send_message(action='success', message=f"")
-                    
+
                 # 记录操作日志
-                logtxt = f"{cmd}" if not error_output else f"错误：{error_output}"
+                logtxt = f"{cmd}" if not error_output else f"错误：{error_output.decode().strip()}"
                 await asyncRuyiAddOpLog(self, msg=f"【执行命令】=> {logtxt}", status=not error_output, module="cmdmg")
-                
+
             # 启动输出流任务
             await stream_output()
-            
+
         except Exception as e:
             await self.send_message(action='error', message=f"命令执行错误: {str(e)}")
         finally:
             # 确保子进程被终止
-            if process and process.poll() is None:
-                process.terminate()
+            if process and process.returncode is None:
                 try:
-                    process.wait(timeout=5)  # 等待进程终止
-                except subprocess.TimeoutExpired:
-                    process.kill()  # 如果超时，强制终止
+                    # 使用 asyncio.wait_for 添加超时
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()  # 确保进程被清理

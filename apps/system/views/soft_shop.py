@@ -365,6 +365,7 @@ class RYSoftInfoManageView(CustomAPIView):
             return DetailResponse(data=data)
         elif action == "get_redis_dblist":
             conf_options = RY_GET_REDIS_CONF_OPTIONS()
+            if not conf_options:return DetailResponse(data=[])
             db_nums = int(conf_options.get('databases',16))
             data = []
             preload = True
@@ -437,7 +438,7 @@ class RYSoftInfoManageView(CustomAPIView):
             db_inx = int(reqData.get("db",0))
             db_conn = Redis_Connect(db=db_inx)
             if not db_conn:
-                return ErrorResponse(msg="redis连接错误")
+                return DetailResponse(data=[])
             total_nums = 0
             try:
                 total_nums = db_conn.dbsize()

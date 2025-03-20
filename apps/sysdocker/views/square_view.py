@@ -24,9 +24,7 @@ from utils.jsonResponse import ErrorResponse,DetailResponse,SuccessResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
 from apps.syslogs.logutil import RuyiAddOpLog
-from utils.ruyiclass.dockerClass import DockerClient
 from utils.ruyiclass.dockerInclude.ry_dk_square import main as dksquare
-from concurrent.futures import ThreadPoolExecutor
 from apps.sysdocker.models import RyDockerApps
 
 class RYDockerSquareAppTagsListManageView(CustomAPIView):

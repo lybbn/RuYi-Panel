@@ -45,6 +45,12 @@ if RUYI_SECURITY_PATH in RUYI_SYSTEM_PATH_LIST: RUYI_SECURITY_PATH = '/ry'
 if RUYI_SECURITY_PATH.endswith("/"): RUYI_SECURITY_PATH = RUYI_SECURITY_PATH[:-1]
 if RUYI_SECURITY_PATH[0] != '/': RUYI_SECURITY_PATH = '/' + RUYI_SECURITY_PATH
 
+#是否demo模式
+RUYI_DEMO = False
+RUYI_DEMO_FILE = os.path.join(RUYI_DATA_BASE_PATH,'demo.ry')
+if os.path.exists(RUYI_DEMO_FILE):
+    RUYI_DEMO = True if ReadFile(RUYI_DEMO_FILE) else False
+
 #版本
 RUYI_SYSVERSION_FILE = os.path.join(BASE_DIR,'sysVersion.ry')
 #模板路径
@@ -183,8 +189,12 @@ CACHES = {
         # 'BACKEND': 'django.core.cache.backends.filebased.FileBasedCache',
         'BACKEND': 'diskcache.DjangoCache',
         'LOCATION': os.path.join(BASE_DIR,'data','cache'),
+        'SHARDS': 4,
         'TIMEOUT': None,# None永不过期
-        "OPTIONS": {"MAX_ENTRIES": 1000},
+        "OPTIONS": {
+            "MAX_ENTRIES": 1000,
+            'size_limit': 2 ** 30,  # 1GB
+        },
     }
 }
 

@@ -318,6 +318,8 @@ def Redis_Connect(db_host="127.0.0.1",db_port=6379,db_password="",db=0,socket_co
     conf_options = {}
     if local:
         conf_options = RY_GET_REDIS_CONF_OPTIONS()
+        if not conf_options:
+            return None
         db_nums = conf_options['databases']
     if preload:
         RedisClient.preload_redis_connections(db_host=db_host,db_port=db_port,db_password=db_password,db=db,socket_connect_timeout=socket_connect_timeout,socket_timeout=socket_timeout,max_connections=max_connections,local=local,localOptions=conf_options,db_nums=db_nums)

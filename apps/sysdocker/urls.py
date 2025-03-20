@@ -13,7 +13,7 @@ from apps.sysdocker.views.container_view import RYDockerLimitManageView,RYDocker
 from apps.sysdocker.views.volumes_view import RYDockerVolumesManageView
 from apps.sysdocker.views.square_view import RYDockerSquareAppTagsListManageView,RYUpdateDockerSquareAppsTagsManageView,RYGetDockerSquareAppsListManageView,RYGetDockerSquareAppsManageView
 from apps.sysdocker.views.backupApps_view import RYDockerBackupAppManageView,RYDockerRestoreAppManageView,RYDockerBackupDelManageView,RYDockerBackupDownloadManageView
-
+from apps.sysdocker.views.gpu_view import RYAIGgpuInfoManageView
 
 system_url = routers.SimpleRouter()
 system_url.register(r'repos', RyDockerRepoViewSet)
@@ -32,5 +32,6 @@ urlpatterns = [
     path('square/restore/', RYDockerRestoreAppManageView.as_view(), name='恢复备份'),
     path('square/delbackup/', RYDockerBackupDelManageView.as_view(), name='删除备份'),
     path('square/downloadbak/', RYDockerBackupDownloadManageView.as_view(), name='下载备份'),
+    path('ai/gpuinfo/', RYAIGgpuInfoManageView.as_view(), name='ai gpu 信息'),
 ]
 urlpatterns += system_url.urls

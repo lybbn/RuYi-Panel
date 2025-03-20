@@ -20,6 +20,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 from apps.system.models import Users
 from django.http.request import QueryDict
 from django.contrib.auth.models import AnonymousUser
+from django.conf import settings
 
 class JWTChannelsAuthMiddleware:
     """
@@ -42,7 +43,7 @@ class JWTChannelsAuthMiddleware:
         user = await self.get_user(token)
 
         # 如果用户未登录，则拒绝 WebSocket 连接
-        if not user.is_authenticated:
+        if not user.is_authenticated or settings.RUYI_DEMO:
             await send({
                 "type": "websocket.close",
                 "code": 403

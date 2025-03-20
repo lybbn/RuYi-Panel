@@ -19,6 +19,7 @@
 # ------------------------------
 from utils.ruyiclass.nginxClass import NginxClient
 from utils.ruyiclass.pythonClass import PythonClient
+from utils.ruyiclass.goClass import GoClient
 from utils.install.install_soft import Ry_Reload_Soft,Ry_Restart_Soft
 from utils.common import current_os
 
@@ -40,6 +41,12 @@ class WebClient:
             cont =  kwargs.get('cont', {})
             isok,msg = PythonClient(siteName=siteName,sitePath=sitePath,cont=cont).create_site()
             return isok,msg
+        elif webserver == "go":
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok,msg = GoClient(siteName=siteName,sitePath=sitePath,cont=cont).create_site()
+            return isok,msg
         return False,"无此类型webserver"
     
     @staticmethod
@@ -50,6 +57,12 @@ class WebClient:
             sitePath = kwargs.get('sitePath', '')
             cont =  kwargs.get('cont', {})
             isok = PythonClient(siteName=siteName,sitePath=sitePath,cont=cont).autoStart()
+            return isok
+        elif webserver == 'go':
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok = GoClient(siteName=siteName,sitePath=sitePath,cont=cont).autoStart()
             return isok
         return False,"无此类型webserver"
     
@@ -67,6 +80,12 @@ class WebClient:
             cont =  kwargs.get('cont', {})
             isok = PythonClient(siteName=siteName,sitePath=sitePath,cont=cont).start_site()
             return isok
+        elif webserver == 'go':
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok = GoClient(siteName=siteName,sitePath=sitePath,cont=cont).start_site()
+            return isok
         return False,"无此类型webserver"
     
     @staticmethod
@@ -83,6 +102,12 @@ class WebClient:
             cont =  kwargs.get('cont', {})
             isok = PythonClient(siteName=siteName,sitePath=sitePath,cont=cont).stop_site()
             return isok,None
+        elif webserver == 'go':
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok = GoClient(siteName=siteName,sitePath=sitePath,cont=cont).stop_site()
+            return isok,None
         return False,"无此类型webserver"
     
     @staticmethod
@@ -94,11 +119,17 @@ class WebClient:
             id = kwargs.get('id', '')
             isok,msg = NginxClient(siteName=siteName,sitePath=sitePath).delete_site(id=id)
             return isok,msg
-        if webserver == 'python':
+        elif webserver == 'python':
             siteName = kwargs.get('siteName', '')
             sitePath = kwargs.get('sitePath', '')
             cont =  kwargs.get('cont', {})
             isok,msg = PythonClient(siteName=siteName,sitePath=sitePath,cont=cont).delete_site()
+            return isok,msg
+        elif webserver == 'go':
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok,msg = GoClient(siteName=siteName,sitePath=sitePath,cont=cont).delete_site()
             return isok,msg
         return False,"无此类型webserver"
     
