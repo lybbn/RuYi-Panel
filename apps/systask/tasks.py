@@ -358,19 +358,27 @@ def func_unzip(zip_filename,extract_path):
     @param zip_filename 压缩文件名（含路径）
     @param extract_path 需要解压的目标目录
     """
-    if current_os == "windows":
-        #解除占用
-        from utils.server.windows import kill_cmd_if_working_dir
-        kill_cmd_if_working_dir(extract_path)
-    _, ext = os.path.splitext(zip_filename)
-    if ext in ['.tar.gz','.tgz','.tar.bz2','.tbz']:
-        with tarfile.open(zip_filename, 'r') as tar:
-            tar.extractall(extract_path)
-    elif ext == '.zip':
-        with zipfile.ZipFile(zip_filename, 'r') as zipf:
-            zipf.extractall(extract_path)
-    else:
-        raise ValueError("不支持的文件格式")
+    
+    try:
+        _, ext = os.path.splitext(zip_filename)
+        ext = ext.lower()
+        if ext in ['.tar.gz','.tgz','.tar.bz2','.tbz']:
+            with tarfile.open(zip_filename, 'r') as tar:
+                tar.extractall(extract_path)
+        elif ext == '.zip':
+            with zipfile.ZipFile(zip_filename, 'r') as zipf:
+                zipf.extractall(extract_path)
+        else:
+            raise ValueError("不支持的文件格式")
+    except PermissionError:
+        if current_os == "windows":
+            #解除占用
+            from utils.server.windows import kill_cmd_if_working_dir
+            kill_cmd_if_working_dir(extract_path)
+            # 再次尝试解压
+            func_unzip(zip_filename, extract_path)  # 递归调用
+    except Exception as e:
+        raise ValueError(e)
 
 def zip_directories_and_files(zip_filename, items):
     with zipfile.ZipFile(zip_filename, 'w') as zipf:
@@ -447,6 +455,9 @@ def start_scheduler():
         id='initialization_ruyi_task_001',
         replace_existing=True,
     )
+    logger.info("===================任务调度器已启动===================")
 
 def stop_scheduler():
-    scheduler.shutdown(wait=False)
+    logger.info("===================任务调度器已关闭===================")
+    if scheduler and scheduler.running:scheduler.shutdown(wait=False)
+    

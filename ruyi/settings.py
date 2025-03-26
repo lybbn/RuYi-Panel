@@ -18,13 +18,18 @@ Django settings for ruyi project.
 import os
 import sys
 from pathlib import Path
-from utils.common import ReadFile,GetBackupPath
+from utils.common import ReadFile,GetBackupPath,initWindowsEnv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
 RUYI_DATA_BASE_PATH = os.path.join(BASE_DIR, 'data')
 RUYI_VHOST_PATH = os.path.join(RUYI_DATA_BASE_PATH,'vhost')
+
+RUYI_SETUP_PATH = os.path.join(BASE_DIR, 'data','setup_path.ry')
+RUYI_PATHON_PATH = os.path.join(BASE_DIR, 'data','python_path.ry')
+initWindowsEnv()
+
 if not os.path.exists(RUYI_VHOST_PATH):os.makedirs(RUYI_VHOST_PATH)
 if not os.path.exists(GetBackupPath()):os.makedirs(GetBackupPath())
 # ruyi Data

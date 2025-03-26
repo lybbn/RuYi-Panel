@@ -14,6 +14,7 @@
 # 公用方法
 # ------------------------------
 import re
+import struct
 import os
 import shutil
 import socket
@@ -75,10 +76,17 @@ def get_python_pip():
     @author lybbn<2024-11-13>
     """
     if current_os == "windows":
-        return {
-            "python":"python",
-            "pip":"pip"
-        }
+        p_path = GetPythonPath()
+        if not p_path:
+            return {
+                "python":"python",
+                "pip":"pip"
+            }
+        else:
+            return {
+                "python":os.path.join(p_path,"python.exe"),
+                "pip":os.path.join(p_path,"Scripts","pip.exe")
+            }
     else:
         return {
             "python":"rypython",
@@ -176,6 +184,36 @@ def check_url_site_canuse(url):
     try:
         response = requests.get(url, timeout=5)
         return response.status_code == 200
+    except:
+        return False
+
+def is_private_ip(ip):
+    """
+    判断是否为内网IP地址
+    支持以下内网段：
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 169.254.0.0/16 (链路本地)
+    - 127.0.0.0/8 (环回地址)
+    """
+    try:
+        # 将IP地址转换为整数
+        ip_num = struct.unpack('!I', socket.inet_aton(ip))[0]
+        
+        # 检查各类内网段
+        private_ranges = [
+            (0x0A000000, 0xFF000000),  # 10.0.0.0/8
+            (0xAC100000, 0xFFF00000),  # 172.16.0.0/12
+            (0xC0A80000, 0xFFFF0000),  # 192.168.0.0/16
+            (0xA9FE0000, 0xFFFF0000),  # 169.254.0.0/16
+            (0x7F000000, 0xFF000000)   # 127.0.0.0/8
+        ]
+        
+        for (net, mask) in private_ranges:
+            if (ip_num & mask) == net:
+                return True
+        return False
     except:
         return False
 
@@ -301,7 +339,7 @@ def WriteFile(file_path,content,mode="w",write=True,encoding="utf-8"):
     mode: w 覆盖写入（默认）、a 追加写入
     write:是否写入
     """
-    if write:
+    if write and file_path:
         # 获取文件所在的目录路径
         directory = os.path.dirname(file_path)
 
@@ -429,6 +467,55 @@ def GetConfig():
         return {}
     return json.loads(content)
 
+def initWindowsEnv():
+    if current_os == "windows":
+        def read_ruyipath_from_registry():
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\RuYi") as key:
+                    value, reg_type = winreg.QueryValueEx(key, "RuyiPath")
+                    return value
+            except FileNotFoundError:
+                return None
+            except Exception as e:
+                # raise Exception(f"读取RuyiPath注册表失败: {e}")
+                return None
+
+        def read_pythonpath_from_registry():
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\RuYi") as key:
+                    value, reg_type = winreg.QueryValueEx(key, "PythonPath")
+                    return value
+            except FileNotFoundError:
+                return None
+            except Exception as e:
+                # raise Exception(f"读取PythonPath注册表失败: {e}")
+                return None
+
+        if not ReadFile(settings.RUYI_SETUP_PATH):
+            RuyiPath = read_ruyipath_from_registry()
+            if RuyiPath:
+                WriteFile(settings.RUYI_SETUP_PATH,RuyiPath)
+        
+        if not ReadFile(settings.RUYI_PATHON_PATH):
+            PythonPath = read_pythonpath_from_registry()
+            if PythonPath:
+                WriteFile(settings.RUYI_PATHON_PATH,PythonPath)
+
+def GetRuyiSetupPath():
+    return ReadFile(settings.RUYI_SETUP_PATH)
+
+def GetPythonPath():
+    return ReadFile(settings.RUYI_PATHON_PATH)
+
+def GetWindowsRealPath(path1,path2):
+    new_path = path2
+    if path1:
+        _, path2_without_drive = os.path.splitdrive(path2)
+        new_path = os.path.join(path1, path2_without_drive.lstrip("/\\")).replace("\\","/")
+    return new_path
+
 def GetWebRootPath():
     """
     @name 读取如意网站根目录
@@ -438,7 +525,9 @@ def GetWebRootPath():
     def getDefaultPath():
         config = GetConfig()
         if current_os == 'windows':
+            setup_path = GetRuyiSetupPath()
             www_path = config['windows']['wwwroot_path']
+            www_path = GetWindowsRealPath(setup_path,www_path)
         else:
             www_path = config['linux']['wwwroot_path']
         return www_path
@@ -459,7 +548,9 @@ def GetRootPath():
     """
     config = GetConfig()
     if current_os == 'windows':
+        setup_path = GetRuyiSetupPath()
         root_path = config['windows']['root_path']
+        root_path = GetWindowsRealPath(setup_path,root_path)
     else:
         root_path = config['linux']['root_path']
     return root_path
@@ -471,7 +562,9 @@ def GetInstallPath():
     """
     config = GetConfig()
     if current_os == 'windows':
+        setup_path = GetRuyiSetupPath()
         install_path = config['windows']['install_path']
+        install_path = GetWindowsRealPath(setup_path,install_path)
     else:
         install_path = config['linux']['install_path']
     return install_path
@@ -483,7 +576,9 @@ def GetDataPath():
     """
     config = GetConfig()
     if current_os == 'windows':
+        setup_path = GetRuyiSetupPath()
         data_path = config['windows']['data_path']
+        data_path = GetWindowsRealPath(setup_path,data_path)
     else:
         data_path = config['linux']['data_path']
     return data_path
@@ -495,7 +590,9 @@ def GetLogsPath():
     """
     config = GetConfig()
     if current_os == 'windows':
+        setup_path = GetRuyiSetupPath()
         logs_path = config['windows']['logs_path']
+        logs_path = GetWindowsRealPath(setup_path,logs_path)
     else:
         logs_path = config['linux']['logs_path']
     return logs_path
@@ -508,7 +605,9 @@ def GetBackupPath():
     def getDefaultPath():
         config = GetConfig()
         if current_os == 'windows':
+            setup_path = GetRuyiSetupPath()
             backup_path = config['windows']['backup_path']
+            backup_path = GetWindowsRealPath(setup_path,backup_path)
         else:
             backup_path = config['linux']['backup_path']
         return backup_path
@@ -529,7 +628,9 @@ def GetTmpPath():
     """
     config = GetConfig()
     if current_os == 'windows':
+        setup_path = GetRuyiSetupPath()
         tmp_path = config['windows']['tmp_path']
+        tmp_path = GetWindowsRealPath(setup_path,tmp_path)
     else:
         tmp_path = config['linux']['tmp_path']
     return tmp_path
@@ -541,10 +642,12 @@ def GetPanelPath():
     """
     config = GetConfig()
     if current_os == 'windows':
-        tmp_path = config['windows']['panel_path']
+        setup_path = GetRuyiSetupPath()
+        panel_path = config['windows']['panel_path']
+        panel_path = GetWindowsRealPath(setup_path,panel_path)
     else:
-        tmp_path = config['linux']['panel_path']
-    return tmp_path
+        panel_path = config['linux']['panel_path']
+    return panel_path
 
 def GetPanelPort():
     """
@@ -769,7 +872,17 @@ def GetPidCpuPercent(pid, pid_cpu_percent):
         pid_cpu_percent[s.name()] += float(s.cpu_percent(interval=0.01))
     except:
         pass
-    
+
+def run_powershell_command(command):
+    """运行 PowerShell 命令并返回输出和错误信息"""
+    result = subprocess.run(
+        ["powershell", "-Command", command],
+        capture_output=True,  # 捕获标准输出和标准错误
+        text=True,             # 以文本形式返回输出
+        creationflags=subprocess.CREATE_NO_WINDOW  # 不创建新窗口
+    )
+    return result.stdout, result.stderr
+
 def GetProcessNameInfo(process_name,process_info,is_windows=True):
     """
     @name 获取指定进程名的信息
@@ -779,19 +892,33 @@ def GetProcessNameInfo(process_name,process_info,is_windows=True):
     """
     try:
         if is_windows:
-            res,err = RunCommand('wmic process where name="%s" get ProcessId,Name,ExecutablePath,WorkingSetSize'%process_name)
+            # res,err = RunCommand('wmic process where name="%s" get ProcessId,Name,ExecutablePath,WorkingSetSize'%process_name)
+            # 构建 PowerShell 命令
+            command = f'Get-Process -Name "{process_name}" | Select-Object Id, ProcessName, Path, WorkingSet | ConvertTo-Csv -NoTypeInformation'
+            
+            # 执行 PowerShell 命令
+            res, err = run_powershell_command(command)
+            if err:
+                # print(f"Error: {err}")
+                return []
             output = res.strip().splitlines()
             # 检查是否有足够的数据
             if len(output) <= 1:
                 return []
-            headers = output[0].split()
+            headers = output[0].strip().split(',')
             processes = []
             # 处理每一行数据
             for line in output[1:]:
-                values = line.split()
+                values = line.strip().split(',')
                 if len(values) == len(headers):
-                    process_info = dict(zip(headers, values))
-                    processes.append(process_info)
+                    # 将属性名映射到所需的名字
+                    p_info = {
+                        "ProcessId": values[0].strip('"'),
+                        "Name": values[1].strip('"'),
+                        "ExecutablePath": values[2].strip('"'),
+                        "WorkingSetSize": values[3].strip('"')
+                    }
+                    processes.append(p_info)
             process_info[process_name] = processes
             return processes
         else:
@@ -1029,6 +1156,5 @@ def is_admin():
     try:
         import ctypes
         return ctypes.windll.shell32.IsUserAnAdmin()
-        return True
     except:
         return False

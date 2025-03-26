@@ -42,7 +42,9 @@ class IPQQwry:
             cls._qqwry = QQwry()
             QQWRY_FILE_PATH = os.path.join(settings.BASE_DIR,'qqwry.dat')
             if not os.path.exists(QQWRY_FILE_PATH):
-                download_url_file("https://raw.gitmirror.com/adysec/IP_database/main/qqwry/qqwry.dat",save_path=QQWRY_FILE_PATH)
+                #https://github.com/metowolf/qqwry.dat/releases/latest/download/qqwry.dat
+                isok,msg = download_url_file("https://gitee.com/lybbn/RuYi-Panel/releases/download/v1.0.5/qqwry.dat",save_path=QQWRY_FILE_PATH)
+                if not isok:return None
             cls._qqwry.load_file(QQWRY_FILE_PATH)
             cls._instance = super(IPQQwry, cls).__new__(cls, *args, **kwargs)
         return cls._instance

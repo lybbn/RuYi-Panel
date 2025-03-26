@@ -139,7 +139,8 @@ def Install_Go(type=2,version={},is_windows=True,call_back=None):
                 WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
                 raise ValueError(msg)
             WriteFile(log_path,"【%s】下载完成\n"%filename,mode='a',write=is_write_log)
-            src_folder = os.path.join(install_base_directory,Path(filename).stem)
+            # src_folder = os.path.join(install_base_directory,Path(filename).stem)
+            src_folder = os.path.join(install_base_directory,"go")
             WriteFile(log_path,"正在解压安装文件到%s\n"%install_directory,mode='a',write=is_write_log)
             from apps.systask.tasks import func_unzip
             func_unzip(save_path,install_base_directory)

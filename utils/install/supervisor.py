@@ -20,7 +20,7 @@
 
 import os
 import time
-from utils.common import ReadFile,get_python_pip,RunCommandReturnCode,DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand
+from utils.common import ReadFile,get_python_pip,RunCommandReturnCode,DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand,GetRandomSet
 from utils.security.files import download_url_file,get_file_name_from_url
 import subprocess
 import importlib
@@ -41,6 +41,7 @@ def get_supervisor_path_info():
         'w_supervisord':'supervisord',
         'w_supervisor_service':'supervisor_service',
         'w_supervisorctl':'supervisorctl',
+        'w_pid':os.path.join(install_abspath_path,'supervisord.pid'),
         'l_supervisorctl':os.path.join(install_abspath_path,'bin','supervisorctl'),
         'l_abspath_supervisord_path':os.path.join(install_abspath_path,'bin','supervisord'),
         'w_config_path':os.path.join(install_abspath_path,"rysupervisord.conf"),
@@ -73,7 +74,11 @@ def check_supervisor_version(softPath=""):
 
 def is_supervisor_running(is_windows=True,simple_check=False):
     if is_windows:
+        soft_paths = get_supervisor_path_info()
+        pid_path = soft_paths['w_pid'] 
         try:
+            pid = ReadFile(pid_path)
+            if not pid:return False
             result = subprocess.run(['sc', 'query', 'supervisord'],stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if 'RUNNING' in result.stdout:
                 return True
@@ -127,19 +132,19 @@ def Install_Supervisor(type=2,version={},is_windows=True,call_back=None):
             os.makedirs(configs_path)
         if is_windows:
             WriteFile(log_path,"【%s】下载完成\n"%filename,mode='a',write=is_write_log)
-            WriteFile(log_path,"开始安装...%s\n",mode='a',write=is_write_log)
+            WriteFile(log_path,"开始安装...\n",mode='a',write=is_write_log)
             subprocess.run([get_python_pip()['pip'], 'install',filename],check=True,text=True,capture_output=True,cwd=save_directory)
             from shutil import which as whichCommand
             supervisord_path = whichCommand("supervisord")
             if not supervisord_path:
                 raise Exception("安装失败，无法执行安装后的supervisor")
-            WriteFile(log_path,"开始生成配置文件...%s\n",mode='a',write=is_write_log)
+            WriteFile(log_path,"开始生成配置文件...\n",mode='a',write=is_write_log)
             WriteFile(soft_paths['w_config_path'],Default_Supervisor_Windows_Config())
             tmp_abspath_path = soft_paths['tmp_abspath_path']
             if not os.path.exists(tmp_abspath_path):
                 os.makedirs(tmp_abspath_path)
-            WriteFile(log_path,"开始生成安装服务...%s\n",mode='a',write=is_write_log)
-            subprocess.run([get_python_pip()['python'], '-m',"supervisor.services","install","-c",soft_paths['w_config_path']],check=True,text=True,capture_output=True)
+            WriteFile(log_path,"开始生成安装服务...\n",mode='a',write=is_write_log)
+            subprocess.run([get_python_pip()['python'], '-m',"supervisor.services","-sn","supervisord","--startup","auto","install","-c",soft_paths['w_config_path']],check=True,text=True,capture_output=True)
             # 新建版本文件
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
@@ -192,6 +197,7 @@ def Uninstall_Supervisor(is_windows=True):
     install_path = soft_paths['install_abspath_path']
     if is_windows:
         if os.path.exists(install_path):
+            Stop_Supervisor()
             time.sleep(0.1)
             RunCommand("supervisor_service remove")
             subprocess.run([get_python_pip()['pip'], 'uninstall',"supervisor-win","-y"],check=True,text=True,capture_output=True)
@@ -317,7 +323,7 @@ def RY_SAVE_SUPERVISOR_CONF(conf="",is_windows=True):
     conf_path = RY_GET_SUPERVISOR_CONFIG_PATH(is_windows=is_windows)
     WriteFile(conf_path,content=conf)
 
-def Default_Supervisor_Windows_Config():
+def Default_Supervisor_Windows_Config(is_windows=True):
     """
     @name supervisor windows 默认配置
     @author lybbn<2024-11-27>
@@ -325,22 +331,24 @@ def Default_Supervisor_Windows_Config():
     soft_paths = get_supervisor_path_info()
     configs_path = soft_paths['configs_path']
     tmp_abspath_path = soft_paths['tmp_abspath_path']
+    w_pid = soft_paths['w_pid'].replace("\\","/")
+    r_passwd = GetRandomSet(8)
     content = f"""; Sample supervisor config file.
 ;
 ; For more information on the config file, please see:
 ; http://supervisord.org/configuration.html
 
-;[inet_http_server]         ; inet (TCP) server disabled by default
-;port=127.0.0.1:9001        ; ip_address:port specifier, *:port for all iface
-;username=user              ; default is no username (open server)
-;password=123               ; default is no password (open server)
+[inet_http_server]         ; inet (TCP) server disabled by default
+port=127.0.0.1:49001        ; ip_address:port specifier, *:port for all iface
+username=ryuser            ; default is no username (open server)
+password={r_passwd}        ; default is no password (open server)
 
 [supervisord]
 logfile={tmp_abspath_path}\\supervisord.log ; (main log file;default $CWD/supervisord.log)
 logfile_maxbytes=50MB               ; (max main logfile bytes b4 rotation;default 50MB)
 logfile_backups=10                  ; (num of main logfile rotation backups;default 10)
 loglevel=info                       ; (log level;default info; others: debug,warn,trace)
-pidfile={tmp_abspath_path}\\supervisord.pid ; (supervisord pidfile;default supervisord.pid)
+pidfile={w_pid} ; (supervisord pidfile;default supervisord.pid)
 nodaemon=false                      ; (start in foreground if true;default false)
 silent=false                 ; no logs to stdout if true; default false
 minfds=1024                         ; (min. avail startup file descriptors;default 1024)
@@ -367,9 +375,9 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 ; or inet_http_server section.
 
 [supervisorctl]
-;serverurl=http://127.0.0.1:9001 ; use an http:// url to specify an inet socket
-;username=chris              ; should be same as in [*_http_server] if set
-;password=123                ; should be same as in [*_http_server] if set
+serverurl=http://127.0.0.1:49001 ; use an http:// url to specify an inet socket
+username=ryuser              ; should be same as in [*_http_server] if set
+password={r_passwd}          ; should be same as in [*_http_server] if set
 ;prompt=mysupervisor         ; cmd line prompt (default "supervisor")
 ;history_file=~/.sc_history  ; use readline history if available
 

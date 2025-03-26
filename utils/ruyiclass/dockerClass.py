@@ -53,7 +53,7 @@ def get_docker_path_info():
         'windows_abspath_docker_bin':os.path.join(install_abspath_path,'docker','docker.exe'),
         'windows_abspath_dockerd_bin':os.path.join(install_abspath_path,'docker','dockerd.exe'),
         'linux_docker_bin':"/usr/bin/docker",
-        'windows_daemon_conf':os.path.join(install_abspath_path,'daemon.json'),
+        'windows_daemon_conf':os.path.expanduser("~/.docker/daemon.json"),
         'linux_daemon_conf':"/etc/docker/daemon.json",
         'data_root':ry_root_path+"/data/docker",
     }
@@ -64,11 +64,14 @@ class DockerClient:
     docker_path_info={}
     def __init__(self,conn=True):
         self.is_windows = True if current_os == 'windows' else False
+        if self.is_windows:self.docker_url="npipe:////./pipe/dockerDesktopLinuxEngine"
         self.docker_path_info = get_docker_path_info()
         if conn:
             try:
                 # 尝试连接到 Docker 服务
-                # self.client = docker.from_env()
+                # if self.is_windows:
+                #     self.client = docker.from_env()
+                # else:
                 self.client = docker.DockerClient(base_url=self.docker_url)
             except:
                 self.client = None
@@ -234,6 +237,7 @@ class DockerClient:
             tags = i_attrs['RepoTags']
             c_name =tags[0] if tags and len(tags)>0 else ""
             short_id = image.short_id
+            work_dir = i_attrs['GraphDriver']['Data'].get('WorkDir',"") if i_attrs['GraphDriver']['Data'] else ""
             l_data = {
                 'id': get_sha_id(short_id),#i_attrs.id
                 'used': "1" if self.is_image_in_use(container_list=container_list,image_id=image.id) else "0",
@@ -241,7 +245,7 @@ class DockerClient:
                 'tags': tags,
                 'size': i_attrs['Size'],
                 'created': i_attrs['Created'],
-                'work_dir': i_attrs['GraphDriver']['Data']['WorkDir'],
+                'work_dir': work_dir,
                 'hostname': i_attrs['Config']['Hostname']
             }
             if search:
@@ -298,7 +302,8 @@ class DockerClient:
         page_number = int(cont.get('page',1))
         limit = int(cont.get('limit',10))
         data_list = []
-        system_networks = ['none', 'bridge', 'host','ruyi-network']
+        # system_networks = ['none', 'bridge', 'host','ruyi-network']
+        system_networks = dk_network.main(client=None).system_networks
         for dl in networklist:
             c_attrs = dl.attrs
             c_name = str(c_attrs["Name"])

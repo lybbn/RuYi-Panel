@@ -495,7 +495,9 @@ class RYFileUploadView(CustomAPIView):
                             final_destination.write(part_file.read())
                         os.remove(f'{path}/{filechunk_name}.part{i}')  # 删除临时分片文件
                 if is_backup_database_path:
-                    RuyiBackup.objects.create(type=1,name=file.name,filename=os.path.abspath(save_path),size=file.size)
+                    filename = f'{path}/{filechunk_name}'
+                    filesize = os.path.getsize(filename)
+                    RuyiBackup.objects.create(type=1,name=filechunk_name,filename=os.path.abspath(filename),size=filesize)
                 RuyiAddOpLog(request,msg="【分片上传文件】【分片%s】%s"%(chunkIndex,f'{path}/{filechunk_name}'),module="filemg")
                 return DetailResponse(data=None,msg="上传成功")
             RuyiAddOpLog(request,msg="【分片上传文件】【分片%s】%s"%(chunkIndex,f'{path}/{filechunk_name}'),module="filemg")

@@ -83,6 +83,11 @@
 			"name": "docker",
 			"installed": 0,
 			"versions": [{
+				"id": 2,
+				"version": "28.0",
+				"c_version": "28.0.2",
+				"url":""
+			},{
 				"id": 1,
 				"version": "27.5",
 				"c_version": "27.5.1",
@@ -205,17 +210,17 @@
 			"title": "Nginx",
 			"name": "nginx",
 			"installed": 0,
-			"versions": [{
+			"versions": [ {
+				"id": 2,
+				"version": "openresty",
+				"c_version": "1.27.1.1",
+				"url": "https://openresty.org/download/openresty-1.27.1.1-win64.zip"
+			},{
 				"id": 1,
 				"version": "1.27",
 				"c_version": "1.27.3",
-				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.zip"
-			}, {
-				"id": 2,
-				"version": "openresty",
-				"c_version": "1.25.3.2",
 				"hide":true,
-				"url": "https://openresty.org/download/openresty-1.25.3.2-win64.zip"
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.zip"
 			}],
 			"author": "nginx.org",
 			"home": "https://www.nginx.org",
@@ -278,22 +283,27 @@
 			"id": 4,
 			"sort": 4,
 			"icon": "docker.png",
-			"title": "Docker",
+			"title": "DockerDesktop",
 			"name": "docker",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "27.5",
-				"c_version": "27.5.1",
-				"url":"https://mirrors.aliyun.com/docker-ce/win/static/stable/x86_64/docker-27.5.1.zip"
+				"version": "latest",
+				"c_version": "Amd64.latest",
+				"url":"https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
+			},{
+				"id": 2,
+				"version": "4.39",
+				"c_version": "4.39.0",
+				"url":"https://github.com/lybbn/RuYi-Panel-SoftWare/releases/download/v0.0.1/Docker_Desktop_Installer.exe"
 			}],
 			"author": "docker.com",
-			"home": "https://www.docker.com",
+			"home": "https://docs.docker.com/desktop/release-notes/",
 			"type": 4,
 			"typename": "运行环境",
 			"desc": "Docker是一个开源的平台，是基于操作系统层级的虚拟化技术",
 			"price": 0,
-			"show": 0
+			"show": 1
 		},{
 			"id": 13,
 			"sort": 13,
@@ -358,14 +368,14 @@
 			"id": 90,
 			"sort": 90,
 			"icon": "go.png",
-			"title": "Go1.23.6",
+			"title": "Go1.23.7",
 			"name": "go",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "1.23.6",
-				"c_version": "1.23.6",
-				"url": "https://mirrors.aliyun.com/golang/go1.23.6.windows-amd64.zip"
+				"version": "1.23.7",
+				"c_version": "1.23.7",
+				"url": "https://mirrors.aliyun.com/golang/go1.23.7.windows-amd64.zip"
 			}],
 			"author": "golang.google.cn",
 			"home": "https://golang.google.cn/",

@@ -26,7 +26,7 @@ import tarfile
 import psutil
 import configparser
 from utils.common import DeleteFile,GetRandomSet,ReadFile,GetBackupPath,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,generate_random_string
-from utils.security.files import download_url_file,get_file_name_from_url
+from utils.security.files import download_url_file,get_file_name_from_url,download_url_file_wget
 from pathlib import Path
 import subprocess
 import importlib
@@ -120,7 +120,7 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
         save_path = os.path.join(save_directory, filename)
         if not type == 2:
             #开始下载
-            ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
+            ok,msg = download_url_file_wget(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
             if not ok:
                 WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
                 raise ValueError(msg)
@@ -135,6 +135,19 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
             # 重命名源文件夹为目标文件夹
             os.rename(src_folder, install_directory)
             WriteFile(log_path,"解压成功\n",mode='a',write=is_write_log)
+            #安装依赖
+            mysqlversion = version['c_version']
+            vc_version = "2013"
+            if "5.7" in mysqlversion:
+                vc_version = "2013"
+            else:
+                vc_version = "2022"
+            WriteFile(log_path,f"安装依赖环境Visual C++ {vc_version}...\n",mode='a',write=is_write_log)
+            from utils.server.windows import install_vc
+            isok = install_vc(version=vc_version)
+            if not isok:
+                msg=f"Visual C++ {vc_version}环境安装失败，请手动安装！！！"
+                raise ValueError(msg)
             # 新建版本文件
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
@@ -171,8 +184,15 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
             
         init_res = Initialize_Mysql(is_windows=is_windows)
         if not init_res:
-            raise ValueError("[error]初始化mysql错误!!!")
+            raise Exception("[error]初始化mysql错误!!!")
         time.sleep(0.1)
+        if is_windows:
+            #安装服务
+            WriteFile(log_path,"正在安装mysql为系统服务...\n",mode='a',write=is_write_log)
+            mysqld_path = soft_paths['windows_abspath_mysqld_path']
+            config_file_path = soft_paths['windows_abspath_conf_path']
+            command = f'{mysqld_path} --install MySQL --defaults-file="{config_file_path}"'
+            subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
         WriteFile(log_path,"正在启动mysql服务...\n",mode='a',write=is_write_log)
         Start_Mysql(is_windows=is_windows)
         WriteFile(log_path,"mysql启动成功\n",mode='a',write=is_write_log)
@@ -205,6 +225,11 @@ def Uninstall_Mysql(is_windows=True):
     data_path = soft_paths['data_abspath_path']
     if is_windows:
         if os.path.exists(install_path):
+            try:
+                mysqldexe = soft_paths['windows_abspath_mysqld_path']
+                subprocess.run(f"{mysqldexe} --remove MySQL",cwd=install_path,shell=True,check=True,capture_output=True,text=True)
+            except:
+                pass
             Stop_Mysql(is_windows=is_windows)
             time.sleep(0.1)
             system.ForceRemoveDir(install_path)
@@ -229,7 +254,14 @@ def is_mysql_running(is_windows=True,simple_check=False):
         return False
     if not is_service_running(port):
         return False
-    soft_name ='mysqld.exe' if is_windows else "mysqld"
+    if is_windows:
+        try:
+            # 查询服务状态
+            result = subprocess.run(f'sc query MySQL | find "STATE"',shell=True,check=True,capture_output=True,text=True)
+            return "RUNNING" in result.stdout
+        except subprocess.CalledProcessError:
+            return False
+    soft_name ='mysqld' if is_windows else "mysqld"
     info_list = GetProcessNameInfo(soft_name,{},is_windows=is_windows)
     if len(info_list)>0:
         return True
@@ -249,7 +281,8 @@ def Start_Mysql(is_windows=True):
         if os.path.exists(exe_path):
             try:
                 if not is_mysql_running(is_windows=True):
-                    command = f'"{exe_path}" --defaults-file="{conf_path}"'
+                    # command = f'"{exe_path}" --defaults-file="{conf_path}"'
+                    command = f'sc start MySQL'
                     subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
                 else:
                     r_status = True
@@ -289,11 +322,18 @@ def Stop_Mysql(is_windows=True):
     """
     soft_name ='mysqld.exe' if is_windows else "mysqld"
     if is_windows:
+        soft_paths = get_mysql_path_info()
         if is_mysql_running(is_windows=is_windows):
-            import signal
-            info_list = GetProcessNameInfo(soft_name,{},is_windows=is_windows)
-            for i in info_list:
-                os.kill(int(i['ProcessId']), signal.SIGTERM)
+            # import signal
+            # info_list = GetProcessNameInfo(soft_name,{},is_windows=is_windows)
+            # for i in info_list:
+            #     os.kill(int(i['ProcessId']), signal.SIGTERM)
+            # return True
+            command = f'sc stop MySQL'
+            subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
+            time.sleep(1)
+            if is_mysql_running(is_windows=True):
+                return False
             return True
     else:
         if is_mysql_running(is_windows=is_windows):
@@ -971,7 +1011,7 @@ innodb_flush_log_at_trx_commit = 1
 innodb_io_capacity = 200
 {"query_cache_size = " + str(query_cache_size) + "M\n" if not is_version_8_or_higher else ""}
 {"query_cache_type = OFF\n" if not is_version_8_or_higher else ""}
-{"skip-mysqlx\n" if not is_version_8_or_higher else ""}
+{"skip-mysqlx\n" if is_version_8_or_higher else ""}
 tmp_table_size = {tmp_table_size}M
 max_heap_table_size = 64M
 
@@ -1007,7 +1047,7 @@ myisam_sort_buffer_size = 4M
 thread_cache_size = {thread_cache_size}
 {"query_cache_size = " + str(query_cache_size) + "M\n" if not is_version_8_or_higher else ""}
 {"query_cache_type = OFF\n" if not is_version_8_or_higher else ""}
-{"skip-mysqlx\n" if not is_version_8_or_higher else ""}
+{"skip-mysqlx\n" if is_version_8_or_higher else ""}
 tmp_table_size = {tmp_table_size}M
 sql-mode = {sqlmode}
 

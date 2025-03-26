@@ -17,7 +17,7 @@
 import os
 import hashlib
 import requests
-from utils.common import ProgramRootPath,GetTmpPath,GetLogsPath,GetPanelPath,GetInstallPath,DeleteDir,DeleteFile,RunCommand,current_os,WriteFile
+from utils.common import ProgramRootPath,GetTmpPath,GetLogsPath,GetPanelPath,GetInstallPath,DeleteDir,DeleteFile,RunCommand,current_os,WriteFile,GetPythonPath
 import zipfile
 import time
 import shutil
@@ -141,7 +141,7 @@ def last_update_op():
     @name 最终更新操作
     """
     if current_os == "windows":
-        pass
+        RunCommand(f'{ruyi_panel_path}/utils/scripts/update_init.bat {ruyi_panel_path} {GetPythonPath()}')
     else:
         RunCommand(f'bash {ruyi_panel_path}/utils/scripts/update_init.sh')
 

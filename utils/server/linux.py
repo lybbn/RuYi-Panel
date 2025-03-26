@@ -1313,4 +1313,6 @@ def AddBinToPath(bin_dir):
         return True
     else:
         raise Exception("无/etc/profile文件")
+
+
     

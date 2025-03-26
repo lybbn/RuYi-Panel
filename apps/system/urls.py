@@ -22,7 +22,7 @@ from apps.system.views.go_manage import RYGoManageView,RYGoProjectManageView
 from apps.system.views.supervisor_manage import RYSupervisorManageView
 from apps.system.views.sysLicenseView import RYSysImportLicenseView,RYSysUnBindLicenseView
 from apps.system.views.docker_manage import RYDockerManageView
-from apps.system.views.sys_process import RYSysProcessListView,RYSysProcessOperateView
+from apps.system.views.sys_process import RYSysProcessListView,RYSysProcessOperateView,RYSysProcessDetailView
 from apps.system.views.sys_network import RYSysNetworkListView,RYSysNetworkOperateView
 
 system_url = routers.SimpleRouter()
@@ -58,6 +58,7 @@ urlpatterns = [
     path('sysFirewall/', RYSysFirewallView.as_view(), name='系统防火墙管理'),
     path('sysProcessList/', RYSysProcessListView.as_view(), name='系统进程管理列表'),
     path('sysProcessMg/', RYSysProcessOperateView.as_view(), name='系统进程管理'),
+    path('sysProcessDetail/', RYSysProcessDetailView.as_view(), name='进程详情'),
     path('sysNetworkList/', RYSysNetworkListView.as_view(), name='系统网络连接列表'),
     path('sysNetworkMg/', RYSysNetworkOperateView.as_view(), name='系统网络连接管理'),
     path('pythonmg/', RYPythonManageView.as_view(), name='python项目管理'),

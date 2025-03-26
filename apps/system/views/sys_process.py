@@ -126,6 +126,22 @@ class RYSysProcessListView(CustomAPIView):
         process_monitor = ProcessMonitor()
         data = process_monitor.get_processes_list(pid_filter=pid_filter,name_filter=name_filter,user_filter=user_filter)
         return DetailResponse(data=data)
+    
+class RYSysProcessDetailView(CustomAPIView):
+    """
+    get:
+    系统进程详情
+    """
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [JWTAuthentication]
+    
+    def get(self,request):
+        reqData = get_parameter_dic(request)
+        pid = reqData.get("pid",None)
+        if not pid and str(pid) != '0':return ErrorResponse(msg="缺少参数")
+        process_monitor = ProcessMonitor()
+        data = process_monitor.get_pid_detail_info(int(pid))
+        return DetailResponse(data=data)
 
 class RYSysProcessOperateView(CustomAPIView):
     """

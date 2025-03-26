@@ -68,7 +68,7 @@ def get_all_network_info(pid_filter=None,name_filter=None,port_filter=None):
             continue
         if name_filter and name_filter.lower() not in pname.lower():
             continue
-        if port_filter and str(port_filter) in [str(l_port),str(r_port)]:
+        if port_filter and str(port_filter) not in [str(l_port),str(r_port)]:
             continue
         
         data.append({

@@ -22,8 +22,8 @@ import os,re
 import time
 import requests
 import psutil
-from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo
-from utils.security.files import download_url_file,get_file_name_from_url
+from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,GetRandomSet
+from utils.security.files import download_url_file,get_file_name_from_url,get_github_quick_downloadurl
 from pathlib import Path
 from django.conf import settings
 import subprocess
@@ -38,11 +38,13 @@ def get_nginx_path_info():
     install_path = root_path+'/nginx'
     log_path = install_path+'/logs'
     return {
+        'name':"nginx",
         'root_abspath_path': root_abspath_path,
         'root_path': root_path,
         'install_abspath_path':install_abspath_path,
         'install_path':install_path,
         'windows_abspath_exe_path':os.path.join(install_abspath_path,'nginx.exe'),
+        'w_nginx_server':os.path.join(install_abspath_path,'nginx_server.exe'),
         'abspath_conf_path':os.path.join(install_abspath_path,'conf','nginx.conf'),
         'abspath_tmpconf_path':os.path.join(install_abspath_path,'conf','nginx_tmp.conf'),
         'linux_exe_path':os.path.join(install_abspath_path,"sbin",'nginx'),
@@ -139,6 +141,19 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
         # 删除下载的文件
         DeleteFile(save_path,empty_tips=False)
         WriteFile(log_path,"已删除下载的临时安装文件，并回调\n",mode='a',write=is_write_log)
+        if is_windows:
+            #安装服务
+            WriteFile(log_path,"正在安装nginx为系统服务...\n",mode='a',write=is_write_log)
+            isok,msg = SET_WINDOWS_SERVICE(log_path=log_path)
+            if not isok:
+                raise Exception(msg)
+            from utils.server.windows import install_as_service
+            service_name = soft_paths['name']
+            soft_exe_path = soft_paths['w_nginx_server']
+            soft_args = ''
+            isok, msg = install_as_service(name=service_name,display_name=service_name,path=soft_exe_path,args=soft_args,description="Nginx web service",start_type=2)
+            if not isok:WriteFile(log_path,f"安装nginx系统服务失败：{msg}\n",mode='a',write=is_write_log)
+
         WriteFile(log_path,"安装成功，安装目录：%s\n"%install_directory,mode='a',write=is_write_log)
         version['install_path'] = install_directory
         nginx_install_call_back(version=version,call_back=call_back,ok=True)
@@ -163,6 +178,8 @@ def Uninstall_Nginx(is_windows=True):
         if os.path.exists(install_path):
             Stop_Nginx(is_windows=is_windows)
             time.sleep(0.1)
+            from utils.server.windows import uninstall_service
+            uninstall_service("nginx")
             system.ForceRemoveDir(install_path)
     else:
         try:
@@ -177,11 +194,14 @@ def is_nginx_running(is_windows=True,simple_check=False):
             return True
         return False
     soft_paths = get_nginx_path_info()
-    soft_name ='nginx.exe' if is_windows else "nginx"
+    soft_name ='nginx' if is_windows else "nginx"
     if is_windows:
         log_path = soft_paths['log_path']
         pid_file = log_path+'/nginx.pid'
         """检查指定的 PID 文件是否对应一个正在运行的 Nginx 进程。"""
+        from utils.server.windows import get_service_status
+        if get_service_status("nginx") == 1:
+            return True
         if not os.path.isfile(pid_file):
             return False
         try:
@@ -248,8 +268,14 @@ def Start_Nginx(is_windows=True):
             try:
                 if not is_nginx_running(is_windows=True):
                     # 启动 Nginx
-                    code = RunCommandReturnCode("start nginx.exe",cwd=soft_paths['install_path'],env_path=soft_paths['install_path'])
-                    return True if code == 0 else False
+                    # code = RunCommandReturnCode("start nginx.exe",cwd=soft_paths['install_path'],env_path=soft_paths['install_path'])
+                    # return True if code == 0 else False
+                    from utils.server.windows import set_service_status
+                    isok,msg = set_service_status("nginx","start")
+                    if not isok:raise Exception(msg)
+                    time.sleep(1)
+                    if not is_nginx_running(is_windows=True):
+                        return False
                 return True
             except Exception as e:
                 raise ValueError(f"启动Nginx时发生错误: {e}")
@@ -285,10 +311,16 @@ def Stop_Nginx(is_windows=True):
         exe_path = soft_paths['windows_abspath_exe_path']
         try:
             if is_nginx_running(is_windows=True):
-                code = RunCommandReturnCode([exe_path,"-s", "stop"],cwd=soft_paths['install_path'])
-                return True if code == 0 else False
+                # code = RunCommandReturnCode([exe_path,"-s", "stop"],cwd=soft_paths['install_path'])
+                # return True if code == 0 else False
+                from utils.server.windows import set_service_status
+                isok,msg = set_service_status("nginx","stop")
+                if not isok:raise Exception(msg)
+                time.sleep(1)
+                if is_nginx_running(is_windows=True):
+                    return False
             return True
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             raise ValueError(f"停止Nginx时发生错误: {e}")
     else:
         if is_nginx_running(is_windows=is_windows):
@@ -525,12 +557,18 @@ def RY_GET_NGINX_CONFIG(is_windows=True):
     vhost_path = settings.RUYI_VHOST_PATH.replace("\\", "/")
     vhost_nginx_path = vhost_path+'/nginx/*.conf'
     proxy_cache_path = soft_paths['install_path']+'/temp/proxy_cache_dir'
+    if is_windows:
+        if not os.path.exists(proxy_cache_path):
+            os.makedirs(proxy_cache_path)
     
     lua_package_path=""
     if not is_windows:
         lua_package_path='lua_package_path "/ruyi/server/nginx/lib/lua/?.lua;;";'
     
-    conf = f"""user www www;
+    user_www ="user www www;"
+    if is_windows:user_www=""
+
+    conf = f"""{user_www}
 worker_processes  auto;
 pid        {pid_path};
 events {{
@@ -615,3 +653,48 @@ def RY_GET_NGINX_INDEX_HTML(is_windows=True):
 </html>
     """
     return html
+
+def SET_WINDOWS_SERVICE(log_path=None,is_write_log=True):
+    soft_paths = get_nginx_path_info()
+    install_path = soft_paths['install_path']
+    download_url="https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-x64.exe"
+    filename = get_file_name_from_url(download_url)
+    save_path = os.path.join(install_path, filename)
+    nginx_server = soft_paths['w_nginx_server']
+    
+    #开始下载
+    ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
+    if not ok:
+        if "github.com" in download_url:
+            WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
+            WriteFile(log_path,"正在尝试github文件加速下载...\n",mode='a',write=is_write_log)
+            new_download_url = get_github_quick_downloadurl(download_url)
+            if not new_download_url:
+                return False,"加速下载失败！！！"
+            ok,msg = download_url_file(url=new_download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
+            if not ok:
+                return False,"加速下载文件失败！！！"
+        else:
+            return False,"[error]【%s】下载失败，原因：%s"%(filename,msg)
+    os.rename(save_path, nginx_server)
+    SET_NGINX_WINDOWS_SERVICE_CONFIG()
+    return True,None
+
+def SET_NGINX_WINDOWS_SERVICE_CONFIG():
+    soft_paths = get_nginx_path_info()
+    install_path = soft_paths['install_path']
+    log_path = soft_paths['log_path']
+    exe_path = soft_paths['windows_abspath_exe_path']
+    content = f"""
+<service>
+    <id>nginx</id>
+    <name>nginx</name>
+    <description>nginx</description>
+    <logpath>{log_path}</logpath>
+    <logmode>roll</logmode>
+    <depend></depend>
+
+    <executable>{exe_path}</executable>
+    <stopexecutable>{exe_path} -s stop</stopexecutable>
+</service>"""
+    WriteFile(install_path+"/nginx_server.xml",content)

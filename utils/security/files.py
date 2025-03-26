@@ -15,6 +15,7 @@
 # ------------------------------
 
 import re
+import wget
 import os
 import shutil
 import datetime
@@ -25,6 +26,8 @@ from utils.server.system import system
 from utils.security.no_delete_list import check_no_delete,check_in_black_list
 from utils.common import ast_convert,GetTmpPath,WriteFile,RunCommand,current_os
 from itertools import chain
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def get_file_name_from_url(url):
     """
@@ -33,6 +36,33 @@ def get_file_name_from_url(url):
     """
     file_name = os.path.basename(url)
     return file_name
+
+def select_github_mirror():
+    """
+    选择可用的 github 镜像源
+    返回第一个可用的镜像 URL 或 None
+    """
+    MIRROR_GITHUB_LIST = [
+        "https://ghfast.top",
+        "https://github.moeyy.xyz",
+        "https://ghproxy.cfd"
+    ]
+    
+    for mirror in MIRROR_GITHUB_LIST:
+        try:
+            response = requests.get(mirror, timeout=5)
+            if response.status_code == 200:
+                return mirror
+        except requests.RequestException as e:
+            continue
+
+    return None
+
+def get_github_quick_downloadurl(url):
+    baseurl = select_github_mirror()
+    if not baseurl:
+        return None
+    return f"${baseurl}/{url}"
 
 def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8192):
     """
@@ -55,7 +85,15 @@ def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8
                 os.makedirs(save_directory)
 
         buffered_logs = []
-        headers = {}
+        # headers = {}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0 ruyi",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Accept-Encoding":"gzip, deflate, br, zstd",
+            "Sec-Ch-Ua":'"Chromium";v="134", "Not:A-Brand";v="24", "Microsoft Edge";v="134"',
+            "Sec-Ch-Ua-Mobile":"?0"
+        }
         downloaded_size = 0
         if os.path.exists(save_path):
             downloaded_size = os.path.getsize(save_path)
@@ -63,8 +101,7 @@ def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8
         r = requests.get(url, headers=headers, stream=True)
         total_size = int(r.headers.get('content-length', 0))
         if total_size == 0:
-            if log_path:
-                WriteFile(log_path, f"检测到已下载的文件，已跳过\n", mode='a', write=True)
+            WriteFile(log_path, f"检测到已下载的文件，已跳过\n", mode='a', write=True)
             return True,"下载成功"
         with open(save_path, 'ab') as f:
             for chunk in r.iter_content(chunk_size=chunk_size):
@@ -74,7 +111,7 @@ def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8
                         downloaded_size += len(chunk)
                         # 计算进度百分比
                         progress = (downloaded_size / total_size) * 100
-                        if process> 100:process=100
+                        if progress> 100:progress=100
                         logs = f'Downloaded {downloaded_size} of {total_size} bytes ({progress:.2f}%)\n'
                         buffered_logs.append(logs)
                         # 仅当缓存达到一定大小时才写入日志
@@ -83,11 +120,229 @@ def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8
                             buffered_logs.clear()
             # 写入剩余的日志
             if buffered_logs:
-                if log_path:
-                    WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
+                WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
         return True,"下载成功"
     except:
         return False,"网络文件错误"
+
+def download_url_file_wget(url, save_path="", process=False, log_path=None,chunk_size=32768):
+    """
+    @name 下载网络文件wget
+    @save_path 下载本地路径名称（包含文件名），为空则默认存储在tmp中
+    @author lybbn<2024-02-22>
+    @process 是否显示进度
+    @log_path 记录日志路径(包含文件名), process True时有效
+    """
+    try:
+        if not save_path:
+            save_directory = GetTmpPath()
+            if not os.path.exists(save_directory):
+                os.makedirs(save_directory)
+            filename = get_file_name_from_url(url)
+            save_path = os.path.join(save_directory, filename)
+        else:
+            save_directory = os.path.dirname(save_path)
+            if not os.path.exists(save_directory):
+                os.makedirs(save_directory)
+
+        # 如果文件已存在，跳过下载
+        if os.path.exists(save_path):
+            WriteFile(log_path, f"检测到已下载的文件，已跳过\n", mode='a', write=True)
+            return True, "下载成功"
+        buffered_logs = []
+
+        # 使用 wget 下载文件
+        def log_progress(current, total, width=80):
+            if process:
+                progress = (current / total) * 100
+                if progress> 100:progress=100
+
+                logs = f'Downloaded {current} of {total} bytes ({progress:.2f}%)\n'
+                buffered_logs.append(logs)
+                # 仅当缓存达到一定大小时才写入日志
+                if len(buffered_logs) >= 10:
+                    WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
+                    buffered_logs.clear()
+
+        # 下载文件
+        wget.download(url, out=save_path, bar=log_progress if process else None)
+
+        # 写入剩余的日志
+        if buffered_logs:
+            WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
+
+        return True, "下载成功"
+    except Exception as e:
+        WriteFile(log_path, f"下载失败: {str(e)}\n", mode='a', write=True)
+        return False, f"网络文件错误: {str(e)}"
+
+def _download_chunk(url, start_byte, end_byte, save_path, chunk_id, max_retries=3, headers=None,process=True, log_path=None, failed_flag=None):
+    """
+    下载文件的指定部分
+    """
+    headers = headers or {}
+    headers['Range'] = f'bytes={start_byte}-{end_byte}'
+    retries = 0
+
+    while retries < max_retries:
+        if failed_flag and failed_flag.is_set():  # 检查是否已失败
+            WriteFile(log_path, f"分块 {chunk_id} 下载已终止\n", mode='a', write=True)
+            return False
+        try:
+            with requests.Session() as session:
+                response = session.get(url, headers=headers, stream=True, timeout=10)
+                response.raise_for_status()
+                chunk_path = f"{save_path}.part{chunk_id}"
+                buffered_logs = []
+                downloaded_size = 0  # 已下载的字节数
+                total_size = end_byte - start_byte + 1  # 当前分块的总大小
+                with open(chunk_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded_size += len(chunk)  # 更新已下载的字节数
+                            # 写入当前分块的下载进度
+                            if process and log_path:
+                                progress = (downloaded_size / total_size) * 100  # 计算下载进度百分比
+                                if progress> 100:progress=100
+                                logs = f'分块 {chunk_id} 下载进度: {progress:.2f}%\n'
+                                buffered_logs.append(logs)
+                                # 仅当缓存达到一定大小时才写入日志
+                                if len(buffered_logs) >= 10:
+                                    WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
+                                    buffered_logs.clear()
+                                WriteFile(log_path, f"", mode='a', write=True)
+                            if failed_flag and failed_flag.is_set():  # 检查是否已失败
+                                WriteFile(log_path, f"分块 {chunk_id} 下载已终止\n", mode='a', write=True)
+                                return False
+                    # 写入剩余的日志
+                    if buffered_logs:
+                        WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
+                WriteFile(log_path, f"分块 {chunk_id} 下载成功\n", mode='a', write=True)
+                # 记录进度
+                if process and log_path:
+                    downloaded_size = end_byte - start_byte + 1
+                    with open(log_path, 'a') as log_file:
+                        WriteFile(log_path, f"分块 {chunk_id} 下载完成，大小: {downloaded_size} 字节\n", mode='a', write=True)
+                return True
+        except Exception as e:
+            retries += 1
+            WriteFile(log_path, f"下载分块 {chunk_id} 失败，重试 {retries}/{max_retries}: {e}\n", mode='a', write=True)
+    WriteFile(log_path, f"下载分块 {chunk_id} 失败，已达到最大重试次数\n", mode='a', write=True)
+    if failed_flag:
+        failed_flag.set()  # 设置失败标志
+    return False
+
+def _merge_chunks(save_path, num_chunks,log_path=None):
+    """
+    合并所有下载的分块
+    """
+    try:
+        with open(save_path, 'wb') as final_file:
+            for i in range(num_chunks):
+                chunk_path = f"{save_path}.part{i}"
+                with open(chunk_path, 'rb') as chunk_file:
+                    final_file.write(chunk_file.read())
+                os.remove(chunk_path)  # 删除临时分块文件
+                WriteFile(log_path, f"分块 {i} 已合并\n", mode='a', write=True)
+        WriteFile(log_path, f"所有分块已合并\n", mode='a', write=True)
+        return True
+    except Exception as e:
+        WriteFile(log_path, f"合并分块失败: {e}\n", mode='a', write=True)
+        return False
+
+def _cleanup_temp_files(save_path, num_chunks, log_path=None):
+    """
+    清理临时分块文件
+    """
+    for i in range(num_chunks):
+        chunk_file = f"{save_path}.part{i}"
+        if os.path.exists(chunk_file):
+            try:
+                os.remove(chunk_file)
+                WriteFile(log_path, f"已清理临时文件: {chunk_file}\n", mode='a', write=True)
+            except Exception as e:
+                WriteFile(log_path, f"清理临时文件 {chunk_file} 失败: {e}\n", mode='a', write=True)
+
+def download_url_file_m(url, save_path="", process=False, log_path=None, num_threads=4, max_retries=3):
+    """
+    @name 多线程下载网络文件
+    @param url: 下载链接
+    @param save_path: 本地保存路径（包含文件名）
+    @param process: 是否显示进度
+    @param log_path: 日志文件路径
+    @param num_threads: 下载线程数
+    @param max_retries: 最大重试次数
+    @author lybbn<2025-03-22>
+    """
+    try:
+        if not save_path:
+            save_directory = GetTmpPath()
+            if not os.path.exists(save_directory):
+                os.makedirs(save_directory)
+            filename = get_file_name_from_url(url)
+            save_path = os.path.join(save_directory, filename)
+        else:
+            save_directory = os.path.dirname(save_path)
+            if not os.path.exists(save_directory):
+                os.makedirs(save_directory)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0 ruyi",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+            "Accept-Encoding":"gzip, deflate, br, zstd",
+            "Sec-Ch-Ua":'"Chromium";v="134", "Not:A-Brand";v="24", "Microsoft Edge";v="134"',
+            "Sec-Ch-Ua-Mobile":"?0"
+        }
+
+        # 获取文件总大小
+        response = requests.head(url,headers=headers)
+        total_size = int(response.headers.get('content-length', 0))
+        if total_size == 0:
+            WriteFile(log_path, "无法获取文件大小，无法进行多线程下载\n", mode='a', write=True)
+            return False, "无法获取文件大小"
+        
+        if os.path.exists(save_path):
+            locla_total_size = os.path.getsize(save_path)
+            if total_size == locla_total_size:
+                WriteFile(log_path, f"检测到已下载的历史文件，已跳过下载，使用本地文件\n", mode='a', write=True)
+                return True,"下载成功"
+
+        # 计算每个线程下载的字节范围
+        chunk_size = total_size // num_threads
+        ranges = [(i * chunk_size, (i + 1) * chunk_size - 1) for i in range(num_threads)]
+        ranges[-1] = (ranges[-1][0], total_size - 1)  # 最后一个线程下载剩余部分
+
+        # 共享状态：用于标记是否下载失败
+        failed_flag = threading.Event()
+
+        # 使用线程池下载
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = []
+            for i, (start_byte, end_byte) in enumerate(ranges):
+                futures.append(executor.submit(_download_chunk, url, start_byte, end_byte, save_path, i, max_retries,headers,process,log_path, failed_flag))
+
+            # 检查所有分块是否下载成功
+            for future in as_completed(futures):
+                if not future.result():
+                    WriteFile(log_path, "部分分块下载失败，终止下载\n", mode='a', write=True)
+                    failed_flag.set()  # 设置失败标志
+                    executor.shutdown(wait=False)  # 立即关闭线程池
+                    _cleanup_temp_files(save_path, num_threads,log_path=log_path)  # 清理临时文件
+                    return False, "部分分块下载失败"
+
+        # 合并分块
+        if not _merge_chunks(save_path, num_threads,log_path=log_path):
+            _cleanup_temp_files(save_path, num_threads,log_path=log_path)  # 清理临时文件
+            return False, "合并分块失败"
+
+        WriteFile(log_path, "下载成功\n", mode='a', write=True)
+        return True, "下载成功"
+    except Exception as e:
+        WriteFile(log_path, f"下载失败: {e}\n", mode='a', write=True)
+        _cleanup_temp_files(save_path, num_threads,log_path=log_path)  # 清理临时文件
+        return False, f"下载失败: {e}"
 
 def get_file_extension(file_path):
     """

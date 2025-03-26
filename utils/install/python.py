@@ -111,7 +111,7 @@ def Install_Python(type=2,version={},is_windows=True,call_back=None):
             if not os.path.exists(install_directory):
                 os.makedirs(install_directory)
             WriteFile(log_path,"安装中，请耐心等待...\n",mode='a',write=is_write_log)
-            subprocess.run([save_path, "/quiet",f"TargetDir={os.path.normpath(install_directory)}", "InstallAllUsers=1", "PrependPath=1","Include_test=0"],creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.run([save_path, "/quiet",f"TargetDir={os.path.normpath(install_directory)}", "InstallAllUsers=0", "PrependPath=0","Include_test=0"],creationflags=subprocess.CREATE_NO_WINDOW)
             WriteFile(log_path,"正在检测安装结果...\n",mode='a',write=is_write_log)
             time.sleep(0.5)
             install_version = check_python_version(soft_paths['windows_abspath_python_path'])

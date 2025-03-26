@@ -18,13 +18,23 @@
 # Docker 网络类
 # ------------------------------
 
+from utils.common import current_os
 import docker.types
 
 class main:
+    is_windows=True
     client=None#容器连接客户端
     driver_list=["bridge","macvlan","ipvlan","overlay"] #还有none,host
-    system_networks = {'none', 'bridge', 'host','ruyi-network'}
+    system_networks = {}
+    linux_system_networks = {'none', 'bridge', 'host','ruyi-network'}
+    # windows_system_networks = {'none', 'nat', 'Default Switch','ruyi-network'}
+    windows_system_networks = {'none', 'bridge', 'host','ruyi-network'}
     def __init__(self,client=None):
+        self.is_windows = True if current_os == 'windows' else False
+        if self.is_windows:
+            self.system_networks = self.windows_system_networks
+        else:
+            self.system_networks = self.linux_system_networks
         self.client = client
         
     def format_to_dict(self,input_str):

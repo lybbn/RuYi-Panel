@@ -16,6 +16,8 @@
 # ws通道
 # ------------------------------
 
+import os
+import time
 import json
 import asyncio
 import subprocess
@@ -24,6 +26,7 @@ from utils.ruyiclass.dockerClass import DockerClient
 from utils.ruyiclass.dockerInclude.ry_dk_square import main as dk_square
 from utils.common import getTimestamp13
 from apps.syslogs.logutil import asyncRuyiAddOpLog
+from utils.server.system import system
 
 class WSTaskConsumer(AsyncWebsocketConsumer):
     ruyi_ws_task_error_flag="ruyi_wstask_error"
@@ -78,6 +81,8 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
             elif action == 'runcmd':
                 cmd=data.get('cmd','')
                 self.rum_cmd_task = asyncio.create_task(self.run_command(cmd))
+            elif action == 'get_tail_file':
+                self.rum_cmd_task = asyncio.create_task(self.get_tail_file(data))
             elif action == 'get_compose_log':
                 self.get_compose_log_task = asyncio.create_task(self.get_compose_log(data))
             elif action == 'heartBeat':
@@ -130,6 +135,48 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
             await dksquare.get_ws_logs(cont)
         except Exception as e:
             await self.send_message(action='error',message=str(e))
+
+    async def get_tail_file(self,cont):
+        success_flag = "ruyi_successful_flag"
+        failed_flag = "ruyi_failed_flag"
+        filepath = cont.get("filepath","")
+        if not filepath:
+            await self.send_message(action='error', message="缺少文件路径")
+            return
+        lines = cont.get("lines",100)
+        realtime = cont.get("realtime",False)
+        timeout = 60*5
+        start_time = time.time()
+        if not realtime:
+            data = system.GetFileLastNumsLines(filepath,lines)
+            await self.send_message(message=data)
+        try:
+            with open(filepath, 'r', encoding='utf-8') as file:
+                # 移动到文件末尾
+                file.seek(0, os.SEEK_END)
+
+                while True:
+                    current_time = time.time()
+                    # 如果超时，则退出
+                    if current_time - start_time >= timeout:
+                        break
+                    # 读取新增内容
+                    line = file.readline()
+                    if line:
+                        await self.send_message(message=line.strip())
+
+                        # 检查是否包含停止标志
+                        if success_flag in line or failed_flag in line:
+                            await self.close()  # 关闭 WebSocket 连接
+                            break
+                    else:
+                        await asyncio.sleep(0.05)
+        except FileNotFoundError:
+            await self.send_message(action='error', message=f"文件 {filepath} 不存在")
+            await self.close()
+        except Exception as e:
+            await self.send_message(action='error', message=f"{e}")
+            await self.close()
             
     async def run_command(self, cmd):
         WHITE_CMDS = ["docker", "tail", "cat"]

@@ -21,8 +21,8 @@
 import os
 import re
 import time
-from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo
-from utils.security.files import download_url_file,get_file_name_from_url
+from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,GetRandomSet
+from utils.security.files import download_url_file,get_file_name_from_url,get_github_quick_downloadurl
 from pathlib import Path
 import subprocess
 import importlib
@@ -38,6 +38,7 @@ def get_redis_path_info():
     install_path = root_path+'/redis'
     log_path = install_path
     return {
+        'name':'redis',
         'root_abspath_path': root_abspath_path,
         'root_path': root_path,
         'install_abspath_path':install_abspath_path,
@@ -94,8 +95,18 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
         #开始下载
         ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
         if not ok:
-            WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
-            raise ValueError(msg)
+            if "github.com" in download_url:
+                WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
+                WriteFile(log_path,"正在尝试github文件加速下载...\n",mode='a',write=is_write_log)
+                new_download_url = get_github_quick_downloadurl(download_url)
+                if not new_download_url:
+                    raise ValueError("加速下载失败！！！")
+                ok,msg = download_url_file(url=new_download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
+                if not ok:
+                    raise ValueError("加速下载文件失败！！！")
+            else:
+                msg = "[error]【%s】下载失败，原因：%s"%(filename,msg)
+                raise ValueError(msg)
         if is_windows:
             WriteFile(log_path,"【%s】下载完成\n"%filename,mode='a',write=is_write_log)
             src_folder = os.path.join(install_base_directory,Path(filename).stem)
@@ -132,7 +143,21 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
             WriteFile(version_file,version['c_version'])
         
         RY_SET_DEFAULT_REDIS_CONFIG(is_windows=is_windows)
-        
+        if is_windows:
+            #安装服务
+            WriteFile(log_path,"正在安装redis为系统服务...\n",mode='a',write=is_write_log)
+            from utils.server.windows import install_as_service,create_service_account
+            sys_username = "redis"
+            sys_password = GetRandomSet(32)
+            isok, msg = create_service_account(username=sys_username,password=sys_password,description="Account for Redis service",allow_service_logon=True)
+            if not isok:raise ValueError(msg)
+            service_name = soft_paths['name']
+            soft_exe_path = soft_paths['windows_abspath_exe_path']
+            conf_path = soft_paths['abspath_conf_path']
+            soft_args = f'--service-run {conf_path} --loglevel verbose'
+            isok, msg = install_as_service(name=service_name,display_name=service_name,path=soft_exe_path,args=soft_args,description="Redis key-value store service",username=sys_username,password=sys_password,start_type=2)
+            if not isok:WriteFile(log_path,f"安装redis系统服务失败：{msg}\n",mode='a',write=is_write_log)
+
         # 删除下载的文件
         DeleteFile(save_path,empty_tips=False)
         WriteFile(log_path,"已删除下载的临时安装文件，并回调\n",mode='a',write=is_write_log)
@@ -160,6 +185,8 @@ def Uninstall_Redis(is_windows=True):
         if os.path.exists(install_path):
             Stop_Redis(is_windows=is_windows)
             time.sleep(0.1)
+            from utils.server.windows import uninstall_service
+            uninstall_service("redis")
             system.ForceRemoveDir(install_path)
     else:
         try:
@@ -181,7 +208,13 @@ def is_redis_running(is_windows=True,simple_check=False):
         return False
     if not is_service_running(port):
         return False
-    soft_name ='redis-server.exe' if is_windows else "redis-server"
+    if is_windows:
+        from utils.server.windows import get_service_status
+        if get_service_status("redis") == 1:
+            return True
+        else:
+            return False
+    soft_name ='redis-server' if is_windows else "redis-server"
     # if is_windows:
     #     result = subprocess.run([soft_paths['windows_abspath_cli_exe_path'], 'ping'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     #     return result.stdout.decode().strip() == 'PONG'
@@ -205,7 +238,13 @@ def Start_Redis(is_windows=True):
         if os.path.exists(exe_path):
             try:
                 if not is_redis_running(is_windows=True):
-                    subprocess.Popen([exe_path, conf_path],cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
+                    #subprocess.Popen([exe_path, conf_path],cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
+                    from utils.server.windows import set_service_status
+                    isok,msg = set_service_status("redis","start")
+                    if not isok:raise Exception(msg)
+                    time.sleep(1)
+                    if not is_redis_running(is_windows=True):
+                        return False
                 else:
                     r_status = True
                 time.sleep(2)

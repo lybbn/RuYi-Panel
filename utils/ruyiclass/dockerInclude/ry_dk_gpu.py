@@ -67,7 +67,8 @@ class GPUMain:
                             return "unknown"
                 return ""
             else:
-                result = subprocess.run(['wmic', 'path', 'win32_videocontroller', 'get', 'name'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                cmd = 'Get-WmiObject Win32_VideoController | Select-Object -ExpandProperty Name'
+                result = subprocess.run(['powershell', '-Command', cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 if result.returncode != 0:
                     return ""
                 line = result.stdout

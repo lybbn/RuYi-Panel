@@ -25,7 +25,7 @@ import docker
 import subprocess
 import asyncio
 from django.conf import settings
-from utils.common import ReadFile,WriteFile,DeleteFile,GetTmpPath,RunCommand,GetDataPath,check_contains_chinese,DeleteDir,current_os,ast_convert,is_service_running,check_is_port,GetBackupPath,GetRandomSet
+from utils.common import ReadFile,WriteFile,DeleteFile,GetTmpPath,RunCommand,GetDataPath,GetInstallPath,DeleteDir,current_os,ast_convert,is_service_running,check_is_port,GetBackupPath,GetRandomSet
 import requests
 import zipfile
 import tarfile
@@ -46,46 +46,97 @@ class main:
     app_tags_file = os.path.join(settings.BASE_DIR,"config", "dkapptags.json")
     dk_app_base_path = GetDataPath().replace("\\", "/")+"/dkapps"
     templates_path = os.path.join(settings.BASE_DIR,"template","dkapps").replace("\\", "/")
-    compose_bin = "/usr/local/bin/docker-compose"
     is_windows = True if current_os == "windows" else False
+    compose_bin = "/usr/local/bin/docker-compose"
     
     def __init__(self):
         if not os.path.exists(self.dk_app_base_path): os.makedirs(self.dk_app_base_path)
-        if not os.path.exists(self.compose_bin):self.compose_bin="/usr/bin/docker-compose"
+        if self.is_windows:
+            self.docker_url="npipe:////./pipe/dockerDesktopLinuxEngine"
+            self.initEnv()
+            self.compose_bin = "docker-compose"
+        else:
+            if not os.path.exists(self.compose_bin):self.compose_bin="/usr/bin/docker-compose"
         try:
             if not os.path.exists(self.apps_file) or not os.path.exists(self.app_tags_file):
                 self.update_dk_apps_and_tags()
         except:
             pass
+    
+    def initEnv(self):
+        """
+        windows 端初始化环境变量
+        """
+        root_path = GetInstallPath()
+        root_abspath_path = os.path.abspath(root_path)
+        install_abspath_path = os.path.join(root_abspath_path,'docker')
+        windows_docker_bin_path = os.path.join(install_abspath_path,'docker','resources','bin')
+        if os.path.exists(windows_docker_bin_path):
+            system.AddBinToPath(windows_docker_bin_path)
         
     def connect(self):
         try:
             # 尝试连接到 Docker 服务
-            # self.client = docker.from_env()
+            # if self.is_windows:
+            #     return docker.from_env()
+            # else:
             return docker.DockerClient(base_url=self.docker_url)
         except:
             return None
             
     def is_docker_running(self):
-        pid = '/var/run/docker.pid'
-        if os.path.exists(pid):
+        if not self.is_windows:
+            pid = '/var/run/docker.pid'
+            if os.path.exists(pid):
+                client = self.connect()
+                if client:return True
+                return False
+            else:
+                return False
+        else:
             client = self.connect()
             if client:return True
             return False
-        else:
+        
+    def check_docker_network_exists(self,network_name):
+        """
+        使用 docker network inspect 检查 Docker 网络中是否存在指定的网络名称。
+        :param network_name: 要检查的网络名称（例如 "ruyi-network"）
+        :return: 如果存在返回 True，否则返回 False
+        """
+        try:
+            # 运行 docker network inspect 命令
+            subprocess.run(
+                ["docker", "network", "inspect", network_name],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            # 如果命令成功，说明网络存在
+            return True
+        except subprocess.CalledProcessError:
+            # 如果命令失败，说明网络不存在
+            return False
+        except Exception as e:
+            print(f"An error occurred: {e}")
             return False
             
     def check_ruyi_network(self):
         """检查ruyi-network网络是否存在"""
-        stdout, stderr = RunCommand("docker network ls | grep ruyi-network")
-        if stderr:
-            if "Cannot connect to the Docker daemon" in stderr:
-                return False,"docker服务未运行，请先安装或启动"
-        if not stdout:
-            stdout, stderr = RunCommand("docker network create ruyi-network")
-            if stderr and "setlocale: LC_ALL: cannot change locale (en_US.UTF-8)" not in stderr:
-                return False, f"创建ruyi-network网络失败： {stderr}"
-            
+        if not self.is_windows:
+            stdout, stderr = RunCommand("docker network ls | grep ruyi-network")
+            if stderr:
+                if "Cannot connect to the Docker daemon" in stderr:
+                    return False,"docker服务未运行，请先安装或启动"
+            if not stdout:
+                stdout, stderr = RunCommand("docker network create ruyi-network")
+                if stderr and "setlocale: LC_ALL: cannot change locale (en_US.UTF-8)" not in stderr:
+                    return False, f"创建ruyi-network网络失败： {stderr}"
+        else:
+            if not self.check_docker_network_exists("ruyi-network"):
+                stdout, stderr = RunCommand("docker network create ruyi-network")
+                if stderr and "setlocale: LC_ALL: cannot change locale (en_US.UTF-8)" not in stderr:
+                    return False, f"创建ruyi-network网络失败： {stderr}"
         return True,"ok"
 
     def paginated_data(self,data=[],page=1,limit=10):
@@ -360,6 +411,26 @@ class main:
             WriteFile(frps_conf_path, frpc_conf_content)
         return True,"ok"
 
+    def replace_in_file(self,file_path, old_str, new_str):
+        """
+        替换文件中的字符串
+        :param file_path: 文件路径
+        :param old_str: 需要替换的字符串
+        :param new_str: 替换后的字符串
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as file:
+                content = file.read()
+            
+            # 替换字符串
+            content = content.replace(old_str, new_str)
+            
+            # 写回文件
+            with open(file_path, 'w', encoding='utf-8') as file:
+                file.write(content)
+        except Exception as e:
+            print(f"Error: {e}")
+
     def generate_compose_config(self,cont={}):
         """
         写项目compose配置
@@ -387,7 +458,10 @@ class main:
         if not os.path.exists(app_env_path):
             shutil.copytree(tp_compose_base_path, app_path, dirs_exist_ok=True)
         
-        RunCommand(f"sed -i 's/RUYI_DKAPP/{name}/g' {app_compose_path}")
+        if not self.is_windows:
+            RunCommand(f"sed -i 's/RUYI_DKAPP/{name}/g' {app_compose_path}")
+        else:
+            self.replace_in_file(app_compose_path, "RUYI_DKAPP", name)
 
         with open(app_env_path) as f:
             lines = f.readlines()
@@ -565,6 +639,8 @@ class main:
         install_log_file = self.get_dkapp_install_logpath(cont=cont)
         
         runcommand_str = "nohup"
+        if self.is_windows:
+            runcommand_str = "start /B cmd /c"
         
         #依赖服务和端口检查
         appid = cont.get("appid","")
@@ -587,11 +663,12 @@ class main:
                     ports.append(value)
         
         #GPU检查
-        if gpu and not GPUMain.is_installed_ctk():
-            gpu_instance = GPUMain()
-            issupport,gpu_env_install_cmd = gpu_instance.get_install_gpu_command(install_log_file)
-            if not issupport:return False,"您开启了GPU选项，但系统不支持！！！"
-            runcommand_str = f"{runcommand_str} {gpu_env_install_cmd};"
+        if not self.is_windows:
+            if gpu and not GPUMain.is_installed_ctk():
+                gpu_instance = GPUMain()
+                issupport,gpu_env_install_cmd = gpu_instance.get_install_gpu_command(install_log_file)
+                if not issupport:return False,"您开启了GPU选项，但系统不支持！！！"
+                runcommand_str = f"{runcommand_str} {gpu_env_install_cmd};"
         
         #放通防火墙
         allowport = cont.get("allowport",False)
@@ -607,8 +684,12 @@ class main:
         isok2,msg2 = self.__check_compose_config(compose_conf_path)
         if not isok2:return False,msg2
 
-        runcommand_str = f"{runcommand_str} {self.compose_bin} -f {compose_conf_path} up -d >> {install_log_file} 2>&1 && echo 'ruyi_successful_flag' >> {install_log_file} || echo 'ruyi_failed_flag' >> {install_log_file}"
-        runcommand_str = f"{runcommand_str} &"
+        if not self.is_windows:
+            runcommand_str = f"{runcommand_str} {self.compose_bin} -f {compose_conf_path} up -d >> {install_log_file} 2>&1 && echo 'ruyi_successful_flag' >> {install_log_file} || echo 'ruyi_failed_flag' >> {install_log_file}"
+            runcommand_str = f"{runcommand_str} &"
+        else:
+            runcommand_str = f"{runcommand_str} {self.compose_bin} -f {compose_conf_path} up -d --timeout 600 >> {install_log_file} 2>&1 && echo 'ruyi_successful_flag' >> {install_log_file} || echo 'ruyi_failed_flag' >> {install_log_file}"
+
         subprocess.Popen(runcommand_str, shell=True)
         return True,"创建并启动中，初次使用应用镜像可能需等待几分钟..."
 

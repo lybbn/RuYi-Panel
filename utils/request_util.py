@@ -2,7 +2,7 @@
 Request工具类
 """
 import json
-
+from utils.common import is_private_ip,ReadFile,WriteFile
 from django.contrib.auth.models import AbstractBaseUser
 from django.contrib.auth.models import AnonymousUser
 from django.urls.resolvers import ResolverMatch
@@ -49,6 +49,11 @@ def get_ip_area(ip):
     """
     if ip in ['localhost','127.0.0.1']:
         return "本机地址"
+    try:
+        if is_private_ip(ip):
+            return "局域网"
+    except:
+        pass
     area = IPQQwry().get_local_ips_area([ip])[0]
     return area
 

@@ -435,6 +435,12 @@ class GoClient:
         if self.is_windows:
             log_path = conf[f'log_command']
             command_line = f"{start_command} >> {log_path} 2>&1"
+            content = f"""
+@echo off
+chcp 65001 > nul
+cd /d {self.sitePath}
+{command_line}
+"""
         else:
             log_path = conf['log_command']
             command_line = f"nohup {start_command} &>> {log_path} &"

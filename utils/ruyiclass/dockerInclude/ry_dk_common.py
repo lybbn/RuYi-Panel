@@ -19,7 +19,7 @@
 # ------------------------------
 import json
 import psutil
-from utils.common import WriteFile,RunCommand
+from utils.common import WriteFile,RunCommand,current_os
 
 def get_sys_cpumem_info():
     cpu_count = psutil.cpu_count(logical=False)  # 物理核心数
@@ -44,10 +44,16 @@ def format_to_dict(input_str):
     if not input_str:return {}
     return dict(line.split('=') for line in input_str.split('\n'))
 
-def docker_client_low_level(url="unix:///var/run/docker.sock"):
+def docker_client_low_level(url=None):
     """
     docker低级接口
     """
+    if not url:
+        if current_os == "windows":
+            # url="npipe:////./pipe/docker_engine"
+            url="npipe:////./pipe/dockerDesktopLinuxEngine"
+        else:
+            url="unix:///var/run/docker.sock"
     try:
         import docker
     except:
