@@ -34,8 +34,8 @@ Vue3 + Vite + Python3 + Django
 
 ### 支持系统
 
-- windows 7 以上（暂开开通测试）
-- windows server 2008 及以上（暂开开通测试）
+- windows 10 及以上 x64
+- windows server 2008 及以上 x64
 - centos7-8-9 debian11-12 ubuntu22-24 alinux 树莓派(x64)
 - 其他系统暂未测试安装调试
 
@@ -47,6 +47,8 @@ Vue3 + Vite + Python3 + Django
 - 密码：ruyi123456
 
 ## 立即安装
+
+支持windows和linux系统
 
  - [点击安装](https://ruyi.lybbn.cn/doc/ruyi/onlineInstall.html)
 
