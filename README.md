@@ -5,9 +5,9 @@
 
 [ 官方文档 ](https://ruyi.lybbn.cn/) | [ 演示 ](http://demoruyi.lybbn.cn/)| [捐赠](https://gitee.com/lybbn/django-vue-lyadmin/wikis/pages?sort_id=5264497&doc_id=2214316) 
 
-## 如意服务器面板介绍
+## 产品简介
 
-系统全名【如意服务器面板】，简称【如意面板】，其中【如意】取自【葫芦兄弟】中"如意如意，随我心意，快快显灵"，意在"如意面板"如法宝如意一样，随心使用，称心如意，支持windows和linux（推荐）服务器运行，在运维中助你一臂之力。
+**如意服务器面板**（简称**如意面板**）是一款高效便捷的服务器运维管理工具，支持Windows和Linux系统运行。名称灵感来源于"葫芦兄弟"中的法宝"如意"，寓意本面板能如如意法宝般随您心意，助您轻松完成服务器运维工作。
 
 ## 技术架构
 
@@ -32,12 +32,19 @@ Vue3 + Vite + Python3 + Django
 - linux默认防火墙开启
 ```
 
-### 支持系统
+## 系统支持
 
-- windows 10 及以上 x64
-- windows server 2008 及以上 x64
-- centos7-8-9 debian11-12 ubuntu22-24 alinux 树莓派(x64)
-- 其他系统暂未测试安装调试
+### 已验证系统
+- **Windows**:
+  - Windows 10+ x64
+  - Windows Server 2008+ x64
+  
+- **Linux**:
+  - CentOS 7/8/9
+  - Debian 11/12
+  - Ubuntu 22.04/24.04
+  - Alinux
+  - 树莓派(x64)
 
 ## 查看演示
 
@@ -58,6 +65,17 @@ Vue3 + Vite + Python3 + Django
 - QQ群：
 
 1. 如意服务器运维面板群1：746326385
+
+## 视频教程
+
+| 序号 | 教程名称 | 观看链接 |
+|------|---------|---------|
+| 1 | 面板安装 | [观看](https://www.bilibili.com/video/BV1iVPUeAEsw) |
+| 2 | 面板升级 | [观看](https://www.bilibili.com/video/BV1oVNpecEnG) |
+| 3 | 命令行工具 | [观看](https://www.bilibili.com/video/BV14cN4edEPP) |
+| 4 | 软件安装 | [观看](https://www.bilibili.com/video/BV1uhNVeZERS) |
+| 5 | Python项目部署 | [观看](https://www.bilibili.com/video/BV1b1KNeuEQG) |
+| ... | 更多教程持续更新中 | |
 
 ## 功能预览
 
