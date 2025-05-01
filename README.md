@@ -37,7 +37,7 @@ Vue3 + Vite + Python3 + Django
 ### 已验证系统
 - **Windows**:
   - Windows 10+ x64
-  - Windows Server 2008+ x64
+  - Windows Server 2012R2+ x64
   
 - **Linux**:
   - CentOS 7/8/9
