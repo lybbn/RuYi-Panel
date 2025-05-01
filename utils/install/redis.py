@@ -146,9 +146,11 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
         if is_windows:
             #安装服务
             WriteFile(log_path,"正在安装redis为系统服务...\n",mode='a',write=is_write_log)
-            from utils.server.windows import install_as_service,create_service_account
+            from utils.server.windows import install_as_service,create_service_account,check_user_exists,delete_user
             sys_username = "redis"
             sys_password = GetRandomSet(32)
+            if check_user_exists(sys_username):
+                delete_user(sys_username)
             isok, msg = create_service_account(username=sys_username,password=sys_password,description="Account for Redis service",allow_service_logon=True)
             if not isok:raise ValueError(msg)
             service_name = soft_paths['name']

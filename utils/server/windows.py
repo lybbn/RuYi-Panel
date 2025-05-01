@@ -47,7 +47,6 @@ def ReadReg(path, key):
     @path 注册表路径
     @key 注册表键值
     """
-    import winreg
     try:
         newKey = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
         value, type = winreg.QueryValueEx(newKey, key)
@@ -1092,8 +1091,15 @@ def RestartRuyi():
     重启如意
     """
     try:
-        pid = os.getpid()
-        subprocess.run(["start.bat", str(pid)], check=True)
+        # pid = os.getpid()
+        # subprocess.run(["start.bat", str(pid)], check=True)
+        ruyiPath =  ReadReg( r"Software\RuYi",'RuyiPath')
+        Python_Path = ReadReg( r"Software\RuYi",'PythonPath')
+        if not ruyiPath or not Python_Path: 
+            Python_exe="python"
+        else:
+            Python_exe = os.path.join(os.path.normpath(Python_Path),"python.exe")
+        subprocess.run([Python_exe,"service.py", "restart"], check=True)
     except:
         pass
 
@@ -1538,3 +1544,18 @@ def _grant_service_logon_right(username: str) -> Tuple[bool, Optional[str]]:
         return False, f"授予权限失败: {win32api.FormatMessage(e.winerror)}"
     except Exception as e:
         return False, f"未知错误: {str(e)}"
+    
+def delete_user(username):
+    try:
+        # 执行用户删除命令
+        result = subprocess.run(
+            ['net', 'user', username, '/delete'],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=True
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        return False

@@ -65,7 +65,7 @@ Install_Openssl() {
     mkdir -p ${py_path}/openssl
 	cd ${py_path}
     # wget https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-${opensslVersion}.tar.gz
-    wget https://download.lybbn.cn/ruyi/install/common/openssl-${opensslVersion}.tar.gz
+    wget http://download.lybbn.cn/ruyi/install/common/openssl-${opensslVersion}.tar.gz
 	tar -zxf openssl-${opensslVersion}.tar.gz
     rm -f openssl-${opensslVersion}.tar.gz
 	cd openssl-${opensslVersion}
@@ -136,7 +136,7 @@ Install_rpcgen() {
         echo "缺少rpcgen安装中..."
         echo "====================================="
         cd /tmp
-        wget https://download.lybbn.cn/ruyi/install/linux/mysql/rpcsvc-proto-1.4.tar.gz
+        wget http://download.lybbn.cn/ruyi/install/linux/mysql/rpcsvc-proto-1.4.tar.gz
         tar -xvf rpcsvc-proto-1.4.tar.gz
         cd rpcsvc-proto-1.4
         ./configure --prefix=/usr/local/rpcgen

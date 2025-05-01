@@ -356,7 +356,7 @@ def update_ruyi_panel():
             return False,"本地开发模式"
     clear_update_tmp_files()
     DeleteFile(tmp_updatelog_file,empty_tips=False)
-    base_url = "https://download.lybbn.cn/ruyi/install"
+    base_url = "http://download.lybbn.cn/ruyi/install"
     if current_os == "windows":
         up_url = '/windows/ruyi.zip'
     else:

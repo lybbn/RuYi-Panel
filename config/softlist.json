@@ -13,8 +13,8 @@
 			"versions": [{
 				"id": 1,
 				"version": "1.27",
-				"c_version": "1.27.3",
-				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.tar.gz"
+				"c_version": "1.27.5",
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.5.tar.gz"
 			}, {
 				"id": 2,
 				"version": "openresty",
@@ -39,8 +39,13 @@
 			"versions": [{
 				"id": 1,
 				"version": "7.2",
-				"c_version": "7.2.6",
-				"url": "https://mirrors.huaweicloud.com/redis/redis-7.2.6.tar.gz"
+				"c_version": "7.2.8",
+				"url": "https://mirrors.huaweicloud.com/redis/redis-7.2.8.tar.gz"
+			},{
+				"id": 2,
+				"version": "7.4",
+				"c_version": "7.4.3",
+				"url": "https://mirrors.huaweicloud.com/redis/redis-7.4.3.tar.gz"
 			}],
 			"author": "redis.io",
 			"home": "https://redis.io",
@@ -124,14 +129,14 @@
 			"id": 24,
 			"sort": 24,
 			"icon": "python.png",
-			"title": "Python3.13.2",
+			"title": "Python3.13.3",
 			"name": "python",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "3.13.2",
-				"c_version": "3.13.2",
-				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.13.2.tgz"
+				"version": "3.13.3",
+				"c_version": "3.13.3",
+				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.13.3.tgz"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -164,14 +169,14 @@
 			"id": 90,
 			"sort": 90,
 			"icon": "go.png",
-			"title": "Go1.23.6",
+			"title": "Go1.23.8",
 			"name": "go",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "1.23.6",
-				"c_version": "1.23.6",
-				"url": "https://mirrors.aliyun.com/golang/go1.23.6.linux-amd64.tar.gz"
+				"version": "1.23.8",
+				"c_version": "1.23.8",
+				"url": "https://mirrors.aliyun.com/golang/go1.23.8.linux-amd64.tar.gz"
 			}],
 			"author": "golang.google.cn",
 			"home": "https://golang.google.cn/",
@@ -210,17 +215,18 @@
 			"title": "Nginx",
 			"name": "nginx",
 			"installed": 0,
-			"versions": [ {
+			"versions": [{
 				"id": 2,
 				"version": "openresty",
-				"c_version": "1.27.1.1",
-				"url": "https://openresty.org/download/openresty-1.27.1.1-win64.zip"
-			},{
+				"c_version": "1.27.1.2",
+				"url": "https://openresty.org/download/openresty-1.27.1.2-win64.zip"
+			},
+			{
 				"id": 1,
-				"version": "1.27",
-				"c_version": "1.27.3",
+				"version": "1.28",
+				"c_version": "1.28.0",
 				"hide":true,
-				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.3.zip"
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.28.0.zip"
 			}],
 			"author": "nginx.org",
 			"home": "https://www.nginx.org",
@@ -240,12 +246,14 @@
 				"id": 1,
 				"version": "3.0",
 				"c_version": "3.0.504",
-				"url": "https://github.com/microsoftarchive/redis/releases/download/win-3.0.504/Redis-x64-3.0.504.zip"
+				"url":"https://gitee.com/lybbn/RuYi-Panel/releases/download/v1.0/Redis-x64-3.0.504.zip",
+				"url1": "https://github.com/microsoftarchive/redis/releases/download/win-3.0.504/Redis-x64-3.0.504.zip"
 			}, {
 				"id": 2,
 				"version": "5.0",
 				"c_version": "5.0.14.1",
-				"url": "https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip"
+				"url": "https://gitee.com/lybbn/RuYi-Panel/releases/download/v1.0/Redis-x64-5.0.14.1.zip",
+				"url1": "https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip"
 			}],
 			"author": "redis.io",
 			"home": "https://redis.io",
@@ -328,14 +336,15 @@
 			"id": 24,
 			"sort": 24,
 			"icon": "python.png",
-			"title": "Python3.13.2",
+			"title": "Python3.13.3",
 			"name": "python",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "3.13.2",
-				"c_version": "3.13.2",
-				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.13.2-amd64.exe"
+				"version": "3.13.3",
+				"c_version": "3.13.3",
+				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.13.3-embed-amd64.zip",
+				"url1": "https://mirrors.aliyun.com/python-release/windows/python-3.13.3-amd64.exe"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -355,7 +364,8 @@
 				"id": 1,
 				"version": "3.12.9",
 				"c_version": "3.12.9",
-				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.12.9-amd64.exe"
+				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.12.9-embed-amd64.zip",
+				"url1": "https://mirrors.aliyun.com/python-release/windows/python-3.12.9-amd64.exe"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -368,14 +378,14 @@
 			"id": 90,
 			"sort": 90,
 			"icon": "go.png",
-			"title": "Go1.23.7",
+			"title": "Go1.23.8",
 			"name": "go",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "1.23.7",
-				"c_version": "1.23.7",
-				"url": "https://mirrors.aliyun.com/golang/go1.23.7.windows-amd64.zip"
+				"version": "1.23.8",
+				"c_version": "1.23.8",
+				"url": "https://mirrors.aliyun.com/golang/go1.23.8.windows-amd64.zip"
 			}],
 			"author": "golang.google.cn",
 			"home": "https://golang.google.cn/",

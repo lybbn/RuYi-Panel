@@ -23,7 +23,7 @@ from utils.customView import CustomAPIView
 from utils.jsonResponse import SuccessResponse,ErrorResponse,DetailResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
-from utils.common import get_parameter_dic,GetWebRootPath,md5,WriteFile,ast_convert,GetBackupPath,RunCommand
+from utils.common import get_parameter_dic,GetWebRootPath,md5,WriteFile,ast_convert,GetBackupPath,RunCommand,detect_file_encoding
 from utils.security.files import list_files_in_directory,get_directory_size,delete_file,delete_dir,create_file,create_dir,rename_file,copy_file,copy_dir,move_file
 from utils.security.files import get_filedir_attribute,batch_operate,get_filename_ext,auto_detect_file_language
 from utils.security.no_delete_list import check_in_black_list
@@ -247,23 +247,30 @@ class RYFileManageView(CustomAPIView):
             content = ""
             encoding = "utf-8"
             try:
-                with open(path, 'r', encoding="utf-8", errors='ignore') as file:
-                    content = file.read()
-            except PermissionError as e:
-                return ErrorResponse(msg="文件被占用，暂无法打开")
-            except OSError as e:
-                return ErrorResponse(msg="操作系统错误，暂无法打开")
+                detected_encoding = detect_file_encoding(path)
+                if detected_encoding:
+                    encoding = detected_encoding
+                    with open(path, 'r', encoding=detected_encoding) as file:
+                        content=file.read()
             except:
                 try:
-                    with open(path, 'r', encoding="GBK", errors='ignore') as file:
+                    with open(path, 'r', encoding="utf-8", errors='ignore') as file:
                         content = file.read()
-                    encoding = "GBK"
                 except PermissionError as e:
                     return ErrorResponse(msg="文件被占用，暂无法打开")
                 except OSError as e:
                     return ErrorResponse(msg="操作系统错误，暂无法打开")
-                except Exception as e:
-                    return ErrorResponse(msg="文件编码不兼容")
+                except:
+                    try:
+                        with open(path, 'r', encoding="GBK", errors='ignore') as file:
+                            content = file.read()
+                        encoding = "GBK"
+                    except PermissionError as e:
+                        return ErrorResponse(msg="文件被占用，暂无法打开")
+                    except OSError as e:
+                        return ErrorResponse(msg="操作系统错误，暂无法打开")
+                    except Exception as e:
+                        return ErrorResponse(msg="文件编码不兼容")
             data = {
                 'st_mtime':str(int(os.stat(path).st_mtime)),
                 'content':content,

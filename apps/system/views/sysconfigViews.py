@@ -286,7 +286,7 @@ class RYUpdateSysManageView(CustomAPIView):
     authentication_classes = [JWTAuthentication]
     
     def get(self,request):
-        s_url = "https://download.lybbn.cn/ruyi/install/version.json"
+        s_url = "http://download.lybbn.cn/ruyi/install/version.json"
         resp = requests.get(url=s_url,timeout=5)
         ver = ""
         if resp.status_code == 200:

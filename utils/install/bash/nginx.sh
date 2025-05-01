@@ -133,7 +133,7 @@ Install_Lua() {
     if [ ! -f /usr/local/bin/lua ]; then
         #5.4.7不兼容，使用老版本5.1.5
         LUA_VERSION="5.1.5"
-        wget -c -O lua-${LUA_VERSION}.tar.gz https://download.lybbn.cn/ruyi/install/linux/nginx/lua-${LUA_VERSION}.tar.gz
+        wget -c -O lua-${LUA_VERSION}.tar.gz http://download.lybbn.cn/ruyi/install/linux/nginx/lua-${LUA_VERSION}.tar.gz
         tar zxf lua-${LUA_VERSION}.tar.gz
         cd lua-${LUA_VERSION}
         #5.4.7版本使用make all test
@@ -150,7 +150,7 @@ Install_Lua() {
 
 Install_LuaJIT() {
     LUAJIT_INC_PATH="luajit-2.1"
-    wget -c -O LuaJIT-2.1-20240815.zip https://download.lybbn.cn/ruyi/install/linux/nginx/LuaJIT-2.1-20240815.zip
+    wget -c -O LuaJIT-2.1-20240815.zip http://download.lybbn.cn/ruyi/install/linux/nginx/LuaJIT-2.1-20240815.zip
     unzip -q -o LuaJIT-2.1-20240815.zip
     cd LuaJIT-2.1-20240815
     make -j${cpu_core}
@@ -171,7 +171,7 @@ Install_LuaJIT() {
 
 Install_Lua_cjson() {
     if [ ! -f /usr/local/lib/lua/5.1/cjson.so ]; then
-        wget -c -O lua-cjson-2.1.0.9.zip https://download.lybbn.cn/ruyi/install/linux/nginx/lua-cjson-2.1.0.9.zip
+        wget -c -O lua-cjson-2.1.0.9.zip http://download.lybbn.cn/ruyi/install/linux/nginx/lua-cjson-2.1.0.9.zip
         unzip -q -o lua-cjson-2.1.0.9.zip
         cd lua-cjson-2.1.0.9
         make
@@ -186,14 +186,14 @@ WAF_LIB_ENABLE=""
 Download_WAF_Lib() {
     #版本要与其他匹配，不能乱升级，否则启动nginx报错 failed to load the 'resty.core' module
     LuaNginxModuleVersion="0.10.27"
-    wget -c -O lua-nginx-module-${LuaNginxModuleVersion}.zip https://download.lybbn.cn/ruyi/install/linux/nginx/lua-nginx-module-${LuaNginxModuleVersion}.zip
+    wget -c -O lua-nginx-module-${LuaNginxModuleVersion}.zip http://download.lybbn.cn/ruyi/install/linux/nginx/lua-nginx-module-${LuaNginxModuleVersion}.zip
     unzip -q -o lua-nginx-module-${LuaNginxModuleVersion}.zip
     mv lua-nginx-module-${LuaNginxModuleVersion} lua_nginx_module
     chmod +x lua_nginx_module/config
     rm -f lua-nginx-module-${LuaNginxModuleVersion}.zip
 
     NgxDevelKitVersion="0.3.3"
-    wget -c -O ngx_devel_kit-${NgxDevelKitVersion}.zip https://download.lybbn.cn/ruyi/install/linux/nginx/ngx_devel_kit-${NgxDevelKitVersion}.zip
+    wget -c -O ngx_devel_kit-${NgxDevelKitVersion}.zip http://download.lybbn.cn/ruyi/install/linux/nginx/ngx_devel_kit-${NgxDevelKitVersion}.zip
     unzip -q -o ngx_devel_kit-${NgxDevelKitVersion}.zip
     mv ngx_devel_kit-${NgxDevelKitVersion} ngx_devel_kit
     rm -f ngx_devel_kit-${NgxDevelKitVersion}.zip
@@ -213,7 +213,7 @@ Install_Jemalloc() {
             Jemalloc_Version="5.3.0"
         fi
         # wget https://github.com/jemalloc/jemalloc/releases/download/5.2.1/jemalloc-5.2.1.tar.bz2
-        wget https://download.lybbn.cn/ruyi/install/linux/nginx/jemalloc-${Jemalloc_Version}.tar.bz2
+        wget http://download.lybbn.cn/ruyi/install/linux/nginx/jemalloc-${Jemalloc_Version}.tar.bz2
         tar -xjf jemalloc-${Jemalloc_Version}.tar.bz2
         cd jemalloc-${Jemalloc_Version}
         ./configure
@@ -293,7 +293,7 @@ Install_Soft() {
         echo "==================================================="
         pcre_version="10.44"
         # wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${pcre_version}/pcre2-${pcre_version}.tar.gz
-        wget https://download.lybbn.cn/ruyi/install/linux/nginx/pcre2-${pcre_version}.tar.gz
+        wget http://download.lybbn.cn/ruyi/install/linux/nginx/pcre2-${pcre_version}.tar.gz
         tar zxf pcre2-$pcre_version.tar.gz
         rm -rf pcre2-$pcre_version.tar.gz
         withPcre="--with-pcre=${RUYI_TEMP_PATH}/nginx-$nginx_version/module3lib/pcre2-${pcre_version}"
@@ -304,7 +304,7 @@ Install_Soft() {
     echo "==================================================="
     opensslVersion="1.1.1w"
     #wget https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-${opensslVersion}.tar.gz
-    wget https://download.lybbn.cn/ruyi/install/linux/nginx/openssl-${opensslVersion}.tar.gz
+    wget http://download.lybbn.cn/ruyi/install/linux/nginx/openssl-${opensslVersion}.tar.gz
 	tar -zxf openssl-${opensslVersion}.tar.gz
     mv openssl-${opensslVersion} openssl
     rm -rf openssl-${opensslVersion}.tar.gz
@@ -316,7 +316,7 @@ Install_Soft() {
         echo "==================================================="
         echo "开始下载ngx_cache_purge..."
         echo "==================================================="
-        wget https://download.lybbn.cn/ruyi/install/linux/nginx/ngx_cache_purge-2.3.tar.gz
+        wget http://download.lybbn.cn/ruyi/install/linux/nginx/ngx_cache_purge-2.3.tar.gz
         tar -zxf ngx_cache_purge-2.3.tar.gz
         mv ngx_cache_purge-2.3 ngx_cache_purge
         rm -rf ngx_cache_purge-2.3.tar.gz
@@ -360,14 +360,14 @@ Install_Soft() {
         echo "==================================================="
         echo "开始安装LUA额外依赖库..."
         echo "==================================================="
-        wget -c -O lua-resty-core-0.1.30.zip https://download.lybbn.cn/ruyi/install/linux/nginx/lua-resty-core-0.1.30.zip
+        wget -c -O lua-resty-core-0.1.30.zip http://download.lybbn.cn/ruyi/install/linux/nginx/lua-resty-core-0.1.30.zip
         unzip -q lua-resty-core-0.1.30.zip
         cd lua-resty-core-0.1.30
         make install LUA_LIB_DIR=${NGINX_SETUP_PATH}/lib/lua
         cd ..
         rm -rf lua-resty-core-0.1.30*
 
-        wget -c -O lua-resty-lrucache-0.15.zip https://download.lybbn.cn/ruyi/install/linux/nginx/lua-resty-lrucache-0.15.zip
+        wget -c -O lua-resty-lrucache-0.15.zip http://download.lybbn.cn/ruyi/install/linux/nginx/lua-resty-lrucache-0.15.zip
         unzip -q lua-resty-lrucache-0.15.zip
         cd lua-resty-lrucache-0.15
         make install LUA_LIB_DIR=${NGINX_SETUP_PATH}/lib/lua

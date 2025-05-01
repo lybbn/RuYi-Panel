@@ -25,6 +25,7 @@ from utils.install.python import get_python_path_info
 from django.conf import settings
 from apps.system.models import Sites
 from utils.server.system import system
+from importlib.util import find_spec
 
 class PythonClient:
     is_windows=True
@@ -88,6 +89,7 @@ class PythonClient:
             "confBasePath":self.confBasePath,
             "scriptsPath":self.scriptsPath,
             "pyenv_path":self.pyenv_path,
+            'pypath':pyconf['install_abspath_path'],#项目选择python版本的根目录
             'pyexe':pyexe,#项目选择版本的python
             'pipexe':pipexe,#虚拟环境中的pip
             'log_base_path':self.log_base_path,
@@ -287,7 +289,47 @@ class PythonClient:
             if user:preexec_fn = self.get_preexec_fn(user)
             subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.PIPE,shell=shell,preexec_fn=preexec_fn, env=env)
         else:
-            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdout=subprocess.PIPE,stderr=subprocess.PIPE,shell=shell,env=env,creationflags=subprocess.DETACHED_PROCESS)
+            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdout=subprocess.PIPE,stderr=subprocess.PIPE,shell=shell,env=env,creationflags=subprocess.CREATE_NO_WINDOW)
+
+    def exec_bat(self,pid_file=None,bat_path=None):
+        if not os.path.exists(bat_path):
+            self.write_create_log(f'bat文件不存在: {bat_path}')
+            return
+        try:
+            conf = self.get_conf_path()
+            pypath = conf.get("pypath",None)
+            env = os.environ.copy()
+            clean_env = {
+                'PATH': self.pyenv_path+ "/Scripts",
+                'SYSTEMROOT': env.get('SYSTEMROOT', ''),
+                'TEMP': env.get('TEMP', ''),
+                'VIRTUAL_ENV':self.pyenv_path
+            }
+            process = subprocess.Popen(
+                ['cmd', '/c',bat_path],
+                shell=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                cwd=self.sitePath,
+                env=clean_env
+            )
+            
+            time.sleep(1)
+            
+            # 获取PID
+            pid = process.pid
+            
+            # 写入PID文件
+            with open(pid_file, 'w') as f:
+                f.write(str(pid))
+                
+            self.write_create_log(f"""==========启动成功==========
+--PID: {pid}
+--PID文件: {os.path.abspath(pid_file)}
+--bat脚本: {os.path.abspath(bat_path)}
+""")
+            
+        except Exception as e:
+            self.write_create_log(f'启动bat脚本失败: {e}')
     
     def install_all_need_requirements(self,cont={}):
         """
@@ -373,7 +415,10 @@ class PythonClient:
             if start_method in ["uwsgi","gunicorn"]:
                 self.ExecCommand([script_path],cwd=self.sitePath,env=env)
             else:
-                self.ExecCommand([script_path],cwd=self.sitePath,user=start_user, env=env)
+                if self.is_windows:
+                    self.exec_bat(bat_path=script_path,pid_file=sitepid)
+                else:
+                    self.ExecCommand([script_path],cwd=self.sitePath,user=start_user, env=env)
             time.sleep(1)
 
             if self.is_project_running():
@@ -692,10 +737,36 @@ class PythonClient:
             sgipy = info['sgi']+".py"
             if info['sgi'] and sgipy not in info['rukou']:
                 folder_path = os.path.dirname(info['rukou'])
-                info['rukou'] = os.path.join(folder_path, sgipy)
+                info['rukou'] = os.path.normpath(os.path.join(folder_path, sgipy))
         info['application'] = PythonClient.get_project_application(cont=info)
         return info
     
+    def _install_python_virtualenv_windows(self):
+        conf = self.get_conf_path()
+        pyexe = conf['pyexe']
+        try:
+            subprocess.run([pyexe,"-m","pip","install","virtualenv","--no-warn-script-location" ], check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            return False
+        
+    def is_module_available(self,module_name):
+        """检查模块是否可用"""
+        return find_spec(module_name) is not None
+
+    def ensure_virtualenv(self):
+        """确保虚拟环境工具可用"""
+        if self.is_module_available("venv"):
+            return "venv"
+        
+        if self.is_module_available("virtualenv"):
+            return "virtualenv"
+        
+        if self._install_python_virtualenv_windows():
+            return "virtualenv"
+        
+        return None
+
     def create_python_env(self,log=True):
         """
         创建python 虚拟环境
@@ -704,13 +775,15 @@ class PythonClient:
         """
         conf = self.get_conf_path()
         pyexe = conf['pyexe']
+        tool = self.ensure_virtualenv()
+
         if not log:
-            res,err,code = RunCommand(f"{pyexe} -m venv {self.pyenv_path}",returncode=True)
+            res,err,code = RunCommand(f"{pyexe} -m {tool} {self.pyenv_path}",returncode=True)
             if code == 0:
                 return True
             return False
         else:
-            r_process = subprocess.Popen([pyexe, "-m",'venv',self.pyenv_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            r_process = subprocess.Popen([pyexe, "-m",tool,self.pyenv_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             # 持续读取输出
             while True:
                 r_output = r_process.stdout.readline()
@@ -734,7 +807,7 @@ class PythonClient:
         pipexe = conf['pipexe']
         pipsource = self.pip_source_dic['阿里云']
         if not log:
-            res,err,code = RunCommand(f"{pipexe} install -r {requirements} -i {pipsource}",returncode=True)
+            _,_,code = RunCommand(f"{pipexe} install -r {requirements} -i {pipsource}",returncode=True)
             if code == 0:
                 return True
             return False
@@ -749,6 +822,9 @@ class PythonClient:
                     self.write_create_log(f"{r_output.strip()}")
             if r_process.returncode == 0:
                 return True
+            error_output = r_process.stderr.read()
+            if error_output.strip():  # 如果有错误内容才写入
+                self.write_create_log(f"\n{error_output.strip()}")
             return False
         
     def install_extra_requirements(self,log=True):
@@ -1261,12 +1337,13 @@ keepalive = 3
             if start_method in ["command"]:
                 command_line = f"{start_command} >> {log_path} 2>&1"
             elif start_method =="daphne":
-                command_line = f"{self.pyenv_path}/bin/daphne -b {host} -p {port} --proxy-headers {application} >> {log_path} 2>&1"
-            content = f"""
+                command_line = f"{self.pyenv_path}/Scripts/daphne -b {host} -p {port} --proxy-headers {application} >> {log_path} 2>&1"
+            
+            content = fr"""
 @echo off
 chcp 65001 > nul
 cd /d {self.sitePath}
-venv\Scripts\activate
+call {self.pyenv_path}/venv/Scripts/activate.bat
 {command_line}
 """
         else:
@@ -1299,9 +1376,8 @@ source venv/bin/activate
 {command_line}
 {command_set_pid}
 """
-
-            script_path = self.get_run_script_path()
-            WriteFile(script_path,content)
+        script_path = self.get_run_script_path()
+        WriteFile(script_path,content)
 
     def autoStart(self):
         """

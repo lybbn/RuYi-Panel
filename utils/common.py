@@ -294,18 +294,59 @@ def get_online_public_ip():
     @author lybbn<2024-01-13>
     """
     try:
-        response = requests.get('https://api.ipify.org/?format=json')
-        data = response.json()
-        public_ip = data['ip']
-        return public_ip
+        response = requests.get('https://api.lybbn.cn/api/public/getip/', timeout=5)
+        response.raise_for_status()  # 检查HTTP状态码
+        public_ip = response.text
+        if check_is_ipv4(public_ip):
+            return public_ip
+        raise Exception("非有效ipv4")
     except Exception as e:
         try:
-            response = requests.get('https://httpbin.org/ip')
+            response = requests.get('https://httpbin.org/ip', timeout=5)
             response.raise_for_status()  # 检查请求是否成功
             ip = response.json()['origin']
             return ip
         except:
             return None
+
+def detect_file_encoding(filename):
+    """
+    自动检测文件编码，并明确区分 UTF-16LE/UTF-16BE（通过 BOM 标记）
+    
+    Args:
+        filename: 文件路径
+    
+    Returns:
+        检测到的编码（如 'utf-8', 'gbk', 'utf-16le', 'utf-16be'）
+        若检测失败或文件不存在则返回 None
+    """
+    try:
+        with open(filename, 'rb') as file:
+            # 1. 首先检查 BOM 标记（前2字节）
+            bom = file.read(2)
+            file.seek(0)  # 重置文件指针
+            
+            # 2. 如果存在 BOM，直接返回对应编码
+            if bom == b'\xff\xfe':
+                return 'utf-16le'
+            elif bom == b'\xfe\xff':
+                return 'utf-16be'
+            
+            # 3. 无 BOM 时，用 chardet 检测
+            raw_data = file.read(1024)  # 读取部分内容检测
+            result = chardet.detect(raw_data)
+            
+            # 4. 处理检测结果
+            if result['confidence'] > 0.7:  # 置信度阈值
+                encoding = result['encoding'].lower()
+                # 特殊处理：将 chardet 返回的 'utf-16' 转换为 'utf-16le'（Windows 常见）
+                if encoding == 'utf-16':
+                    return 'utf-16le'
+                return encoding
+            return None
+            
+    except (IOError, OSError):
+        return None  # 文件不存在或无法读取
 
 #读取文件内容
 def ReadFile(filename,mode='r'):
@@ -313,20 +354,25 @@ def ReadFile(filename,mode='r'):
     filename:文件（包含路径）
     返回：若文件不存在则返回None
     """
+    content=None
     try:
-        with open(filename, mode) as file:
+        detected_encoding = detect_file_encoding(filename)
+        if detected_encoding:
+            with open(filename, mode, encoding=detected_encoding) as file:
+                return file.read()
+        with open(filename, mode, encoding='utf-8', errors='ignore') as file:
             content = file.read()
-            # 处理文件内容
+            return content
     except:
-        try:
-            with open(filename, mode, encoding="utf-8", errors='ignore') as file:
-                content = file.read()
-        except:
+        encodings = ['utf-8', 'gbk']  # 优先级从高到低
+        for encoding in encodings:
             try:
-                with open(filename, mode, encoding="GBK", errors='ignore') as file:
-                    content = file.read()
-            except:
-                return None
+                with open(filename, mode, encoding=encoding, errors='ignore') as file:
+                    return file.read()
+            except UnicodeDecodeError:
+                continue  # 尝试下一个编码
+            except (IOError, OSError):
+                return None  # 文件不存在或其他IO错误
     return content
 
 #写入文件内容，不存在则创建
@@ -695,15 +741,18 @@ def GetRandomSet(bits):
     value_set = "".join(random.sample(total_set, bits))
     return value_set
 
-def generate_random_string(length):
+def generate_random_string(length,special=True):
     """
     @name 随机生成指定长度的字符串，包含字母+数字+自定义特殊字符
     @author lybbn<2024-01-13>
     filename:文件（包含路径）
     content:写入的内容
     """
-    special_chars = '!@#$%^*=+-'
-    all_chars = string.ascii_letters + string.digits + special_chars
+    if special:
+        special_chars = '!@#$%^*=+-'
+        all_chars = string.ascii_letters + string.digits + special_chars
+    else:
+        all_chars = string.ascii_letters + string.digits
     random_string = ''.join(random.choice(all_chars) for _ in range(length))
     return random_string
 

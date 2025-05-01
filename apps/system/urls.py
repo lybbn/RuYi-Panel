@@ -24,6 +24,7 @@ from apps.system.views.sysLicenseView import RYSysImportLicenseView,RYSysUnBindL
 from apps.system.views.docker_manage import RYDockerManageView
 from apps.system.views.sys_process import RYSysProcessListView,RYSysProcessOperateView,RYSysProcessDetailView
 from apps.system.views.sys_network import RYSysNetworkListView,RYSysNetworkOperateView
+from apps.system.views.sys_images_tools import RYSysImageToolsView
 
 system_url = routers.SimpleRouter()
 system_url.register(r'terminal', TerminalServerViewSet)
@@ -67,5 +68,6 @@ urlpatterns = [
     path('gositemg/', RYGoProjectManageView.as_view(), name='go项目列表/操作'),
     path('supervisormg/', RYSupervisorManageView.as_view(), name='supervisor管理'),
     path('dockermg/', RYDockerManageView.as_view(), name='docker管理'),
+    path('imgtools/', RYSysImageToolsView.as_view(), name='图片工具'),
 ]
 urlpatterns += system_url.urls

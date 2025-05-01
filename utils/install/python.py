@@ -27,6 +27,8 @@ import importlib
 from utils.server.system import system
 from django.conf import settings
 from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
+import shutil
+import zipfile
 
 def get_python_path_info(version):
     root_path = GetInstallPath()
@@ -70,7 +72,112 @@ def check_python_version(pythonPath=""):
         return tuple(map(int, version.split(".")))
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
-        
+
+def _func_unzip(zip_filename,extract_path):
+    """
+    @name 解压
+    @author lybbn<2024-03-07>
+    @param zip_filename 压缩文件名（含路径）
+    @param extract_path 需要解压的目标目录
+    """
+    _, ext = os.path.splitext(zip_filename)
+    if ext == '.zip':
+        with zipfile.ZipFile(zip_filename, 'r') as zipf:
+            zipf.extractall(extract_path)
+
+def _check_python_version_windows(pythonPath=""):
+    try:
+        if not pythonPath:
+            pythonPath = "python"
+        else:
+            pythonPath = os.path.normpath(pythonPath)
+        output = subprocess.check_output([pythonPath, "--version"], stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW)
+        version = output.decode().strip().split()[1]
+        return tuple(map(int, version.split(".")))
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+def _install_python_windows(python_installer,install_dir):
+    if not os.path.exists(install_dir):
+        os.makedirs(install_dir)
+    _func_unzip(python_installer,install_dir)
+    return _check_python_version_windows(install_dir+"/python.exe")
+
+def _install_python_pip_windows(install_dir,log_path=None):
+    if not os.path.exists(install_dir):
+        os.makedirs(install_dir)
+    pversion = os.path.basename(install_dir)  # 获取"3.13.3"
+    compact_version_arr = pversion.split(".")
+    pth_str = compact_version_arr[0]+compact_version_arr[1]
+    pth_file = os.path.join(install_dir, f"python{pth_str}._pth")#python313._pth
+    if os.path.exists(pth_file):
+        try:
+            with open(pth_file, 'r') as f:
+                lines = f.readlines()
+            modified_lines = []
+            for line in lines:
+                if line.strip() == "#import site":
+                    modified_lines.append("import site\n")
+                else:
+                    modified_lines.append(line)
+            
+            with open(pth_file, 'w') as f:
+                f.writelines(modified_lines)
+        except Exception as e:
+            raise Exception(f"修改 ._pth 文件失败: {e}")
+
+    get_pip_url = "https://bootstrap.pypa.io/get-pip.py"
+    get_pip_path = os.path.join(install_dir, "get-pip.py")
+
+    WriteFile(log_path,"正在安装 pip...\n",mode='a')
+    try:
+        isok,msg = download_url_file(url=get_pip_url,save_path=get_pip_path,process=True,log_path=log_path,chunk_size=8192)
+        if not isok:
+            WriteFile(log_path,f"{msg}\n",mode='a')
+            return False
+    except Exception as e:
+        WriteFile(log_path,f"下载 get-pip.py 失败: {e}\n",mode='a')
+        return False
+    python_exe = os.path.join(install_dir, "python.exe")
+    try:
+        subprocess.run([python_exe, get_pip_path,"--no-warn-script-location"], check=True,creationflags=subprocess.CREATE_NO_WINDOW)
+        WriteFile(log_path,f"pip 安装完成\n",mode='a')
+    except subprocess.CalledProcessError as e:
+        WriteFile(log_path,f"pip 安装失败: {e}\n",mode='a')
+        return False
+    scripts_dir = os.path.join(install_dir, "Scripts")
+    if not os.path.exists(scripts_dir):
+        os.makedirs(scripts_dir)
+    WriteFile(log_path,f"配置目录结构...\n",mode='a')
+    pip_exe = os.path.join(install_dir, "pip.exe")
+    pip_related_files = ["pip.exe", "pip3.exe", "pip3.12.exe"]
+    
+    for file in pip_related_files:
+        src = os.path.join(install_dir, file)
+        if os.path.exists(src):
+            try:
+                shutil.move(src, os.path.join(scripts_dir, file))
+            except Exception as e:
+                WriteFile(log_path,f"移动 {file} 失败: {e}\n",mode='a')
+    _addProgramDynamicPath(install_dir)
+    return True
+
+def _addProgramDynamicPath(install_dir):
+    pth_file = os.path.join(install_dir,"Lib","site-packages", "ruyi_start.pth")
+    content = "import sys; import os; sys.path.insert(0, os.path.dirname(sys.argv[0]))"
+    if not os.path.exists(pth_file):
+        WriteFile(pth_file,content)
+
+def _install_python_virtualenv_windows(install_dir,log_path=None):
+    python_exe = os.path.join(install_dir, "python.exe")
+    try:
+        subprocess.run([python_exe,"-m","pip","install","virtualenv","--no-warn-script-location","-i","https://mirrors.aliyun.com/pypi/simple/"], check=True,creationflags=subprocess.CREATE_NO_WINDOW)
+        WriteFile(log_path,f"virtualenv 安装完成。\n",mode='a')
+        return True
+    except subprocess.CalledProcessError as e:
+        WriteFile(log_path,f"virtualenv 安装失败: {e}\n",mode='a')
+        return False
+
 def Install_Python(type=2,version={},is_windows=True,call_back=None):
     """
     @name 安装Python
@@ -111,7 +218,17 @@ def Install_Python(type=2,version={},is_windows=True,call_back=None):
             if not os.path.exists(install_directory):
                 os.makedirs(install_directory)
             WriteFile(log_path,"安装中，请耐心等待...\n",mode='a',write=is_write_log)
-            subprocess.run([save_path, "/quiet",f"TargetDir={os.path.normpath(install_directory)}", "InstallAllUsers=0", "PrependPath=0","Include_test=0"],creationflags=subprocess.CREATE_NO_WINDOW)
+            # tmp_installlog = os.path.join(os.path.normpath(install_directory), 'python_install.log')
+            # try:
+            #     subprocess.run([save_path, "/quiet",f"/log={tmp_installlog}",f"TargetDir={os.path.normpath(install_directory)}", "InstallAllUsers=0","Shortcuts=0","Include_doc=0", "PrependPath=0","Include_test=0"],creationflags=subprocess.CREATE_NO_WINDOW, stdout=subprocess.PIPE, stderr=subprocess.PIPE,text=True,check=True)
+            # except Exception as e:
+            #     raise Exception(f"安装失败：{e}")
+            isok = _install_python_windows(save_path,install_directory)
+            if not isok:raise Exception("python安装失败")
+            isok = _install_python_pip_windows(install_directory,log_path=log_path)
+            if not isok:raise Exception("pip安装失败")
+            isok = _install_python_virtualenv_windows(install_directory,log_path=log_path)
+            if not isok:raise Exception("virtualenv安装失败")
             WriteFile(log_path,"正在检测安装结果...\n",mode='a',write=is_write_log)
             time.sleep(0.5)
             install_version = check_python_version(soft_paths['windows_abspath_python_path'])

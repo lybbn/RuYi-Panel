@@ -197,7 +197,8 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
         Start_Mysql(is_windows=is_windows)
         WriteFile(log_path,"mysql启动成功\n",mode='a',write=is_write_log)
         time.sleep(0.5)
-        root_pass = generate_random_string(16)
+        root_pass = generate_random_string(16,special=False)
+        WriteFile(log_path,"开始设置mysql的root密码...\n",mode='a',write=is_write_log)
         RY_SET_MYSQL_ROOT_PASS(root_pass,is_windows=is_windows)
         WriteFile(log_path,f"设置mysql的root密码成功，root密码：{root_pass}\n",mode='a',write=is_write_log)
         version['password'] = root_pass
@@ -279,20 +280,22 @@ def Start_Mysql(is_windows=True):
         r_status = False
         # 确保路径存在
         if os.path.exists(exe_path):
-            try:
-                if not is_mysql_running(is_windows=True):
-                    # command = f'"{exe_path}" --defaults-file="{conf_path}"'
-                    command = f'sc start MySQL'
-                    subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
-                else:
-                    r_status = True
-                time.sleep(1)
-                if not r_status and is_mysql_running(is_windows=True):
-                    r_status = True
-            except Exception as e:
-                raise ValueError(f"启动Mysql时发生错误: {e}")
-            if not r_status:
-                raise ValueError(f"Mysql启动错误")
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if not is_mysql_running(is_windows=True):
+                        # command = f'"{exe_path}" --defaults-file="{conf_path}"'
+                        command = f'sc start MySQL'
+                        subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
+                    else:
+                        return True
+                    time.sleep(2)
+                    if is_mysql_running(is_windows=True):
+                        return True
+                except:
+                    if attempt == max_retries - 1:
+                        raise ValueError(f"Mysql启动错误")
+                    time.sleep(3)
         else:
             raise ValueError(f"Mysql未安装")
     else:
@@ -323,23 +326,32 @@ def Stop_Mysql(is_windows=True):
     soft_name ='mysqld.exe' if is_windows else "mysqld"
     if is_windows:
         soft_paths = get_mysql_path_info()
-        if is_mysql_running(is_windows=is_windows):
-            # import signal
-            # info_list = GetProcessNameInfo(soft_name,{},is_windows=is_windows)
-            # for i in info_list:
-            #     os.kill(int(i['ProcessId']), signal.SIGTERM)
-            # return True
-            command = f'sc stop MySQL'
-            subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
-            time.sleep(1)
-            if is_mysql_running(is_windows=True):
-                return False
-            return True
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if is_mysql_running(is_windows=is_windows):
+                    # import signal
+                    # info_list = GetProcessNameInfo(soft_name,{},is_windows=is_windows)
+                    # for i in info_list:
+                    #     os.kill(int(i['ProcessId']), signal.SIGTERM)
+                    # return True
+                    command = f'sc stop MySQL'
+                    subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
+                    time.sleep(2)
+                    if is_mysql_running(is_windows=True):
+                        continue
+                    return True
+            except:
+                if attempt == max_retries - 1:
+                    raise ValueError(f"Mysql停止失败")
+                time.sleep(2)
+        if is_mysql_running(is_windows=True):
+            return False
     else:
         if is_mysql_running(is_windows=is_windows):
             try:
                 subprocess.run(["sudo", "systemctl", "stop", "mysql"], check=True)
-                time.sleep(1)
+                time.sleep(2)
                 if is_mysql_running(is_windows=False):
                     return False
                 else:
@@ -427,14 +439,43 @@ def RY_SET_MYSQL_ROOT_PASS(password,first = True,is_windows=True):
                 if not is_windows:
                     import shlex
                     command = shlex.split(command)
-                result = subprocess.run(command,cwd=soft_paths['install_path'],check=True, text=True)
-                return True
+                result = subprocess.run(command,cwd=soft_paths['install_path'],check=True, text=True,timeout=10)
+                # 验证密码是否真的修改成功
+                if verify_mysql_password(new_root_pass, is_windows):
+                    return True
+                return False
             except Exception as e:
                 raise ValueError(f"修改mysql root密码时发生错误: {e}")
         else:
             raise ValueError(f"Mysql未运行")
     else:
         raise ValueError(f"Mysql未安装")
+
+def verify_mysql_password(password: str, is_windows: bool) -> bool:
+    """验证MySQL密码是否已正确修改"""
+    try:
+        soft_paths = get_mysql_path_info()
+        mysql_path = soft_paths['windows_abspath_mysql_path'] if is_windows else soft_paths['linux_mysql_path']
+        
+        if is_windows:
+            command = f'"{mysql_path}" -u root -p"{password}" -e "SELECT 1;"'
+            shell = True
+        else:
+            import shlex
+            command = shlex.split(f"{mysql_path} -u root -p'{password}' -e 'SELECT 1;'")
+            shell = False
+        
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=shell,
+            timeout=10
+        )
+        return result.returncode == 0
+        
+    except Exception:
+        return False
 
 def Mysql_Connect(db_host="127.0.0.1",db_port=3306,db_user="root",db_password="",db_name="",connect_timeout=3,charset="utf8mb4",local=True):
     """
@@ -595,7 +636,7 @@ def RY_BACKUP_MYSQL_DATABASE(db_info={},is_windows=True,return_bk_ins = False):
     db_pass = db_info.get('db_pass','')
     db_port = db_info.get('db_port','')
     charset = db_info.get('format','utf8mb4')
-    file_sql_name = f"db_{db_name}_{time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime())}_mysql_{GetRandomSet(5)}.sql"
+    file_sql_name = f"db_{db_name}_{time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())}_mysql_{GetRandomSet(5)}.sql"
     file_name = f"{file_sql_name}.zip"
     tmp_back_path =GetBackupPath().replace("/","\\") if is_windows else GetBackupPath()
     export_dir = os.path.join(tmp_back_path, "database",db_name)
@@ -906,6 +947,8 @@ def RY_GET_MYSQL_CONFIG(version="",is_windows=True):
         sqlmode = "NO_ZERO_DATE,NO_ZERO_IN_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION,STRICT_TRANS_TABLES,NO_AUTO_CREATE_USER"
         
     total_mem_m = int(total_memory_bytes/1024/1024)
+    if is_windows:#windows 下更改为数据库最低性能，高配数据库可能导致卡顿，导致用户体验不好
+        total_mem_m = 2048 if total_mem_m >=2048 else 2048
     if total_mem_m >1024 and total_mem_m <2048:
         key_buffer_size=32
         table_open_cache=128

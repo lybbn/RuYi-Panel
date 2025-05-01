@@ -3,7 +3,7 @@
     "author":"lybbn",
     "email":"1042594286@qq.com",
     "home_base_url": "https://ruyi.lybbn.cn",
-    "download_base_url": "https://download.ruyi.lybbn.cn",
+    "download_base_url": "http://download.lybbn.cn",
     "linux":{
         "root_path": "/ruyi",
         "install_path": "/ruyi/server",
