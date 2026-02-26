@@ -177,10 +177,6 @@ Vue3 + Vite + Python3 + Django
 
 [更多预览](https://gitee.com/lybbn/RuYi-Panel/wikis/pages?sort_id=13387675&doc_id=6451384)
 
-## 开源协议
-
-本项目采用 [MIT](LICENSE) 开源协议
-
 ## 鸣谢
 
 感谢以下开源项目提供的支持：
