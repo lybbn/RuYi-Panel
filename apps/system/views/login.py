@@ -25,6 +25,7 @@ from django.conf import settings
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.syslogs.logutil import RuyiAddOpLog
 from utils.security.safe_filter import filter_xss1,filter_xss2
+from utils.security.login_protection import check_login_allowed, record_login_success, record_login_failure, get_login_ban_status
 
 base_dir = settings.BASE_DIR
 confit_path = os.path.join(base_dir, 'web','dist','ruyi.config.js')
@@ -37,10 +38,13 @@ class CaptchaView(CustomAPIView):
     permission_classes = []
 
     def get(self, request):
+        ban_status = get_login_ban_status(request)
+        if ban_status:
+            return ErrorResponse(msg='登录失败次数过多，请稍后重试', data={'ban_status': ban_status})
+
         hashkey = CaptchaStore.generate_key()
         id = CaptchaStore.objects.filter(hashkey=hashkey).first().id
         imgage = captcha_image(request, hashkey)
-        # 将图片转换为base64
         image_base = base64.b64encode(imgage.content)
         json_data = {"key": id, "image_base": "data:image/png;base64," + image_base.decode('utf-8')}
         return DetailResponse(data=json_data)
@@ -74,6 +78,11 @@ class LoginView(CustomAPIView):
         CaptchaStore.objects.filter(expiration__lte = five_minute_ago).delete()
 
     def post(self, request):
+        allowed, ban_msg, remaining = check_login_allowed(request)
+        if not allowed:
+            RuyiAddOpLog(request, msg=ban_msg, module="login", status=False)
+            return ErrorResponse(msg=ban_msg, data={'remaining_seconds': remaining, 'banned': True})
+
         username = filter_xss2(filter_xss1(request.data.get('username',None)))
         password = filter_xss2(filter_xss1(request.data.get('password',None)))
         captchaKey = request.data.get('captchaKey',None)
@@ -83,24 +92,27 @@ class LoginView(CustomAPIView):
         five_minute_ago = datetime.now() - timedelta(hours=0, minutes=5, seconds=0)
         if image_code and five_minute_ago > image_code.expiration:
             self.delete_expire_captcha()
+            banned, fail_msg, remaining = record_login_failure(request)
             msg="验证码过期"
             RuyiAddOpLog(request,msg=msg,module="login",status=False)
-            return ErrorResponse(msg=msg)
+            return ErrorResponse(msg=fail_msg if banned else msg, data={'remaining_seconds': remaining, 'banned': banned})
         else:
             if image_code and (image_code.response == captcha or image_code.challenge == captcha):
                 image_code and image_code.delete()
             else:
                 self.delete_expire_captcha()
+                banned, fail_msg, remaining = record_login_failure(request)
                 msg="图片验证码错误"
                 RuyiAddOpLog(request,msg=msg,module="login",status=False)
-                return ErrorResponse(msg=msg)
+                return ErrorResponse(msg=fail_msg if banned else msg, data={'remaining_seconds': remaining, 'banned': banned})
             
         user = Users.objects.filter(username=username).first()
 
         if not user:
-            return ErrorResponse(msg="账号/密码错误")
+            banned, fail_msg, remaining = record_login_failure(request)
+            return ErrorResponse(msg=fail_msg, data={'remaining_seconds': remaining, 'banned': banned})
 
-        if user and not user.is_staff:#判断是否允许登录后台
+        if user and not user.is_staff:
             msg="您没有权限登录"
             RuyiAddOpLog(request,msg=msg,module="login",status=False)
             return ErrorResponse(msg=msg)
@@ -110,15 +122,16 @@ class LoginView(CustomAPIView):
             RuyiAddOpLog(request,msg=f'【{username}】{msg}',module="login",status=False)
             return ErrorResponse(msg=msg)
 
-        if user and user.check_password(password):  # check_password() 对明文进行加密,并验证
+        if user and user.check_password(password):
+            record_login_success(request)
             data = LoginSerializer.get_token(user)
             msg="登录成功"
             RuyiAddOpLog(request,msg=f'【{username}】{msg}',module="login",status=True)
             return DetailResponse(data=data,msg=msg)
         else:
-            msg="账号/密码错误"
-            RuyiAddOpLog(request,msg=f'【{username}】{msg}',module="login",status=False)
-            return ErrorResponse(msg=msg)
+            banned, fail_msg, remaining = record_login_failure(request)
+            RuyiAddOpLog(request,msg=f'【{username}】账号/密码错误',module="login",status=False)
+            return ErrorResponse(msg=fail_msg, data={'remaining_seconds': remaining, 'banned': banned})
 
 def AdminConfigResponse(request):
     

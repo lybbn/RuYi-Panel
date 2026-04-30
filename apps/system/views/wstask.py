@@ -24,7 +24,7 @@ import subprocess
 from channels.generic.websocket import AsyncWebsocketConsumer
 from utils.ruyiclass.dockerClass import DockerClient
 from utils.ruyiclass.dockerInclude.ry_dk_square import main as dk_square
-from utils.common import getTimestamp13
+from utils.common import getTimestamp13, GetLogsPath
 from apps.syslogs.logutil import asyncRuyiAddOpLog
 from utils.server.system import system
 
@@ -64,6 +64,8 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
             if self.rum_cmd_task:self.rum_cmd_task.cancel()
         if hasattr(self, 'get_compose_log_task'):
             if self.get_compose_log_task:self.get_compose_log_task.cancel()
+        if hasattr(self, 'get_update_log_task'):
+            if self.get_update_log_task:self.get_update_log_task.cancel()
 
     @classmethod
     async def decode_json(cls, text_data):
@@ -85,6 +87,8 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
                 self.rum_cmd_task = asyncio.create_task(self.get_tail_file(data))
             elif action == 'get_compose_log':
                 self.get_compose_log_task = asyncio.create_task(self.get_compose_log(data))
+            elif action == 'get_update_log':
+                self.get_update_log_task = asyncio.create_task(self.get_update_log(data))
             elif action == 'heartBeat':
                 self.missed_heartbeats = 0  # 重置未收到心跳计数器
                 await self.send_message(action='heartBeat',message={'timestamp':getTimestamp13()})
@@ -176,6 +180,97 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
             await self.close()
         except Exception as e:
             await self.send_message(action='error', message=f"{e}")
+            await self.close()
+    
+    async def get_update_log(self, cont):
+        success_flag = "ruyi_successful_flag"
+        failed_flag = "ruyi_failed_flag"
+        filepath = os.path.join(GetLogsPath(), 'ruyi_updatepanel.log')
+        lines = cont.get("lines", 200)
+        realtime = cont.get("realtime", True)
+        timeout = 60 * 15
+        start_time = time.time()
+
+        def _delete_stale_log(fp):
+            if os.path.exists(fp):
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+
+        await asyncio.to_thread(_delete_stale_log, filepath)
+
+        while not await asyncio.to_thread(os.path.exists, filepath):
+            if time.time() - start_time >= 30:
+                await self.send_message(action='error', message="⏳ 等待日志文件超时，可能升级进程未启动")
+                return
+            await asyncio.sleep(0.2)
+
+        if not realtime:
+            data = await asyncio.to_thread(system.GetFileLastNumsLines, filepath, lines)
+            await self.send_message(message=data)
+            return
+
+        def _read_initial_lines(fp, max_lines):
+            with open(fp, 'r', encoding='utf-8') as f:
+                all_lines = f.readlines()
+                total = len(all_lines)
+                start_idx = max(0, total - max_lines)
+                result = []
+                for i in range(start_idx, total):
+                    result.append(all_lines[i])
+                return result, f.tell()
+
+        def _read_new_lines(fp, offset):
+            new_lines = []
+            new_offset = offset
+            with open(fp, 'r', encoding='utf-8') as f:
+                f.seek(offset)
+                while True:
+                    line = f.readline()
+                    if not line:
+                        break
+                    if not line.endswith('\n'):
+                        # 读到不完整的行，回退 offset，等下次再读
+                        new_offset = f.tell() - len(line.encode('utf-8'))
+                        break
+                    new_lines.append(line)
+                # 无论是否读到新行，都更新 offset 为当前文件位置
+                new_offset = f.tell()
+            return new_lines, new_offset
+
+        last_offset = 0
+        try:
+            initial_lines, last_offset = await asyncio.to_thread(_read_initial_lines, filepath, lines)
+            for line in initial_lines:
+                await self.send_message(message=line)
+                if success_flag in line or failed_flag in line:
+                    await self.close()
+                    return
+
+            while True:
+                current_time = time.time()
+                if current_time - start_time >= timeout:
+                    await self.send_message(action='error', message="⚠️ 更新操作超时（15分钟），请检查后台进程或查看日志文件")
+                    break
+
+                current_size = await asyncio.to_thread(os.path.getsize, filepath)
+
+                if current_size > last_offset:
+                    new_lines, last_offset = await asyncio.to_thread(_read_new_lines, filepath, last_offset)
+                    for line in new_lines:
+                        await self.send_message(message=line)
+                        if success_flag in line or failed_flag in line:
+                            await self.close()
+                            return
+
+                await asyncio.sleep(0.3)
+
+        except FileNotFoundError:
+            await self.send_message(action='error', message=f"❌ 日志文件不存在: {filepath}")
+            await self.close()
+        except Exception as e:
+            await self.send_message(action='error', message=f"❌ 读取日志出错: {e}")
             await self.close()
             
     async def run_command(self, cmd):

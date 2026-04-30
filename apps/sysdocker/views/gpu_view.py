@@ -32,7 +32,6 @@ class RYAIGgpuInfoManageView(CustomAPIView):
     获取GPU信息
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         data = GPUMain().get_gpu_info()

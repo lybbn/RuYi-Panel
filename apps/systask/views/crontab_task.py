@@ -194,9 +194,12 @@ class CrontabTaskViewSet(CustomModelViewSet):
         taskname = instance.name
         self.perform_destroy(instance)
         job_id = instance.job_id
-        pause_task(job_id)
-        remove_task(job_id)
-        deleteTaskLogs(job_id)
+        try:
+            pause_task(job_id)
+            remove_task(job_id)
+            deleteTaskLogs(job_id)
+        except:
+            pass
         RuyiAddOpLog(request,msg="【计划任务】-【删除】=>"+taskname,module="taskmg")
         return DetailResponse(data=[], msg="删除成功")
     
@@ -284,7 +287,6 @@ class GetDjangoJobExecutionView(CustomAPIView):
     获取执行日志
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     def get(self, request):
         reqData = get_parameter_dic(request)

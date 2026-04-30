@@ -33,7 +33,6 @@ class RYDockerImageManageView(CustomAPIView):
     设置image镜像
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)

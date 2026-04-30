@@ -32,7 +32,6 @@ class RYServManageView(CustomAPIView):
     服务器/面板管理
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     def post(self, request):
         reqData = get_parameter_dic(request)

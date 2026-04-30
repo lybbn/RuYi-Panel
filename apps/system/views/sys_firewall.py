@@ -37,7 +37,6 @@ class RYSysFirewallView(CustomAPIView):
     防火墙设置
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         is_windows = True  if current_os == "windows" else False

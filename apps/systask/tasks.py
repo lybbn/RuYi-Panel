@@ -285,6 +285,27 @@ def cronTask(obj,job_id):
     else:
         pass
     taskloggers.info("------------------------【%s】任务结束------------------------"%job_name)
+    
+    # 检查任务执行结果，触发告警通知
+    if type == 0:#shell任务
+        if stderr:
+            _trigger_cron_fail_alert(job_name, f"执行脚本失败：{stderr}")
+    elif type in [1, 2, 3]:#备份类任务
+        # 备份任务已在各自逻辑中处理日志
+        pass
+    elif type == 4:#访问URL任务
+        if not result["status"]:
+            _trigger_cron_fail_alert(job_name, f"访问URL失败：{result['content']}")
+
+def _trigger_cron_fail_alert(job_name, error_msg):
+    """
+    触发定时任务失败告警
+    """
+    try:
+        from apps.sysalert.tasks import check_cron_fail
+        check_cron_fail(job_name, error_msg)
+    except Exception as e:
+        logger.error(f"触发定时任务失败告警失败: {e}")
 
 def installTask(job_id,job_func,func_args=[]):
     """
@@ -448,6 +469,12 @@ def start_scheduler():
     scheduler.add_jobstore(DjangoJobStore(), 'default')
     scheduler._logger = logger
     scheduler.start()
+    try:
+        # 恢复依赖运行时调度器的动态任务，避免服务重启后监控采集丢失
+        from apps.sysmonitor.tasks import register_monitor_task
+        register_monitor_task()
+    except Exception as e:
+        logger.error(f"恢复监控采集任务失败: {e}")
     scheduler.add_job(
         executeNextTask,
         trigger=DateTrigger(run_date=datetime.datetime.now() + datetime.timedelta(seconds=1)),  # 1 秒后执行

@@ -38,7 +38,6 @@ class RYSystemTaskCenterView(CustomAPIView):
     系统任务中心
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     def get(self, request):
         reqData = get_parameter_dic(request)

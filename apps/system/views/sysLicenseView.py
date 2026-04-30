@@ -32,7 +32,6 @@ class RYSysImportLicenseView(CustomAPIView):
     导入系统license
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self,request):
         ALLOWED_MIME_TYPES = ['application/zip', 'application/x-zip-compressed']
@@ -78,7 +77,6 @@ class RYSysUnBindLicenseView(CustomAPIView):
     解除license绑定
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self,request):
         isok,msg = proFuncLoader().unbind_license()

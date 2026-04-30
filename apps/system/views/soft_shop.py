@@ -61,6 +61,13 @@ def soft_install_callback(job_id="",version={},ok=True):
                 RySoftShop.objects.create(name=name,install_version=version['c_version'],install_path=version['install_path'],installed=True,status=2,password=password,info=info,type=int(version.get('type',0)))
         else:
             task.status = 2
+            name = version.get('name', '')
+            if name:
+                detail_version = version.get('c_version') if name in ['python', 'go'] else None
+                if detail_version:
+                    RySoftShop.objects.filter(name=name, install_version=detail_version).delete()
+                else:
+                    RySoftShop.objects.filter(name=name).delete()
         end_time = datetime.datetime.now()  # 记录任务结束时间
         if task.exec_at:
             task.duration = (end_time - task.exec_at).total_seconds()
@@ -79,7 +86,6 @@ class RYSoftShopListView(CustomAPIView):
     获取应用列表
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     def post(self, request):
         reqData = get_parameter_dic(request)
@@ -158,7 +164,6 @@ class RYSoftShopManageView(CustomAPIView):
     应用管理
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     @transaction.atomic
     def post(self, request):
@@ -211,11 +216,28 @@ class RYSoftShopManageView(CustomAPIView):
             if soft['name'] in ["python","go"]:#允许多个版本存在
                 version_post = reqData.get("version",None)#如果提供了版本（c_version），就卸载指定，没提供取第一个
                 version = version_post if version_post else soft["versions"][0]['c_version']
-                Ry_Uninstall_Soft(name=soft['name'],is_windows=is_windows,version=version)
+                try:
+                    Ry_Uninstall_Soft(name=soft['name'],is_windows=is_windows,version=version)
+                except Exception as e:
+                    detail_version = version
+                    s_installed, s_version, s_status, s_install_path = Check_Soft_Installed(name=soft['name'],is_windows=is_windows,version=detail_version)
+                    if not s_installed:
+                        RySoftShop.objects.filter(name=soft['name'],install_version=version).delete()
+                        RuyiAddOpLog(request,msg="【软件商店】-【卸载】=>"+soft['name']+version,module="softmg")
+                        return DetailResponse(msg="卸载成功")
+                    return ErrorResponse(msg=str(e))
                 RySoftShop.objects.filter(name=soft['name'],install_version=version).delete()
                 RuyiAddOpLog(request,msg="【软件商店】-【卸载】=>"+soft['name']+version,module="softmg")
             else:
-                Ry_Uninstall_Soft(name=soft['name'],is_windows=is_windows)
+                try:
+                    Ry_Uninstall_Soft(name=soft['name'],is_windows=is_windows)
+                except Exception as e:
+                    s_installed, s_version, s_status, s_install_path = Check_Soft_Installed(name=soft['name'],is_windows=is_windows)
+                    if not s_installed:
+                        RySoftShop.objects.filter(name=soft['name']).delete()
+                        RuyiAddOpLog(request,msg="【软件商店】-【卸载】=>"+soft['name'],module="softmg")
+                        return DetailResponse(msg="卸载成功")
+                    return ErrorResponse(msg=str(e))
                 RySoftShop.objects.filter(name=soft['name']).delete()
                 RuyiAddOpLog(request,msg="【软件商店】-【卸载】=>"+soft['name'],module="softmg")
             return DetailResponse(msg="卸载成功")
@@ -295,7 +317,6 @@ class RYSoftInstallLogsView(CustomAPIView):
     应用管理
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     @transaction.atomic
     def post(self, request):
@@ -334,7 +355,6 @@ class RYSoftInfoManageView(CustomAPIView):
     应用信息管理
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     @transaction.atomic
     def post(self, request):

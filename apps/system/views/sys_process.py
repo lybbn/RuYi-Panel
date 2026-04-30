@@ -116,7 +116,6 @@ class RYSysProcessListView(CustomAPIView):
     系统进程列表
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)
@@ -133,7 +132,6 @@ class RYSysProcessDetailView(CustomAPIView):
     系统进程详情
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)
@@ -149,7 +147,6 @@ class RYSysProcessOperateView(CustomAPIView):
     系统进程操作
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     def post(self, request):
         reqData = get_parameter_dic(request)

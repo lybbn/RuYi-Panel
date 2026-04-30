@@ -16,6 +16,7 @@
 # 系统配置
 # ------------------------------
 import os,re
+import json
 import requests
 import socket
 import datetime
@@ -65,7 +66,6 @@ class RYSysLicenseView(CustomAPIView):
     获取系统license
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         data = proFuncLoader().get_license()
@@ -79,7 +79,6 @@ class RYSysconfigManageView(CustomAPIView):
     更新系统配置
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         u_ins = Users.objects.filter(is_superuser=True,is_staff=True).first()
@@ -114,6 +113,21 @@ class RYSysconfigManageView(CustomAPIView):
         data['siteNums'] = Sites.objects.count()
         data['dbNums'] = Databases.objects.count()
         data['softNums'] = RySoftShop.objects.filter(installed=True).count()
+        
+        # API配置
+        api_config_path = os.path.join(settings.RUYI_DATA_BASE_PATH, 'api_config.json')
+        data['api_enable'] = False
+        data['api_key'] = ''
+        data['api_ip_whitelist'] = []
+        if os.path.exists(api_config_path):
+            try:
+                api_config = json.loads(ReadFile(api_config_path))
+                data['api_enable'] = api_config.get('api_enable', False)
+                data['api_key'] = api_config.get('api_key', '')
+                data['api_ip_whitelist'] = api_config.get('api_ip_whitelist', [])
+            except:
+                pass
+                
         return DetailResponse(data=data)
 
     def post(self, request):
@@ -251,6 +265,46 @@ class RYSysconfigManageView(CustomAPIView):
                 DeleteFile(settings.RUYI_SSL_ENABLE_FILE)
             RuyiAddOpLog(request,msg="【面板设置】-【面板SSL】%s"%(en_msg),module="panelst")
             return DetailResponse(msg="设置成功")
+        elif action == "save_api_config":
+            api_enable = reqData.get('api_enable', False)
+            api_key = reqData.get('api_key', '')
+            api_ip_whitelist = reqData.get('api_ip_whitelist', []) # List of strings
+            
+            if api_enable and not api_key:
+                return ErrorResponse(msg="启用API时必须配置密钥")
+            if len(api_key) < 16 or len(api_key) > 128:
+                return ErrorResponse(msg="密钥长度必须大于等于16位，小于等于128位")
+            
+            # 校验IP白名单格式
+            for ip_rule in api_ip_whitelist:
+                ip_rule = ip_rule.strip()
+                if not ip_rule: continue
+                
+                if ip_rule == '*':
+                    continue
+                elif '-' in ip_rule:
+                    parts = ip_rule.split('-')
+                    if len(parts) != 2:
+                        return ErrorResponse(msg=f"IP段格式错误: {ip_rule}")
+                    if not is_valid_ipv4(parts[0].strip()) or not is_valid_ipv4(parts[1].strip()):
+                         return ErrorResponse(msg=f"IP段格式错误: {ip_rule}")
+                else:
+                    if not is_valid_ipv4(ip_rule):
+                        return ErrorResponse(msg=f"IP格式错误: {ip_rule}")
+
+            config = {
+                'api_enable': api_enable,
+                'api_key': api_key,
+                'api_ip_whitelist': api_ip_whitelist
+            }
+            api_config_path = os.path.join(settings.RUYI_DATA_BASE_PATH, 'api_config.json')
+            try:
+                WriteFile(api_config_path, json.dumps(config))
+                status_msg = "启用" if api_enable else "禁用"
+                RuyiAddOpLog(request, msg=f"【面板设置】-【API接口】{status_msg}API接口", module="panelst")
+                return DetailResponse(msg="设置成功")
+            except Exception as e:
+                return ErrorResponse(msg=f"保存失败: {str(e)}")
         return ErrorResponse(msg="参数错误")
     
 class RYGetInterfacesView(CustomAPIView):
@@ -261,7 +315,6 @@ class RYGetInterfacesView(CustomAPIView):
     更新系统配置
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         hostname = socket.gethostname()
@@ -283,14 +336,16 @@ class RYUpdateSysManageView(CustomAPIView):
     更新系统
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         s_url = "http://download.lybbn.cn/ruyi/install/version.json"
-        resp = requests.get(url=s_url,timeout=5)
         ver = ""
-        if resp.status_code == 200:
-            ver = resp.text
+        try:
+            resp = requests.get(url=s_url, timeout=5)
+            if resp.status_code == 200:
+                ver = resp.text
+        except Exception:
+            pass
         c_ver = ReadFile(settings.RUYI_SYSVERSION_FILE)
         has_new_version = False
         if ver:
@@ -307,20 +362,39 @@ class RYUpdateSysManageView(CustomAPIView):
         return DetailResponse(data=data)
     
     def post(self, request):
+        import os
+        
         reqData = get_parameter_dic(request)
         action = reqData.get("action","")
-        if action == "update":
-            isok,msg = update_ruyi_panel()
-            if not isok:
-                return ErrorResponse(msg=msg)
-            RuyiAddOpLog(request,msg="【面板设置】=> 更新面板",module="panelst")
-            return DetailResponse(msg="更新成功，请重启面板！！！")
-        elif action == "fix":
-            isok,msg = update_ruyi_panel()
-            if not isok:
-                return ErrorResponse(msg=msg)
-            RuyiAddOpLog(request,msg="【面板设置】=> 修复面板",module="panelst")
-            return DetailResponse(msg="修复成功，请重启面板！！！")
+        if action in ("update", "fix"):
+            try:
+                from utils.common import GetLogsPath, DeleteFile
+                from utils.upgrade_panel import update_ruyi_panel
+                import multiprocessing
+                
+                log_file = os.path.join(GetLogsPath(), 'ruyi_updatepanel.log')
+                DeleteFile(log_file, empty_tips=False)
+                
+                log_dir = os.path.dirname(log_file)
+                if not os.path.exists(log_dir):
+                    os.makedirs(log_dir)
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    f.write(f"[启动] 升级任务已触发，正在启动进程...\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+                
+                process = multiprocessing.Process(
+                    target=update_ruyi_panel,
+                    daemon=True
+                )
+                process.start()
+                
+                action_text = "更新" if action == "update" else "修复"
+                RuyiAddOpLog(request, msg=f"【面板设置】=> {action_text}面板", module="panelst")
+                return DetailResponse(msg=f"已启动{action_text}任务，请查看日志")
+            except Exception as e:
+                import traceback
+                return ErrorResponse(msg=f"启动升级任务失败: {str(e)}\n{traceback.format_exc()}")
         return ErrorResponse(msg="类型错误")
     
 class RYGetSysLocalAndAppsServiceView(CustomAPIView):
@@ -329,7 +403,6 @@ class RYGetSysLocalAndAppsServiceView(CustomAPIView):
     获取本地和dkapp的服务列表（如：mysql等）
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)

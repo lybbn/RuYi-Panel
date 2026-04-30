@@ -7,7 +7,6 @@ django.setup()
 
 import platform
 from apps.system.models import Users,Config,SiteGroup
-from apps.systask.models import CrontabTask
 from apps.sysdocker.models import RyDockerRepo
 from django.contrib.auth.hashers import make_password
 from utils.common import GetRandomSet
@@ -108,59 +107,16 @@ if object.{key}:
         from django_apscheduler.jobstores import DjangoJobStore
         scheduler.add_jobstore(DjangoJobStore(), 'default')
         scheduler.start()
-        from apps.systask.tasks import cronTask
-        from django.conf import settings
-        root_path = settings.BASE_DIR
-        job_id1 = "sys_job_check_sites_end_001"
-        job_id2 = "sys_job_check_letsencrypt_001"
-        shell_body1 = ""
-        shell_body2 = ""
-        plat = platform.system().lower()
-        if plat == 'windows':
-            shell_body1 = f"cd {root_path}\npython manage.py checkSitesEnd"
-            shell_body2 = f"cd {root_path}\npython manage.py renewSSL"
-        else:
-            shell_body1 = f"cd {root_path}\n/usr/local/ruyi/python/bin/python3 manage.py checkSitesEnd"
-            shell_body2 = f"cd {root_path}\n/usr/local/ruyi/python/bin/python3 manage.py renewSSL"
-        reqData1 = {"type":0,"name":"检查网站过期","shell_body":shell_body1}
-        reqData2 = {"type":0,"name":"续签Let's Encrypt证书","shell_body":shell_body2}
-        django_job1 = scheduler.add_job(cronTask,'cron',id=job_id1,second=0, minute=10, hour=1, day="*", month="*", week="*", year="*",args=[reqData1,job_id1],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
-        django_job2 = scheduler.add_job(cronTask,'cron',id=job_id2,second=0, minute=10, hour=1, day="*", month="*", week="*", year="*",args=[reqData2,job_id2],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
-        data = [
-            {
-                "id": 1,
-                "job_id":job_id1,
-                "name": "检查网站过期",
-                "is_sys": 0, 
-                "status": 1,
-                "period_type": 1,
-                "year": 0,
-                "month": 0,
-                "week": 0,
-                "day": 0,
-                "hour": 1,
-                "minute": 10,
-                "second": 0,
-                "shell_body": shell_body1,
-            },
-            {
-                "id": 2,
-                "job_id":job_id2,
-                "name": "续签Let's Encrypt证书",
-                "is_sys": 0, 
-                "status": 1,
-                "period_type": 1,
-                "year": 0,
-                "month": 0,
-                "week": 0,
-                "day": 0,
-                "hour": 1,
-                "minute": 10,
-                "second": 0,
-                "shell_body": shell_body2,
-            },
-        ]
-        self.save(CrontabTask, data, "计划任务表")
+        
+        # 注意：监控和告警任务不由初始化自动注册
+        # - 监控任务：由用户在监控配置页面开启后自动注册
+        # - 告警任务：由用户创建具体告警任务后自动注册
+        
+        # 初始化系统默认计划任务
+        from apps.systask.init_data import init_crontab_tasks
+        print(f"正在初始化【计划任务表】")
+        created_count, skipped_count = init_crontab_tasks(force=self.delete)
+        print(f"初始化完成【计划任务表】: 新建 {created_count} 个, 跳过 {skipped_count} 个")
         
     def init_dockers_repo(self):
         """
@@ -174,13 +130,35 @@ if object.{key}:
         }]
         self.save(RyDockerRepo, data, "初始化容器仓库表")
 
+    def init_alert_notify_config(self):
+        """
+        初始化告警通知渠道配置
+        预制6种通知渠道，默认禁用，需要用户配置后启用
+        """
+        from apps.sysalert.init_data import init_alert_notify_config
+        
+        print(f"正在初始化【告警通知渠道配置】")
+        created_count, skipped_count = init_alert_notify_config(force=self.delete)
+        print(f"初始化完成【告警通知渠道配置】: 新建 {created_count} 个, 跳过 {skipped_count} 个")
+
+    def init_waf(self):
+        """
+        初始化WAF数据
+        """
+        from apps.syswaf.init_data import init_waf_data
+        
+        print(f"正在初始化【WAF数据】")
+        categories, rules, config, ip_group, from_remote = init_waf_data(force=self.delete)
+        print(f"初始化完成【WAF数据】: 分类{categories}个, 规则{rules}条, 配置{config}, IP组{ip_group}")
+
     def run(self):
         self.init_users()
         self.init_config()
         self.init_site_group()
         self.init_task()
         self.init_dockers_repo()
-
+        self.init_alert_notify_config()
+        self.init_waf()
 
 def main(delete=True,username=None,password=None):
     Initialize(delete=delete,username=username,password=password).run()

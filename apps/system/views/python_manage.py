@@ -61,7 +61,6 @@ class RYPythonSiteManageView(CustomAPIView):
     设置Python 站点项目
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)
@@ -346,7 +345,6 @@ class RYPythonManageView(CustomAPIView):
     设置Python项目
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)

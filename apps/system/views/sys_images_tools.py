@@ -31,7 +31,6 @@ class RYSysImageToolsView(CustomAPIView):
     图片工具
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     @csrf_exempt
     def post(self,request):

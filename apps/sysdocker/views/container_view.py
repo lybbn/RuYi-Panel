@@ -32,7 +32,6 @@ class RYDockerLimitManageView(CustomAPIView):
     获取系统信息（用于容器最大限制）
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         cpu_count = psutil.cpu_count(logical=False)  # 物理核心数
@@ -56,7 +55,6 @@ class RYDockerContainerManageView(CustomAPIView):
     设置容器
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)
@@ -90,5 +88,26 @@ class RYDockerContainerManageView(CustomAPIView):
             isok,msg = docker_client.set_status(cont=reqData)
             if not isok:return ErrorResponse(msg=msg)
             RuyiAddOpLog(request,msg=f"【容器】- {status} => {name}",module="dockermg")
+            return DetailResponse(msg=msg)
+        elif action == "get_logs":
+            isok,data = docker_client.get_container_logs(cont=reqData)
+            if not isok:return ErrorResponse(msg=data)
+            return DetailResponse(data=data)
+        elif action == "get_stats":
+            isok,data = docker_client.get_container_stats(cont=reqData)
+            if not isok:return ErrorResponse(msg=data)
+            return DetailResponse(data=data)
+        elif action == "clear_logs":
+            isok,msg = docker_client.clear_container_logs(cont=reqData)
+            if not isok:return ErrorResponse(msg=msg)
+            return DetailResponse(msg=msg)
+        elif action == "edit":
+            id = reqData.get('id',"")
+            name = reqData.get('name',"")
+            if not id:return ErrorResponse(msg="缺少容器ID")
+            reqData['action_type']="container"
+            isok,msg = docker_client.edit(reqData)
+            if not isok:return ErrorResponse(msg=msg)
+            RuyiAddOpLog(request,msg=f"【容器】- 编辑容器：{name}",module="dockermg")
             return DetailResponse(msg=msg)
         return ErrorResponse(msg="类型错误")

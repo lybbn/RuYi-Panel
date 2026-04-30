@@ -119,7 +119,6 @@ class RYSysNetworkListView(CustomAPIView):
     系统网络连接列表
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)
@@ -135,7 +134,6 @@ class RYSysNetworkOperateView(CustomAPIView):
     系统网络连接操作
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     def post(self, request):
         reqData = get_parameter_dic(request)

@@ -1,0 +1,761 @@
+{
+  "version": "1.0.0",
+  "update_time": "2025-02-26",
+  "description": "如意面板WAF防护规则",
+  "categories": [
+    {
+      "id": 1,
+      "name": "SQL注入",
+      "code": "sql",
+      "icon": "Warning",
+      "color": "#F56C6C",
+      "sort": 1,
+      "description": "SQL注入攻击防护"
+    },
+    {
+      "id": 2,
+      "name": "XSS攻击",
+      "code": "xss",
+      "icon": "Warning",
+      "color": "#E6A23C",
+      "sort": 2,
+      "description": "跨站脚本攻击防护"
+    },
+    {
+      "id": 3,
+      "name": "命令注入",
+      "code": "cmd",
+      "icon": "Warning",
+      "color": "#F56C6C",
+      "sort": 3,
+      "description": "命令注入攻击防护"
+    },
+    {
+      "id": 4,
+      "name": "路径遍历",
+      "code": "path",
+      "icon": "Warning",
+      "color": "#E6A23C",
+      "sort": 4,
+      "description": "路径遍历攻击防护"
+    },
+    {
+      "id": 5,
+      "name": "扫描防护",
+      "code": "scan",
+      "icon": "View",
+      "color": "#909399",
+      "sort": 5,
+      "description": "扫描器检测"
+    },
+    {
+      "id": 6,
+      "name": "敏感文件",
+      "code": "file",
+      "icon": "Document",
+      "color": "#E6A23C",
+      "sort": 6,
+      "description": "敏感文件访问防护"
+    },
+    {
+      "id": 7,
+      "name": "Bot管理",
+      "code": "bot",
+      "icon": "Monitor",
+      "color": "#67C23A",
+      "sort": 7,
+      "description": "爬虫和Bot检测"
+    },
+    {
+      "id": 99,
+      "name": "其他",
+      "code": "other",
+      "icon": "More",
+      "color": "#909399",
+      "sort": 99,
+      "description": "其他规则"
+    }
+  ],
+  "rules": [
+    {
+      "rule_id": "sql-001",
+      "name": "SQL注入 - UNION注入",
+      "category_id": 1,
+      "severity": "high",
+      "pattern": "(?i)(union\\s+(all\\s+)?select)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测UNION SELECT类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-002",
+      "name": "SQL注入 - SELECT FROM",
+      "category_id": 1,
+      "severity": "high",
+      "pattern": "(?i)(select\\s+.+\\s+from)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测SELECT FROM类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-003",
+      "name": "SQL注入 - INSERT/UPDATE/DELETE",
+      "category_id": 1,
+      "severity": "high",
+      "pattern": "(?i)(insert\\s+into|update\\s+.+\\s+set|delete\\s+from)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测INSERT/UPDATE/DELETE类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-004",
+      "name": "SQL注入 - DROP/TRUNCATE",
+      "category_id": 1,
+      "severity": "critical",
+      "pattern": "(?i)(drop\\s+(table|database)|truncate\\s+table)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测DROP/TRUNCATE类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-005",
+      "name": "SQL注入 - 执行函数",
+      "category_id": 1,
+      "severity": "high",
+      "pattern": "(?i)(exec(ute)?\\s*\\(|xp_cmdshell)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测执行函数类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-006",
+      "name": "SQL注入 - 信息获取",
+      "category_id": 1,
+      "severity": "high",
+      "pattern": "(?i)(information_schema|sys\\.(tables|columns)|sysobjects|syscolumns)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测信息获取类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-008",
+      "name": "SQL注入 - 时间盲注",
+      "category_id": 1,
+      "severity": "high",
+      "pattern": "(?i)(benchmark\\s*\\(|sleep\\s*\\(|waitfor\\s+delay)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测时间盲注类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-009",
+      "name": "SQL注入 - 文件操作",
+      "category_id": 1,
+      "severity": "critical",
+      "pattern": "(?i)(load_file\\s*\\(|into\\s+(out|dump)file)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测文件操作类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-010",
+      "name": "SQL注入 - 编码绕过",
+      "category_id": 1,
+      "severity": "medium",
+      "pattern": "(?i)(hex\\s*\\(|unhex\\s*\\(|char\\s*\\(|ascii\\s*\\(|ord\\s*\\()",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测编码绕过类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-011",
+      "name": "SQL注入 - 字符串函数",
+      "category_id": 1,
+      "severity": "medium",
+      "pattern": "(?i)(mid\\s*\\(|substr(ing)?\\s*\\(|length\\s*\\(|concat\\s*\\()",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测字符串函数类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-012",
+      "name": "SQL注入 - 条件语句",
+      "category_id": 1,
+      "severity": "medium",
+      "pattern": "(?i)(ifnull\\s*\\(|nullif\\s*\\(|coalesce\\s*\\(|case\\s+when)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测条件语句类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-013",
+      "name": "SQL注入 - 类型转换",
+      "category_id": 1,
+      "severity": "medium",
+      "pattern": "(?i)(cast\\s*\\(|convert\\s*\\()",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测类型转换类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-014",
+      "name": "SQL注入 - 注释符",
+      "category_id": 1,
+      "severity": "medium",
+      "pattern": "(--\\s*$|/\\*.+\\*/|;\\s*$)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测注释符类型的SQL注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-015",
+      "name": "SQL注入 - HAVING注入",
+      "category_id": 1,
+      "severity": "medium",
+      "pattern": "(?i)(having\\s+\\d+\\s*=)",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测HAVING子句注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sql-016",
+      "name": "SQL注入 - GROUP BY注入",
+      "category_id": 1,
+      "severity": "medium",
+      "pattern": "(?i)(group\\s+by\\s+\\d+\\s*\\()",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测GROUP BY子句注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-001",
+      "name": "XSS检测 - Script标签",
+      "category_id": 2,
+      "severity": "high",
+      "pattern": "(?i)(<script[^>]*>|</script>|<script[^>]*\\s+src\\s*=)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测Script标签类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-002",
+      "name": "XSS检测 - 事件处理器",
+      "category_id": 2,
+      "severity": "high",
+      "pattern": "(?i)(on(?:abort|activate|afterprint|afterupdate|beforeactivate|beforecopy|beforecut|beforedeactivate|beforeeditfocus|beforepaste|beforeprint|beforeunload|beforeupdate|blur|bounce|cellchange|change|click|contextmenu|controlselect|copy|cut|dataavailable|datasetchanged|datasetcomplete|dblclick|deactivate|drag|dragdrop|dragend|dragenter|dragleave|dragover|dragstart|drop|error|errorupdate|filterchange|finish|focus|focusin|focusout|hashchange|help|input|keydown|keypress|keyup|layoutcomplete|load|losecapture|message|mousedown|mouseenter|mouseleave|mousemove|mouseout|mouseover|mouseup|mousewheel|move|moveend|movestart|offline|online|outofsync|paste|popstate|propertychange|readystatechange|reset|resize|resizeend|resizestart|rowenter|rowexit|rowsdelete|rowsinserted|scroll|search|select|selectionchange|selectstart|start|stop|storage|submit|syncrestored|timeout|toggle|unload|volumechange)\\s*=)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测事件处理器类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-003",
+      "name": "XSS检测 - 数据URI",
+      "category_id": 2,
+      "severity": "medium",
+      "pattern": "(?i)(data\\s*:\\s*text/html|data\\s*:\\s*application)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测Data URI类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-004",
+      "name": "XSS检测 - JavaScript协议",
+      "category_id": 2,
+      "severity": "high",
+      "pattern": "(?i)(javascript\\s*:|vbscript\\s*:)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测JavaScript协议类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-005",
+      "name": "XSS检测 - 危险标签",
+      "category_id": 2,
+      "severity": "high",
+      "pattern": "(?i)(<iframe[^>]*>|<frame[^>]*>|<object[^>]*>|<embed[^>]*>|<applet[^>]*>)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测危险标签类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-006",
+      "name": "XSS检测 - Meta标签",
+      "category_id": 2,
+      "severity": "medium",
+      "pattern": "(?i)(<meta[^>]*http-equiv)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测Meta标签类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-007",
+      "name": "XSS检测 - 表单标签",
+      "category_id": 2,
+      "severity": "medium",
+      "pattern": "(?i)(<form[^>]*>|<input[^>]*>|<button[^>]*>|<textarea[^>]*>|<select[^>]*>)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测表单标签类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-008",
+      "name": "XSS检测 - CSS表达式",
+      "category_id": 2,
+      "severity": "medium",
+      "pattern": "(?i)(expression\\s*\\(|behavior\\s*:|-moz-binding\\s*:|@import)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测CSS表达式类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-009",
+      "name": "XSS检测 - DOM操作",
+      "category_id": 2,
+      "severity": "high",
+      "pattern": "(?i)(document\\s*\\.\\s*(cookie|location|write)|window\\s*\\.\\s*(location|open))",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测DOM操作类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-010",
+      "name": "XSS检测 - 危险函数",
+      "category_id": 2,
+      "severity": "high",
+      "pattern": "(?i)(eval\\s*\\(|setTimeout\\s*\\(|setInterval\\s*\\(|Function\\s*\\()",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测危险函数类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-011",
+      "name": "XSS检测 - 弹窗函数",
+      "category_id": 2,
+      "severity": "medium",
+      "pattern": "(?i)(alert\\s*\\(|confirm\\s*\\(|prompt\\s*\\()",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测弹窗函数类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-012",
+      "name": "XSS检测 - 编码函数",
+      "category_id": 2,
+      "severity": "medium",
+      "pattern": "(?i)(fromCharCode|escape\\s*\\(|unescape\\s*\\()",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测编码函数类型的XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-014",
+      "name": "XSS检测 - SVG攻击",
+      "category_id": 2,
+      "severity": "medium",
+      "pattern": "(?i)(<svg[^>]*onload|xlink:href|xmlns:xlink)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测SVG XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "xss-015",
+      "name": "XSS检测 - Base64编码",
+      "category_id": 2,
+      "severity": "medium",
+      "pattern": "(?i)(base64_decode\\s*\\(|atob\\s*\\()",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测Base64解码XSS攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cmd-001",
+      "name": "命令注入 - 分号执行",
+      "category_id": 3,
+      "severity": "critical",
+      "pattern": "(?i)(;\\s*(cat|ls|dir|pwd|whoami|id|uname|wget|curl|nc|ncat|telnet|ftp|ssh|scp|rm|mv|cp|chmod|chown|kill|ps|top|free|df|du|find|grep|awk|sed|perl|python|ruby|php)\\s+)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测分号执行类型的命令注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cmd-002",
+      "name": "命令注入 - 管道执行",
+      "category_id": 3,
+      "severity": "critical",
+      "pattern": "(?i)(\\|\\s*(cat|ls|id|whoami|wget|curl|nc)\\s+)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测管道执行类型的命令注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cmd-003",
+      "name": "命令注入 - 反引号执行",
+      "category_id": 3,
+      "severity": "critical",
+      "pattern": "(`[^`]+`)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测反引号执行类型的命令注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cmd-004",
+      "name": "命令注入 - 子Shell执行",
+      "category_id": 3,
+      "severity": "critical",
+      "pattern": "(\\$\\([^)]+\\)|\\$\\{[^}]+\\})",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测子Shell执行类型的命令注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cmd-005",
+      "name": "命令注入 - 逻辑运算符",
+      "category_id": 3,
+      "severity": "high",
+      "pattern": "(\\|\\|\\s*\\w+|&&\\s*\\w+)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测逻辑运算符类型的命令注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cmd-006",
+      "name": "命令注入 - 重定向",
+      "category_id": 3,
+      "severity": "high",
+      "pattern": "((?:;|\\||&&|\\|\\||`\\s*)\\s*(?:>|>>|<)\\s*/(?:etc|tmp|var|root|home|bin|sbin|usr|opt|dev|proc|sys|run|boot|lib|lib64|mnt|media|srv|opt|data|backup|log|www|html|web|public|uploads|config|settings|database|db|sql|backup|bak|old|swp|env|git|svn|ssh|docker|kubernetes|k8s)[a-zA-Z0-9_\\-/]*)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测重定向类型的命令注入攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cmd-007",
+      "name": "命令注入 - PHP危险函数",
+      "category_id": 3,
+      "severity": "critical",
+      "pattern": "(?i)(eval\\s*\\(|assert\\s*\\(|preg_replace\\s*\\(.*\\/e|create_function\\s*\\(|call_user_func\\s*\\(|call_user_func_array\\s*\\()",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测PHP危险函数执行",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cmd-008",
+      "name": "命令注入 - 文件包含函数",
+      "category_id": 3,
+      "severity": "critical",
+      "pattern": "(?i)(include\\s*\\(|require\\s*\\(|include_once\\s*\\(|require_once\\s*\\(|file_get_contents\\s*\\(|file_put_contents\\s*\\()",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测PHP文件包含函数",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cmd-009",
+      "name": "命令注入 - PHP全局变量",
+      "category_id": 3,
+      "severity": "high",
+      "pattern": "\\$_(GET|POST|COOKIE|FILES|SESSION|SERVER|ENV|REQUEST|GLOBALS)\\s*\\[",
+      "targets": "[\"url\", \"post\", \"cookie\"]",
+      "description": "检测PHP全局变量注入",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "path-001",
+      "name": "路径遍历 - 目录穿越",
+      "category_id": 4,
+      "severity": "high",
+      "pattern": "(\\.\\./|\\.\\.\\\\|%2e%2e%2f|%2e%2e/|\\.\\.%2f|%2e%2e%5c|%2e%2e\\\\|\\.\\.%5c|\\.\\./\\.\\./|\\.\\.\\\\\\.\\.\\\\)",
+      "targets": "[\"url\"]",
+      "description": "检测目录穿越类型的路径遍历攻击(CVE-2024-38820兼容)",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "path-002",
+      "name": "路径遍历 - 敏感文件",
+      "category_id": 4,
+      "severity": "critical",
+      "pattern": "(?i)(/etc/passwd|/etc/shadow|/etc/hosts|/etc/group|/proc/self|/var/log)",
+      "targets": "[\"url\"]",
+      "description": "检测敏感文件访问类型的路径遍历攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "path-003",
+      "name": "路径遍历 - 系统目录",
+      "category_id": 4,
+      "severity": "high",
+      "pattern": "(?i)(/usr/bin|/usr/sbin|/bin/sh|/bin/bash|c:\\\\windows|c:/windows|\\\\windows\\\\system32|/windows/system32)",
+      "targets": "[\"url\"]",
+      "description": "检测系统目录访问类型的路径遍历攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "path-004",
+      "name": "路径遍历 - 上传目录脚本执行",
+      "category_id": 4,
+      "severity": "critical",
+      "pattern": "(?i)/(uploads|upload|images|image|img|file|files|attachment|attachments|avatar|avatars|static|cache|temp|tmp|data|datas|resource|resources|assets|asset)/[^/]+\\.(php|php3|php4|php5|phtml|jsp|jspx|asp|aspx|ashx|asmx|py|rb|sh|cgi|pl)",
+      "targets": "[\"url\"]",
+      "description": "检测上传目录脚本执行攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "path-005",
+      "name": "路径遍历 - 伪协议攻击",
+      "category_id": 4,
+      "severity": "critical",
+      "pattern": "(?i)(gopher|dict|ldap|tftp|file|php|glob|phar|zlib|ftp|ogg|data|expect|input|filter)://",
+      "targets": "[\"url\", \"post\"]",
+      "description": "检测伪协议文件包含攻击",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "scan-001",
+      "name": "扫描器检测 - 安全工具",
+      "category_id": 5,
+      "severity": "medium",
+      "pattern": "(?i)(sqlmap|nmap|nikto|nessus|acunetix|burp|dirbuster|gobuster|wfuzz|wpscan|joomscan|masscan|zgrab|zap|arachni|w3af|skipfish|vega|webscarab|HTTrack|pangolin|havij|fimap|PycURL|netsparker|httperf|nuclei)",
+      "targets": "[\"header\"]",
+      "description": "检测常见安全扫描工具",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "scan-002",
+      "name": "扫描器检测 - 敏感路径",
+      "category_id": 5,
+      "severity": "medium",
+      "pattern": "(?i)(/admin|/backup|/config|/\\.git|/\\.svn|/\\.env|/phpinfo|/test)",
+      "targets": "[\"url\"]",
+      "description": "检测敏感路径扫描",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "file-001",
+      "name": "敏感文件 - 版本控制",
+      "category_id": 6,
+      "severity": "high",
+      "pattern": "(?i)(\\.git/|\\.svn/|\\.hg/|\\.bzr/)",
+      "targets": "[\"url\"]",
+      "description": "检测版本控制目录访问",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "file-002",
+      "name": "敏感文件 - 配置文件",
+      "category_id": 6,
+      "severity": "critical",
+      "pattern": "(?i)(\\.env|web\\.config|\\.htaccess|\\.htpasswd|config\\.php|database\\.yml|settings\\.py|wp-config\\.php)",
+      "targets": "[\"url\"]",
+      "description": "检测配置文件访问",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "file-003",
+      "name": "敏感文件 - 备份文件",
+      "category_id": 6,
+      "severity": "high",
+      "pattern": "(?i)(backup\\.sql|dump\\.sql|\\.sql|\\.log|\\.bak|\\.old|\\.swp|\\.swo|\\.inc|\\.mdb|\\.java|\\.class|\\.tar|\\.gz|\\.zip|\\.rar|\\.7z|\\.bz2|~$)",
+      "targets": "[\"url\"]",
+      "description": "检测备份文件访问",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "file-004",
+      "name": "敏感文件 - 系统文件",
+      "category_id": 6,
+      "severity": "medium",
+      "pattern": "(?i)(\\.DS_Store|Thumbs\\.db)",
+      "targets": "[\"url\"]",
+      "description": "检测系统文件访问",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "file-005",
+      "name": "敏感文件 - 历史记录",
+      "category_id": 6,
+      "severity": "high",
+      "pattern": "(?i)(\\.bash_history|\\.zsh_history|\\.mysql_history|\\.psql_history)",
+      "targets": "[\"url\"]",
+      "description": "检测Shell历史记录文件访问",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "bot-001",
+      "name": "Bot检测 - 恶意爬虫",
+      "category_id": 7,
+      "severity": "low",
+      "pattern": "(?i)(scrapy|curl|wget|python-requests|go-http-client|java/http)",
+      "targets": "[\"header\"]",
+      "description": "检测常见爬虫工具",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-23897",
+      "name": "CVE-2024-23897 Jenkins任意文件读取",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(@[/\\\\](etc|proc|var|root|home|windows|program|users)",
+      "targets": "[\"url\", \"post\", \"header\"]",
+      "description": "Jenkins CLI 任意文件读取漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-21733",
+      "name": "CVE-2024-21733 Tomcat请求走私",
+      "category_id": 99,
+      "severity": "high",
+      "pattern": "(?i)(Content-Length\\s*:\\s*\\d+.*Transfer-Encoding\\s*:|Transfer-Encoding\\s*:\\s*.*Content-Length\\s*:)",
+      "targets": "[\"header\"]",
+      "description": "Apache Tomcat HTTP请求走私漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-22243",
+      "name": "CVE-2024-22243 Spring URL绕过",
+      "category_id": 99,
+      "severity": "high",
+      "pattern": "(?i)(\\\\x00|\\\\x0d|\\\\x0a|%00|%0d|%0a)",
+      "targets": "[\"url\"]",
+      "description": "Spring Framework URL解析绕过漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-38856",
+      "name": "CVE-2024-38856 OFBiz认证绕过",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(/webtools/control/forgotPassword|/webtools/control/login)",
+      "targets": "[\"url\"]",
+      "description": "Apache OFBiz 认证绕过漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-38819",
+      "name": "CVE-2024-38819 Spring Data DOS",
+      "category_id": 99,
+      "severity": "medium",
+      "pattern": "(\\*\\*\\*\\*\\*\\*|\\{\\{\\{\\{\\{|\\+\\+\\+\\+\\+|\\\\\\\\\\\\\\\\\\\\\\\\)",
+      "targets": "[\"url\"]",
+      "description": "Spring Data URL解析拒绝服务漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-22274",
+      "name": "CVE-2024-22274 XWiki SSTI综合防护",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(\\{\\{.*(groovy|python|velocity).*\\}\\}|\\$\\{.*jndi|\\$\\{.*env|\\$\\{.*sys|solrSearch.*\\{\\{|groovy.*Runtime\\.exec|groovy.*ProcessBuilder)",
+      "targets": "[\"url\", \"post\"]",
+      "description": "XWiki SSTI及RCE漏洞综合防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-50379",
+      "name": "CVE-2024-50379 Tomcat竞争条件RCE",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(PUT\\s+/.*\\.jsp|PUT\\s+/.*\\.jspx|PUT\\s+/.*\\.war)",
+      "targets": "[\"url\", \"header\"]",
+      "description": "Apache Tomcat 条件竞争文件上传RCE漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-22257",
+      "name": "CVE-2024-22257 Spring授权绕过",
+      "category_id": 99,
+      "severity": "high",
+      "pattern": "(?i)(/admin/.*\\?.*redirect|/api/.*\\?.*forward|/manage/.*\\?.*url=)",
+      "targets": "[\"url\"]",
+      "description": "Spring Security 授权绕过漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-34102",
+      "name": "CVE-2024-34102 Magento XXE",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(<!ENTITY\\s+.*SYSTEM\\s+[\"\\']file://|<!ENTITY\\s+.*SYSTEM\\s+[\"\\']http://|<!ENTITY\\s+.*SYSTEM\\s+[\"\\']https://)",
+      "targets": "[\"post\", \"header\"]",
+      "description": "Magento XXE漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-4577",
+      "name": "CVE-2024-4577 PHP CGI参数注入",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(%3d|%2d|%2b|%252d|%252b)(php|ini|cfg|conf)",
+      "targets": "[\"url\"]",
+      "description": "PHP CGI Windows参数注入漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2024-4956",
+      "name": "CVE-2024-4956 Nexus路径遍历",
+      "category_id": 99,
+      "severity": "high",
+      "pattern": "(?i)(/%2f%2f.*etc|%252f%252f.*etc|/\\.\\.\\.\\./.*etc)",
+      "targets": "[\"url\"]",
+      "description": "Nexus Repository 路径遍历漏洞防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "deser-001",
+      "name": "通用反序列化攻击防护",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(rO0ABX|H4sIAAAA|KLUv|yv66vg|Y2hhcm|4oC5C|UEsDBBQ|UEsDBBQAC|UEsDBBQA)",
+      "targets": "[\"post\", \"cookie\", \"header\"]",
+      "description": "Java/Python/PHP反序列化攻击通用防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "log4j-001",
+      "name": "Log4j2/H2 JNDI注入综合防护",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(\\$\\{jndi:.*ldap|\\$\\{jndi:.*rmi|\\$\\{jndi:.*dns|\\$\\{jndi:.*iiop|jndi:.*ldap|jndi:.*rmi|jndi:.*dns|jndi:.*iiop|\\$\\{env:.*\\}|\\$\\{sys:.*\\}|\\$\\{java:.*\\})",
+      "targets": "[\"url\", \"post\", \"cookie\", \"header\"]",
+      "description": "Log4j2及H2 Console JNDI注入综合防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "fastjson-001",
+      "name": "Fastjson反序列化防护",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(\"@type\":\\s*\"(com\\.sun|org\\.apache|java\\.lang|javax\\.script|org\\.codehaus|com\\.alibaba|com\\.taobao))",
+      "targets": "[\"post\"]",
+      "description": "Fastjson反序列化漏洞通用防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "jackson-001",
+      "name": "Jackson反序列化防护",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(\"@class\":\\s*\"(com\\.sun|org\\.apache|java\\.lang|javax\\.script|org\\.codehaus))",
+      "targets": "[\"post\"]",
+      "description": "Jackson反序列化漏洞通用防护",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "sqlmap-001",
+      "name": "SQLMap攻击特征检测",
+      "category_id": 99,
+      "severity": "high",
+      "pattern": "(?i)(sqlmap|sqlmap.*--|sqlmap.*-u|sqlmap.*--dump|sqlmap.*--dbs)",
+      "targets": "[\"url\", \"post\", \"cookie\", \"header\"]",
+      "description": "SQLMap自动化注入工具攻击特征检测",
+      "is_builtin": true
+    },
+    {
+      "rule_id": "memshell-001",
+      "name": "内存马植入检测",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(?i)(java\\.lang\\.Runtime|java\\.lang\\.ProcessBuilder|javax\\.servlet\\.Filter|javax\\.servlet\\.Servlet|org\\.apache\\.tomcat|org\\.springframework\\.web)",
+      "targets": "[\"post\", \"cookie\"]",
+      "description": "Java内存马植入行为检测",
+      "is_builtin": true
+    }
+  ]
+}

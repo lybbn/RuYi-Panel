@@ -26,6 +26,7 @@ from rest_framework.permissions import IsAuthenticated
 from utils.common import get_parameter_dic,GetWebRootPath,md5,WriteFile,ast_convert,GetBackupPath,RunCommand,detect_file_encoding
 from utils.security.files import list_files_in_directory,get_directory_size,delete_file,delete_dir,create_file,create_dir,rename_file,copy_file,copy_dir,move_file
 from utils.security.files import get_filedir_attribute,batch_operate,get_filename_ext,auto_detect_file_language
+from utils.security.files import get_recycle_config,set_recycle_config,is_recycle_enabled,move_to_recycle,list_recycle_items,restore_recycle_item,delete_recycle_item,clear_recycle_items,batch_recycle_move,batch_recycle_restore,batch_recycle_delete
 from utils.security.no_delete_list import check_in_black_list
 import platform
 from django.http import FileResponse,StreamingHttpResponse
@@ -57,7 +58,6 @@ class RYFileManageView(CustomAPIView):
     文件管理
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     def post(self, request):
         reqData = get_parameter_dic(request)
@@ -150,10 +150,67 @@ class RYFileManageView(CustomAPIView):
             size = get_directory_size(path)
             data = {"size":size}
             return DetailResponse(data=data)
+        elif action == "get_recycle_config":
+            data = get_recycle_config()
+            return DetailResponse(data=data)
+        elif action == "set_recycle_config":
+            enable = reqData.get("enable", True)
+            if isinstance(enable, str):
+                enable = True if enable.lower() in ['true','1','yes'] else False
+            data = set_recycle_config(enable=enable)
+            return DetailResponse(data=data,msg="设置成功")
+        elif action == "list_recycle":
+            page = int(reqData.get("page",1))
+            limit = int(reqData.get("limit",20))
+            search = reqData.get("search","")
+            limit = 3000 if limit > 3000 else limit
+            data, total = list_recycle_items(page=page,limit=limit,search=search)
+            return SuccessResponse(data=data,total=total,page=page,limit=limit)
+        elif action == "restore_recycle":
+            item_id = reqData.get("id","")
+            if not item_id:
+                return ErrorResponse(msg="参数错误")
+            data = restore_recycle_item(item_id,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【文件管理】-【回收站恢复】%s"%data.get('origin_path',''),module="filemg")
+            return DetailResponse(msg="恢复成功")
+        elif action == "delete_recycle":
+            item_id = reqData.get("id","")
+            if not item_id:
+                return ErrorResponse(msg="参数错误")
+            delete_recycle_item(item_id)
+            RuyiAddOpLog(request,msg="【文件管理】-【回收站删除】%s"%item_id,module="filemg")
+            return DetailResponse(msg="删除成功")
+        elif action == "batch_restore_recycle":
+            ids = ast_convert(reqData.get("ids",[]))
+            if not ids:
+                return ErrorResponse(msg="参数错误")
+            batch_recycle_restore(ids,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【文件管理】-【回收站批量恢复】%s"%ids,module="filemg")
+            return DetailResponse(msg="批量恢复成功")
+        elif action == "batch_delete_recycle":
+            ids = ast_convert(reqData.get("ids",[]))
+            if not ids:
+                return ErrorResponse(msg="参数错误")
+            batch_recycle_delete(ids)
+            RuyiAddOpLog(request,msg="【文件管理】-【回收站批量删除】%s"%ids,module="filemg")
+            return DetailResponse(msg="批量删除成功")
+        elif action == "clear_recycle":
+            clear_recycle_items()
+            RuyiAddOpLog(request,msg="【文件管理】-【回收站清空】",module="filemg")
+            return DetailResponse(msg="清空成功")
         elif action == "batch_operate":
             reqData['path'] = path
             c_type = reqData.get('type',None)
             c_type_name = get_type_name(c_type)
+            if c_type == "del" and is_recycle_enabled():
+                s_path = ast_convert(reqData.get('spath',[]))
+                if not s_path:
+                    return ErrorResponse(msg="参数错误")
+                data = batch_recycle_move(s_path,is_windows=is_windows)
+                msg = "批量移入回收站成功"
+                new_msg = "【文件管理】-【批量】-【回收站】-【%s】- %s"%(msg,s_path)
+                RuyiAddOpLog(request,msg=new_msg,module="filemg",status=True)
+                return DetailResponse(msg=msg,data=data)
             isok,msg,code,data = batch_operate(param=reqData,is_windows=is_windows)
             new_msg = "【文件管理】-【批量】-【%s】-【%s】-从[%s]到[%s]"%(c_type_name,msg,ast_convert(reqData.get('spath',[])),path)
             if c_type == "del":
@@ -179,10 +236,18 @@ class RYFileManageView(CustomAPIView):
             RuyiAddOpLog(request,msg="【文件管理】-【创建目录】%s"%path,module="filemg")
             return DetailResponse(msg="创建成功")
         elif action == "delete_file":
+            if is_recycle_enabled():
+                move_to_recycle(path=path,is_windows=is_windows)
+                RuyiAddOpLog(request,msg="【文件管理】-【回收站】-【删除文件】%s"%path,module="filemg")
+                return DetailResponse(msg="已移入回收站")
             delete_file(path=path,is_windows=is_windows)
             RuyiAddOpLog(request,msg="【文件管理】-【删除文件】%s"%path,module="filemg")
             return DetailResponse(msg="删除成功")
         elif action == "delete_dir":
+            if is_recycle_enabled():
+                move_to_recycle(path=path,is_windows=is_windows)
+                RuyiAddOpLog(request,msg="【文件管理】-【回收站】-【删除目录】%s"%path,module="filemg")
+                return DetailResponse(msg="已移入回收站")
             delete_dir(path=path,is_windows=is_windows)
             RuyiAddOpLog(request,msg="【文件管理】-【删除目录】%s"%path,module="filemg")
             return DetailResponse(msg="删除成功")
@@ -353,7 +418,6 @@ class RYFileDownloadView(CustomAPIView):
     文件下载
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self, request):
         reqData = get_parameter_dic(request)
@@ -407,7 +471,6 @@ class RYFileTokenView(CustomAPIView):
     获取文件访问token
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     def post(self, request):
         reqData = get_parameter_dic(request)
@@ -454,7 +517,6 @@ class RYFileUploadView(CustomAPIView):
     文件上传(支持分片断点续传)
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     throttle_classes=[]
 
     def post(self, request):

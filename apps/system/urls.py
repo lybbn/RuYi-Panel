@@ -6,9 +6,9 @@
 from django.urls import path, re_path
 from rest_framework import routers
 
+from apps.system.views.monitor import GetSystemMonitorAllView
 from apps.system.views.terminal import TerminalServerViewSet
 from apps.system.views.common_commands import CommonCommandsViewSet
-from apps.system.views.monitor import *
 from apps.system.views.file_manage import RYFileManageView,RYFileDownloadView,RYFileTokenView,RYFileUploadView
 from apps.system.views.SiteGroupViews import SiteGroupViewSet
 from apps.system.views.sysconfigViews import RYSysconfigManageView,RYGetInterfacesView,RYSysLicenseView,RYUpdateSysManageView,RYGetSysLocalAndAppsServiceView
@@ -25,6 +25,8 @@ from apps.system.views.docker_manage import RYDockerManageView
 from apps.system.views.sys_process import RYSysProcessListView,RYSysProcessOperateView,RYSysProcessDetailView
 from apps.system.views.sys_network import RYSysNetworkListView,RYSysNetworkOperateView
 from apps.system.views.sys_images_tools import RYSysImageToolsView
+from apps.system.views.sys_ssh_manage import RYSysSSHManageView
+from apps.system.views.fail2ban_manage import RYFail2BanManageView
 
 system_url = routers.SimpleRouter()
 system_url.register(r'terminal', TerminalServerViewSet)
@@ -62,11 +64,13 @@ urlpatterns = [
     path('sysProcessDetail/', RYSysProcessDetailView.as_view(), name='进程详情'),
     path('sysNetworkList/', RYSysNetworkListView.as_view(), name='系统网络连接列表'),
     path('sysNetworkMg/', RYSysNetworkOperateView.as_view(), name='系统网络连接管理'),
+    path('sshMg/', RYSysSSHManageView.as_view(), name='SSH管理'),
     path('pythonmg/', RYPythonManageView.as_view(), name='python项目管理'),
     path('pythonSiteMg/', RYPythonSiteManageView.as_view(), name='python项目站点管理'),
     path('golangmg/', RYGoManageView.as_view(), name='go项目管理'),
     path('gositemg/', RYGoProjectManageView.as_view(), name='go项目列表/操作'),
     path('supervisormg/', RYSupervisorManageView.as_view(), name='supervisor管理'),
+    path('fail2banmg/', RYFail2BanManageView.as_view(), name='fail2ban管理'),
     path('dockermg/', RYDockerManageView.as_view(), name='docker管理'),
     path('imgtools/', RYSysImageToolsView.as_view(), name='图片工具'),
 ]

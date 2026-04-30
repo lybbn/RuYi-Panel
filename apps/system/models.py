@@ -145,18 +145,34 @@ class Databases(BaseModel):
 
 
 class TerminalServer(BaseModel):
+    PROTOCOL_CHOICES = (
+        ("ssh", "SSH"),
+        ("rdp", "RDP"),
+    )
     TYPE_CHOICES = (
         (0, "密码验证"),
         (1, "私钥验证"),
     )
+    RDP_SECURITY_CHOICES = (
+        ("", "默认"),
+        ("any", "自动"),
+        ("nla", "NLA"),
+        ("tls", "TLS"),
+        ("rdp", "RDP"),
+    )
+    connect_protocol = models.CharField(max_length=20, choices=PROTOCOL_CHOICES, default="ssh", verbose_name="连接协议")
     host = models.CharField(max_length=100, verbose_name="服务器IP/域名")
     port = models.IntegerField(verbose_name="端口号", default=22,help_text="端口号")
     remark = models.CharField(max_length=100,verbose_name="备注",null=True,blank=True)
     username = models.CharField(max_length=200, verbose_name="用户名")
     password = models.CharField(max_length=200, verbose_name="密码",null=True,blank=True)
-    pkey = models.CharField(max_length=255, verbose_name="私钥",null=True,blank=True)
+    pkey = models.TextField(verbose_name="私钥",null=True,blank=True)
     pkey_passwd = models.CharField(max_length=255, verbose_name="私钥密码",null=True,blank=True)
     type = models.SmallIntegerField(choices=TYPE_CHOICES, verbose_name="验证方式", default=0,help_text="验证方式")
+    rdp_domain = models.CharField(max_length=255, verbose_name="RDP 域", null=True, blank=True)
+    rdp_security = models.CharField(max_length=20, choices=RDP_SECURITY_CHOICES, default="", verbose_name="RDP 安全模式", null=True, blank=True)
+    rdp_ignore_cert = models.BooleanField(default=True, verbose_name="RDP 忽略证书")
+    rdp_color_depth = models.IntegerField(default=32, verbose_name="RDP 色深")
 
     class Meta:
         db_table = table_prefix + "terminal"

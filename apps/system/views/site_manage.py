@@ -33,7 +33,7 @@ from apps.sysshop.models import RySoftShop
 from utils.ruyiclass.webClass import WebClient
 from utils.server.system import system
 from utils.security.letsencrypt_cert import letsencryptTool
-from utils.sslPem import getCertInfo
+from utils.sslPem import getCertInfo,create_root_certificate,create_signed_certificate,load_pfx_file
 from apps.sysbak.models import RuyiBackup
 from django.http import FileResponse
 from django.utils.encoding import escape_uri_path
@@ -81,7 +81,6 @@ class RYSiteManageView(CustomAPIView):
     网站站点设置
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         is_windows = True if current_os == 'windows' else False
@@ -190,6 +189,11 @@ class RYSiteManageView(CustomAPIView):
             for s in SiteDomain_objs:
                 s.site = s_ins
             SiteDomains.objects.bulk_create(SiteDomain_objs)
+            from apps.syswaf.models import WafSiteConfig
+            WafSiteConfig.objects.get_or_create(
+                site_id=s_ins.id,
+                defaults={'site_name': s_ins.name, 'waf_status': 'off'}
+            )
             RuyiAddOpLog(request,msg="【网站管理】-【添加静态网站】 名称：%s ，位置：%s"%(name,path),module="sitemg")
             WebClient.reload_service(webserver=webServer)
             return DetailResponse(msg="设置成功")
@@ -240,6 +244,11 @@ class RYSiteManageView(CustomAPIView):
             if not s_ins:return ErrorResponse(msg="无此站点")
             isok,msg = WebClient.del_site(webserver=webServer,siteName=s_ins.name,sitePath=s_ins.path,id=id)
             if not isok:return ErrorResponse(msg=msg)
+            from apps.syswaf.models import WafSiteConfig
+            from apps.syswaf.services import WafConfigSync
+            WafSiteConfig.objects.filter(site_id=id).delete()
+            sync = WafConfigSync()
+            sync.sync_site_config(site_id=int(id))
             RuyiAddOpLog(request,msg="【网站管理】-【删除网站】 名称：%s"%s_ins.name,module="sitemg")
             WebClient.reload_service(webserver=webServer)
             return DetailResponse(msg="删除成功")
@@ -556,7 +565,6 @@ class RYSiteDomainManageView(CustomAPIView):
     网站域名列表设置
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)
@@ -659,9 +667,9 @@ class RYSiteBackupManageView(CustomAPIView):
     网站站点备份工具
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self,request):
+        webServer = get_current_webserver_name()
         reqData = get_parameter_dic(request)
         action = reqData.get("action","")
         id = reqData.get("id","")
@@ -723,6 +731,52 @@ class RYSiteBackupManageView(CustomAPIView):
             return DetailResponse(msg="删除成功")
         return ErrorResponse(msg="类型错误")
 
+def get_current_webserver_name():
+    webServerIns = RySoftShop.objects.filter(type=3).first()
+    if webServerIns is None:
+        return ""
+    return webServerIns.name
+
+def ensure_ruyi_root_certificate():
+    root_pfx_path = settings.RUYI_ROOTPFX_PATH_FILE
+    root_password = ReadFile(settings.RUYI_ROOTPFX_PASSWORD_PATH_FILE)
+    if os.path.exists(root_pfx_path):
+        if not root_password:
+            return False,"根证书密码文件不存在"
+        root_cert, root_key = load_pfx_file(root_pfx_path, root_password)
+        if not root_cert or not root_key:
+            return False,"根证书加载失败"
+        return True,{
+            "root_password":root_password,
+            "root_cert":root_cert,
+            "root_key":root_key
+        }
+    root_password = root_password or "ruyi.lybbn.cn"
+    pfx_data,root_key,root_cert = create_root_certificate(password=root_password)
+    WriteFile(settings.RUYI_ROOTPFX_PASSWORD_PATH_FILE,root_password)
+    WriteFile(root_pfx_path,pfx_data,mode="wb")
+    return True,{
+        "root_password":root_password,
+        "root_cert":root_cert,
+        "root_key":root_key
+    }
+
+def normalize_selfsigned_hosts(domains):
+    hosts = []
+    for domain in domains:
+        host = str(domain).strip()
+        if not host:
+            continue
+        if "*" in host:
+            return False,"自建证书暂不支持泛域名"
+        if " " in host:
+            return False,"证书域名格式错误"
+        if host not in hosts:
+            hosts.append(host)
+    if not hosts:
+        return False,"请选择至少一个域名或IP"
+    return True,hosts
+
 class RYSSLManageView(CustomAPIView):
     """
     get:
@@ -731,7 +785,6 @@ class RYSSLManageView(CustomAPIView):
     网站SSL设置
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)
@@ -784,6 +837,24 @@ class RYSSLManageView(CustomAPIView):
                         })
                 return DetailResponse(data=data)
             return ErrorResponse(msg="类型错误")
+        elif action == "get_selfsigned_info":
+            root_password = ReadFile(settings.RUYI_ROOTPFX_PASSWORD_PATH_FILE)
+            has_root_cert = os.path.exists(settings.RUYI_ROOTPFX_PATH_FILE)
+            return DetailResponse(data={
+                "root_password":root_password,
+                "has_root_cert":has_root_cert,
+            })
+        elif action == "download_selfsigned_root_pfx":
+            filename = settings.RUYI_ROOTPFX_PATH_FILE
+            if not os.path.exists(filename):
+                return ErrorResponse(msg="根证书文件不存在")
+            file_size = os.path.getsize(filename)
+            response = FileResponse(open(filename, 'rb'))
+            response['content_type'] = "application/octet-stream"
+            response['Content-Disposition'] = f'attachment;filename="{escape_uri_path(os.path.basename(filename))}"'
+            response['Content-Length'] = file_size
+            RuyiAddOpLog(request,msg="【网站管理】-【SSL】下载自建证书根证书",module="sitemg")
+            return response
         elif action == "get_letsencrypt_log":
             error = False
             orderover = False
@@ -819,6 +890,7 @@ class RYSSLManageView(CustomAPIView):
         return ErrorResponse(msg="类型错误")
             
     def post(self,request):
+        webServer = get_current_webserver_name()
         reqData = get_parameter_dic(request)
         action = reqData.get("action","")
         if action == "create_acme_account":
@@ -833,6 +905,17 @@ class RYSSLManageView(CustomAPIView):
                 return DetailResponse(msg="创建成功")
             else:
                 return ErrorResponse(msg="参数错误")
+        elif action == "download_selfsigned_root_pfx":
+            filename = settings.RUYI_ROOTPFX_PATH_FILE
+            if not os.path.exists(filename):
+                return ErrorResponse(msg="根证书文件不存在")
+            file_size = os.path.getsize(filename)
+            response = FileResponse(open(filename, 'rb'))
+            response['content_type'] = "application/octet-stream"
+            response['Content-Disposition'] = f'attachment;filename="{escape_uri_path(os.path.basename(filename))}"'
+            response['Content-Length'] = file_size
+            RuyiAddOpLog(request,msg="【网站管理】-【SSL】下载自建证书根证书",module="sitemg")
+            return response
         elif action == "apply_cert_letsencrypt":
             domains = ast_convert(reqData.get("domains",[]))
             site_id = reqData.get("site_id","")
@@ -862,6 +945,37 @@ class RYSSLManageView(CustomAPIView):
             t.start()
             RuyiAddOpLog(request,msg="【网站管理】-【SSL】站点：%s,申请letsencrypt证书"%(s_ins.name),module="sitemg")
             return DetailResponse(data=order_no,msg="申请中...")
+        elif action == "apply_cert_selfsigned":
+            domains = ast_convert(reqData.get("domains",[]))
+            site_id = reqData.get("site_id","")
+            if not site_id:return ErrorResponse(msg="参数错误")
+            ok,hosts_or_msg = normalize_selfsigned_hosts(domains)
+            if not ok:
+                return ErrorResponse(msg=hosts_or_msg)
+            s_ins = Sites.objects.filter(id=site_id).first()
+            if not s_ins:return ErrorResponse(msg="无此站点")
+            root_ok,root_data = ensure_ruyi_root_certificate()
+            if not root_ok:
+                return ErrorResponse(msg=root_data)
+            cert_pem,key_pem = create_signed_certificate(
+                root_cert=root_data['root_cert'],
+                root_key=root_data['root_key'],
+                hosts=hosts_or_msg
+            )
+            isok,msg = WebClient.save_site_ssl_cert(
+                webserver=webServer,
+                siteName=s_ins.name,
+                sitePath=s_ins.path,
+                cont={
+                    "cert":cert_pem.decode("utf-8"),
+                    "key":key_pem.decode("utf-8"),
+                    "root_password":root_data['root_password']
+                }
+            )
+            if not isok:return ErrorResponse(msg=msg)
+            WebClient.reload_service(webserver=webServer)
+            RuyiAddOpLog(request,msg="【网站管理】-【SSL】站点：%s,生成自建证书"%(s_ins.name),module="sitemg")
+            return DetailResponse(msg="自建证书生成成功")
         elif action == "renew_cert_letsencrypt":
             order_no = ""
             site_id = reqData.get("site_id","")

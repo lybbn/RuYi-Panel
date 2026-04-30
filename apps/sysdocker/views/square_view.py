@@ -33,7 +33,6 @@ class RYDockerSquareAppTagsListManageView(CustomAPIView):
     获取广场标签列表
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         data = dksquare().get_apptags_list()
@@ -45,7 +44,6 @@ class RYUpdateDockerSquareAppsTagsManageView(CustomAPIView):
     更新应用/标签列表
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self,request):
         isok,msg = dksquare().update_dk_apps_and_tags()
@@ -59,7 +57,6 @@ class RYGetDockerSquareAppsListManageView(CustomAPIView):
     获取广场列表
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def get(self,request):
         reqData = get_parameter_dic(request)
@@ -87,6 +84,7 @@ class RYGetDockerSquareAppsListManageView(CustomAPIView):
                 except:
                     pass
                 for m in page_data:
+                    newsq.sync_app_install_status(m)
                     appid = m.appid
                     name = m.name
                     appname = m.appname
@@ -160,7 +158,6 @@ class RYGetDockerSquareAppsManageView(CustomAPIView):
     获取广场APP操作
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self,request):
         reqData = get_parameter_dic(request)

@@ -36,7 +36,6 @@ class RYDockerBackupAppManageView(CustomAPIView):
     备份应用
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self,request):
         reqData = get_parameter_dic(request)
@@ -63,7 +62,6 @@ class RYDockerRestoreAppManageView(CustomAPIView):
     恢复应用
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self,request):
         reqData = get_parameter_dic(request)
@@ -96,7 +94,6 @@ class RYDockerBackupDelManageView(CustomAPIView):
     删除应用备份
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self,request):
         reqData = get_parameter_dic(request)
@@ -123,7 +120,6 @@ class RYDockerBackupDownloadManageView(CustomAPIView):
     下载应用备份
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
     
     def post(self,request):
         reqData = get_parameter_dic(request)

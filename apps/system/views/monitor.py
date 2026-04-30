@@ -27,7 +27,6 @@ class GetSystemMonitorAllView(CustomAPIView):
     获取主机cpu、内存、磁盘等实时信息
     """
     permission_classes = [IsAuthenticated]
-    authentication_classes = [JWTAuthentication]
 
     def get(self, request):
         data = system().GetSystemAllInfo()

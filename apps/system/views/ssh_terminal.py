@@ -255,20 +255,16 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
                 )
                     
             else:
-                tmppkey = ssh_info.pkey.encode('utf-8')
-                if sys.version_info[0] == 2:
-                    pk_file = BytesIO(tmppkey)
-                else:
-                    pk_file = StringIO(tmppkey)
+                pk_file = StringIO(ssh_info.pkey)
                 pkey_passwd = ssh_info.pkey_passwd
                 if pkey_passwd:
-                    pkey = paramiko.RSAKey.from_private_key(pk_file,password=ssh_info.pkey_passwd)
+                    pkey = paramiko.RSAKey.from_private_key(pk_file,password=pkey_passwd)
                 else:
                     pkey = paramiko.RSAKey.from_private_key(pk_file)
                 self.ssh_conn.connect(
-                    hostname=self.ssh_info.host,
-                    port=self.ssh_info.port,
-                    username=self.ssh_info.username,
+                    hostname=targethost,
+                    port=ssh_info.port,
+                    username=ssh_info.username,
                     pkey=pkey,
                     timeout=30,
                     banner_timeout=30
@@ -568,10 +564,11 @@ class WebSSHConsumer(WebsocketConsumer):
                 pkey = paramiko.RSAKey.from_private_key(pk_file,password=ssh_info.pkey_passwd)
             else:
                 pkey = paramiko.RSAKey.from_private_key(pk_file)
+            
             self.ssh_conn.connect(
-                hostname=self.ssh_info.host,
-                port=self.ssh_info.port,
-                username=self.ssh_info.username,
+                hostname=ssh_info.host,
+                port=ssh_info.port,
+                username=ssh_info.username,
                 pkey=pkey,
                 timeout=30
             )
