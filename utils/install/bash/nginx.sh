@@ -159,10 +159,13 @@ Install_LuaJIT() {
     rm -rf LuaJIT-2.1-20240815*
     export LUAJIT_LIB=/usr/local/lib
     export LUAJIT_INC=/usr/local/include/${LUAJIT_INC_PATH}
+    if [ ! -d /usr/local/lib64 ]; then
+        mkdir -p /usr/local/lib64
+    fi
     rm -rf /usr/local/lib64/libluajit-5.1.so.2
     ln -sf /usr/local/lib/libluajit-5.1.so.2 /usr/local/lib64/libluajit-5.1.so.2
     LOCAL_LD_SO_CHECK1=$(cat /etc/ld.so.conf|grep /usr/local/lib)
-    LOCAL_LD_SO_CHECK2=$(cat cat /etc/ld.so.conf.d/local.conf|grep /usr/local/lib)
+    LOCAL_LD_SO_CHECK2=$(cat /etc/ld.so.conf.d/local.conf 2>/dev/null|grep /usr/local/lib)
     if [ -z "${LOCAL_LD_SO_CHECK1}" ] && [ -z "${LOCAL_LD_SO_CHECK2}" ];then
         echo "/usr/local/lib" >>/etc/ld.so.conf
     fi
@@ -286,16 +289,37 @@ Install_Soft() {
     
 
     if [ "${nginx_version_2}" == "openresty" ]; then
-        withPcre=""
+        echo "==================================================="
+        echo "开始下载pcre2 for openresty..."
+        echo "==================================================="
+        pcre_version="10.44"
+        wget http://download.lybbn.cn/ruyi/install/linux/nginx/pcre2-${pcre_version}.tar.gz
+        tar zxf pcre2-$pcre_version.tar.gz
+        rm -rf pcre2-$pcre_version.tar.gz
+        echo "==================================================="
+        echo "开始编译pcre2..."
+        echo "==================================================="
+        cd pcre2-$pcre_version
+        ./configure
+        make -j${cpu_core}
+        make install
+        cd ..
+        withPcre="--with-pcre=${RUYI_TEMP_PATH}/nginx-$nginx_version/module3lib/pcre2-${pcre_version}"
     else
         echo "==================================================="
         echo "开始下载pcre2..."
         echo "==================================================="
         pcre_version="10.44"
-        # wget https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${pcre_version}/pcre2-${pcre_version}.tar.gz
         wget http://download.lybbn.cn/ruyi/install/linux/nginx/pcre2-${pcre_version}.tar.gz
         tar zxf pcre2-$pcre_version.tar.gz
         rm -rf pcre2-$pcre_version.tar.gz
+        echo "==================================================="
+        echo "开始编译pcre2..."
+        echo "==================================================="
+        cd pcre2-$pcre_version
+        ./configure
+        make -j${cpu_core}
+        cd ..
         withPcre="--with-pcre=${RUYI_TEMP_PATH}/nginx-$nginx_version/module3lib/pcre2-${pcre_version}"
     fi
 

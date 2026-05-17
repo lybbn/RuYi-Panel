@@ -17,7 +17,9 @@
 import os
 import hashlib
 import requests
-from utils.common import ProgramRootPath,GetTmpPath,GetLogsPath,GetPanelPath,GetInstallPath,DeleteDir,DeleteFile,RunCommand,current_os,WriteFile,GetPythonPath
+import datetime
+import traceback
+from utils.common import ProgramRootPath,GetTmpPath,GetLogsPath,GetPanelPath,GetInstallPath,DeleteDir,DeleteFile,RunCommand,current_os,WriteFile,GetPythonPath,ReadFile
 import zipfile
 import time
 import shutil
@@ -33,10 +35,19 @@ web_pack_path = ruyi_panel_path+web_pack_xd_path
 
 def print_log(msg):
     """
-    @name 打印并记录日志
+    @name 打印并记录日志（带时间戳，立即刷新）
     """
-    print(msg)
-    WriteFile(tmp_updatelog_file, f"{msg}\n", mode='a')
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_line = f"[{timestamp}] {msg}"
+    print(log_line, flush=True)
+    
+    directory = os.path.dirname(tmp_updatelog_file)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    with open(tmp_updatelog_file, 'a', encoding='utf-8') as f:
+        f.write(f"{log_line}\n")
+        f.flush()
+        os.fsync(f.fileno())
     
 
 def get_file_list(dpath, f_list,root_dir):
@@ -84,7 +95,7 @@ def get_file_name_from_url(url):
 
 def download_url_file(url, save_path="",chunk_size=8192):
     """
-    @name 下载网络文件
+    @name 下载网络文件（带进度显示）
     @save_path 下载本地路径名称（包含文件名），为空则默认存储在tmp中
     @author lybbn<2024-02-22>
     """
@@ -106,14 +117,33 @@ def download_url_file(url, save_path="",chunk_size=8192):
             headers['Range'] = 'bytes={}-'.format(downloaded_size)
         r = requests.get(url, headers=headers, stream=True)
         total_size = int(r.headers.get('content-length', 0))
+        
         if total_size == 0:
-            return True,"下载成功"
+            print_log(f'⚠️ 无法获取文件大小，开始下载...')
+        else:
+            file_size_mb = round(total_size / (1024 * 1024), 2)
+            print_log(f'📦 文件大小: {file_size_mb} MB')
+            
         with open(save_path, 'ab') as f:
+            last_percent = -1
             for chunk in r.iter_content(chunk_size=chunk_size):
                 if chunk:
                     f.write(chunk)
+                    downloaded_size += len(chunk)
+                    
+                    if total_size > 0:
+                        percent = int(downloaded_size / total_size * 100)
+                        if percent % 10 == 0 and percent != last_percent and percent <= 100:
+                            last_percent = percent
+                            dl_mb = round(downloaded_size / (1024 * 1024), 2)
+                            print_log(f'⬇️ 下载进度: {percent}% ({dl_mb}/{file_size_mb} MB)')
+        
+        final_size_mb = round(downloaded_size / (1024 * 1024), 2) if downloaded_size > 0 else 0
+        print_log(f'✅ 下载完成！共 {final_size_mb} MB')
         return True,"下载成功"
-    except:
+    except Exception as e:
+        print_log(f'❌ 下载失败: {str(e)}')
+        print_log(f'❌ 详细错误:\n{traceback.format_exc()}')
         return False,"网络文件错误"
 
 def DeleteDirGlob(path_pattern):
@@ -140,10 +170,77 @@ def last_update_op():
     """
     @name 最终更新操作
     """
-    if current_os == "windows":
-        RunCommand(f'{ruyi_panel_path}/utils/scripts/update_init.bat {ruyi_panel_path} {GetPythonPath()}')
-    else:
-        RunCommand(f'bash {ruyi_panel_path}/utils/scripts/update_init.sh')
+    print_log('\n' + '='*70)
+    print_log('🔧 开始执行升级后初始化操作...')
+    print_log('='*70 + '\n')
+    
+    # 执行升级初始化（数据库迁移、补充初始数据等）
+    print_log('📌 正在执行数据库迁移和初始化...')
+    try:
+        py_path = GetPythonPath()
+        if current_os == "windows":
+            cmd = f'cd {ruyi_panel_path} && {py_path} manage.py upgrade_init'
+        else:
+            cmd = f'cd {ruyi_panel_path} && /usr/local/ruyi/python/bin/python3 manage.py upgrade_init'
+        
+        print_log(f'   执行命令：{cmd}')
+        out_err = RunCommand(cmd)
+        
+        if out_err and len(out_err) >= 2:
+            out, err = out_err[0], out_err[1]
+            
+            if out:
+                for line in out.splitlines():
+                    if line.strip():
+                        print_log(f'   📋 {line}')
+            
+            if err:
+                for line in err.splitlines():
+                    if line.strip():
+                        print_log(f'   ⚠️ {line}')
+        else:
+            print_log('   📋 命令执行完成（无输出）')
+        
+        print_log('\n✅ 数据库迁移和初始化完成\n')
+        
+    except Exception as e:
+        print_log(f'\n❌ 升级初始化出错: {str(e)}')
+        print_log(f'❌ 详细堆栈:\n{traceback.format_exc()}\n')
+    
+    # 执行系统脚本
+    print_log('🔧 正在执行更新后系统脚本...')
+    try:
+        if current_os == "windows":
+            print_log('   🖥️ 检测到 Windows 系统，执行 update_init.bat')
+            script_out_err = RunCommand(f'{ruyi_panel_path}/utils/scripts/update_init.bat {ruyi_panel_path} {GetPythonPath()}')
+        else:
+            print_log('   🐧 检测到 Linux 系统，执行 update_init.sh')
+            # 确保脚本没有 CRLF 问题
+            update_script = f'{ruyi_panel_path}/utils/scripts/update_init.sh'
+            RunCommand(f"sed -i 's/\\r$//' {update_script}")
+            script_out_err = RunCommand(f'bash {update_script}')
+        
+        if script_out_err and len(script_out_err) >= 2:
+            out, err = script_out_err[0], script_out_err[1]
+            
+            if out:
+                for line in out.splitlines():
+                    if line.strip():
+                        print_log(f'   🔧 {line}')
+            
+            if err:
+                for line in err.splitlines():
+                    if line.strip():
+                        print_log(f'   ⚠️ {line}')
+        else:
+            print_log('   🔧 脚本执行完成（无输出）')
+        
+        print_log('\n✅ 所有升级后操作已完成！')
+        print_log('='*70 + '\n')
+        
+    except Exception as e:
+        print_log(f'\n❌ 系统脚本执行出错: {str(e)}')
+        print_log(f'❌ 详细堆栈:\n{traceback.format_exc()}\n')
 
 def get_file_hash(file_path, hash_algorithm="sha256"):
     hash_func = hashlib.new(hash_algorithm)
@@ -222,7 +319,8 @@ def update_copy_dir_files(f_list ,src_dir,dst_dir):
                 if os.path.isfile(sfile):
                     shutil.copyfile(sfile,dfile)
             except Exception as e:
-                print_log(f'文件{dfile}，异常错误：{str(e)}')
+                print_log(f'❌ 文件{dfile}，异常错误：{str(e)}')
+                print_log(f'❌ 错误详情: {traceback.format_exc()}')
                 pass
         if totalnums == i:
             return True
@@ -348,14 +446,28 @@ def update_ruyi_panel():
     @name 更新面板
     @author lybbn
     """
+    start_time = time.time()
+    start_time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
     local_dev_files=["README_AUTHOR.md","create_package.py"]
     zs_program_path = ProgramRootPath()
     for ldf in local_dev_files:
         if os.path.exists(f"{ruyi_panel_path}/{ldf}") or os.path.exists(f"{zs_program_path}/{ldf}"):
             print("本地开发模式，禁止此操作！！！")
             return False,"本地开发模式"
+    
+    print_log(f'{"="*70}')
+    print_log(f'🚀 面板升级开始时间: {start_time_str}')
+    print_log(f'💻 操作系统: {current_os.upper()}')
+    print_log(f'📂 面板路径: {ruyi_panel_path}')
+    try:
+        from ruyi.settings import RUYI_SYSVERSION_FILE
+        current_version = ReadFile(RUYI_SYSVERSION_FILE)
+        print_log(f'⏱️ 当前版本: {current_version}')
+    except:
+        print_log(f'⏱️ 当前版本: 未知')
+    print_log(f'{"="*70}\n')
     clear_update_tmp_files()
-    DeleteFile(tmp_updatelog_file,empty_tips=False)
     base_url = "http://download.lybbn.cn/ruyi/install"
     if current_os == "windows":
         up_url = '/windows/ruyi.zip'
@@ -371,17 +483,22 @@ def update_ruyi_panel():
             new_s_dir = tmp_new_panel_dir+"/ruyi"
             get_file_list(tmp_new_panel_dir,file_list,new_s_dir)
             
+            print_log(f'📂 解压完成！共 {len(file_list)} 个文件')
+            
             old_web_static_list = []
             get_file_list(web_pack_path,old_web_static_list,ruyi_panel_path)
             
+            print_log(f'📦 Web静态资源: {len(old_web_static_list)} 个文件')
             print_log('正在备份面板...')
             if bakcup_copy_dir_files(file_list,old_web_static_list,ruyi_panel_path, bak_panel_dir):
+                print_log(f'💾 备份完成！已备份 {len(file_list) + len(old_web_static_list)} 个文件')
+                print_log('开始更新面板文件...\n')
                 def update_panel_files(f_list,src_dir,retry_nums = 1):
                     if update_copy_dir_files(f_list,src_dir,ruyi_panel_path):
                         print_log('正在校验面板文件完整性...')
                         res = check_hash(f_list,src_dir,ruyi_panel_path)
                         if not res:
-                            print_log('SUCCESS：面板更新成功！！！')
+                            print_log('SUCCESS：面板文件更新成功！！！')
                             return True,"更新成功"
                         else:
                             if retry_nums < 3:
@@ -398,6 +515,7 @@ def update_ruyi_panel():
                                     dsc_file = '{}/{}'.format(ruyi_panel_path,f).replace('//','/')
                                     print_log(dsc_file)
                                 print_log(f'ERROR：校验失败，有【{len(res)}】个文件无法更新，正在回滚操作。')
+                                print_log('ruyi_failed_flag')
                     return False,"更新失败"
                 #删掉web包，避免无用文件过多堆积
                 DeleteDir(web_pack_path)
@@ -407,15 +525,42 @@ def update_ruyi_panel():
                     DeleteDir(web_pack_path)
                     rollback_copy_dir_files(file_list,old_web_static_list,bak_panel_dir,ruyi_panel_path)
                     print_log('操作失败，已回滚此次操作...')
+                    print_log('ruyi_failed_flag')
                 else:
                     clear_update_tmp_files()
+                    
+                    end_time = time.time()
+                    end_time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    cost_time = round(end_time - start_time, 2)
+                    
+                    print_log(f'\n{"="*70}')
+                    print_log(f'✅ 面板升级结束时间: {end_time_str}')
+                    print_log(f'⏱️ 总耗时: {cost_time}秒 ({round(cost_time/60, 2)}分钟)')
+                    print_log(f'{"="*70}\n')
+                    
                     last_update_op()
+                    
+                    print_log('ruyi_successful_flag')
                     return True,err
             else:
                 err="备份失败"
+                print_log('ruyi_failed_flag')
         else:
             err="解压失败"
+            print_log('ruyi_failed_flag')
     clear_update_tmp_files()
+    
+    end_time = time.time()
+    end_time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cost_time = round(end_time - start_time, 2)
+    
+    print_log(f'\n{"="*70}')
+    print_log(f'❌ 面板升级结束时间: {end_time_str}')
+    print_log(f'⏱️ 总耗时: {cost_time}秒 ({round(cost_time/60, 2)}分钟)')
+    print_log(f'❌ 失败原因: {err}')
+    print_log(f'{"="*70}\n')
+    print_log('ruyi_failed_flag')
+    
     return False,err
 
 if __name__ == '__main__':

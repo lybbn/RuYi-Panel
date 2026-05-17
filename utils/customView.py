@@ -1,11 +1,17 @@
 from rest_framework.views import APIView
 from rest_framework.throttling import UserRateThrottle,AnonRateThrottle
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from utils.authentication import APIKeyAuthentication
 from utils.security.security_path import security_path_authed_key,ResponseNginx404
 from django.conf import settings
 from functools import wraps
 
 class CustomAPIView(APIView):
     throttle_classes = [UserRateThrottle,AnonRateThrottle]
+    authentication_classes = [
+        JWTAuthentication,
+        APIKeyAuthentication,
+    ]
     check_security_path = True
     
     def dispatch(self, request, *args, **kwargs):

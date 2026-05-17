@@ -1559,3 +1559,77 @@ def delete_user(username):
         return True
     except subprocess.CalledProcessError as e:
         return False
+
+
+def list_services(service_type: str = 'running') -> dict:
+    """
+    列出 Windows 系统服务
+    返回: {'services': list, 'total': int}
+    """
+    try:
+        if service_type == 'running':
+            cmd = 'sc query state= active | findstr /C:"SERVICE_NAME:" /C:"DISPLAY_NAME:" /C:"STATE"'
+        elif service_type == 'stopped':
+            cmd = 'sc query state= inactive | findstr /C:"SERVICE_NAME:" /C:"DISPLAY_NAME:" /C:"STATE"'
+        else:
+            cmd = 'sc query state= all | findstr /C:"SERVICE_NAME:" /C:"DISPLAY_NAME:" /C:"STATE"'
+
+        stdout, stderr = RunCommand(cmd, timeout=15)
+
+        services = []
+        lines = stdout.strip().split('\n')
+        current = {}
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith('SERVICE_NAME:'):
+                if current:
+                    services.append(current)
+                current = {'name': line.replace('SERVICE_NAME:', '').strip()}
+            elif line.startswith('DISPLAY_NAME:'):
+                if current is not None:
+                    current['display_name'] = line.replace('DISPLAY_NAME:', '').strip()
+            elif line.startswith('STATE'):
+                if current is not None:
+                    parts = line.split(':')
+                    state_str = parts[-1].strip() if len(parts) > 1 else ''
+                    current['state'] = state_str
+                    current['active'] = 'RUNNING' in state_str
+        if current:
+            services.append(current)
+
+        return {
+            'service_type': service_type,
+            'services': services[:100],
+            'total': len(services),
+        }
+    except Exception as e:
+        return {'error': f'获取服务列表失败: {str(e)}'}
+
+
+def get_service_logs(name: str, lines: int = 50, since: str = '1 hour ago') -> dict:
+    """
+    获取 Windows 服务日志 (Event Log)
+    返回: {'service_name': str, 'lines': int, 'since': str, 'content': str, 'truncated': bool}
+    """
+    try:
+        cmd = f'wevtutil qe Application /c:{lines} /rd:true /f:text /q:"*[System[Provider[@Name=\'{name}\']]]" 2>nul'
+        stdout, stderr = RunCommand(cmd, timeout=15)
+
+        if not stdout.strip():
+            cmd = f'wevtutil qe System /c:{lines} /rd:true /f:text /q:"*[System[Provider[@Name=\'{name}\']]]" 2>nul'
+            stdout, stderr = RunCommand(cmd, timeout=15)
+
+        if not stdout.strip():
+            stdout = f'Windows 事件日志中未找到服务 "{name}" 的相关记录。\n提示：可尝试使用 Get-WinEvent 或查看服务自身日志文件。'
+
+        return {
+            'service_name': name,
+            'lines': lines,
+            'since': since,
+            'content': stdout[:15000],
+            'truncated': len(stdout) > 15000,
+        }
+    except Exception as e:
+        return {'error': f'获取服务日志失败: {str(e)}'}

@@ -43,6 +43,7 @@ class NginxClient:
     proxyPath = None
     redirectBasePath = None#重定向配置目录
     redirectPath = None
+    extensionBasePath = None#扩展配置目录（WAF等）
     antichainStartKey = "RyAntiChain-Start"
     antichainEndKey = "RyAntiChain-End"
     replaceLine1Key = "#RUYIREPLACELINE1"
@@ -71,6 +72,7 @@ class NginxClient:
         if not os.path.exists(self.redirectBasePath): os.makedirs(self.redirectBasePath)
         self.redirectPath = settings.RUYI_VHOST_PATH.replace("\\", "/")+"/redirect"+ "/" + self.siteName +"_redirect.json"
         self.sslBasePath = settings.RUYI_VHOST_PATH.replace("\\", "/")+"/ssl/" + self.siteName
+        self.extensionBasePath = self.confBasePath + "/extension/" + self.siteName
         self.stopPath = os.path.join(settings.RUYI_TEMPLATE_BASE_PATH,"www","stop").replace("\\", "/")
         self.softPathInfo = get_nginx_path_info()
         self.check_default_config()
@@ -103,6 +105,9 @@ class NginxClient:
             except Exception as e:
                 return False,'创建根目录失败：%s'%e
         
+        # 创建扩展配置目录
+        self.create_extension_dir()
+        
         self.create_default_file()
         self.create_conf(domainList=domainList)
         return True,"ok"
@@ -116,6 +121,18 @@ class NginxClient:
         source_template_base_path = os.path.join(settings.RUYI_TEMPLATE_BASE_PATH,'html')
         WriteFile(file_404_path, ReadFile(os.path.join(source_template_base_path,'404.html')))
         WriteFile(file_index_path, ReadFile(os.path.join(source_template_base_path,'index.html')))
+        return True
+    
+    def create_extension_dir(self):
+        """
+        @name 创建站点扩展配置目录
+        @author lybbn<2025-02-15>
+        """
+        if not os.path.exists(self.extensionBasePath):
+            os.makedirs(self.extensionBasePath)
+        placeholder_file = self.extensionBasePath + "/.placeholder.conf"
+        if not os.path.exists(placeholder_file):
+            WriteFile(placeholder_file, "# Extension placeholder - Do not delete\n")
         return True
     
     def create_conf(self,domainList = []):
@@ -141,6 +158,9 @@ class NginxClient:
     index index.html index.htm index.php default.php default.htm default.html; 
     access_log {self.logAccessPath};
     error_log {self.logErrorPath};
+    
+    #扩展配置目录（WAF等）
+    include {self.confBasePath}/extension/{self.siteName}/*.conf;
     
     {self.replaceLine2Key} 禁止删除本行，自动插入配置使用，否则会导致部分功能失效
     
@@ -329,6 +349,9 @@ class NginxClient:
         #删除反向代理
         DeleteFile(self.proxyPath,empty_tips=False)
         DeleteDir(self.proxyBasePath)
+        
+        #删除扩展配置目录
+        DeleteDir(self.extensionBasePath)
         
         #删除站点、域名列表
         SiteDomains.objects.filter(site_id=id).delete()
@@ -752,6 +775,7 @@ class NginxClient:
         subFilters = ast_convert(cont.get('subFilters',[]))
         proxyHost = cont.get('proxyHost',"")
         sniEnable = cont.get('sniEnable',False)
+        websocket = cont.get('websocket',False)
         cache = cont.get('cache',False)
         cacheTime = int(cont.get('cacheTime',1))
         cacheUnit = cont.get('cacheUnit','m')
@@ -785,6 +809,19 @@ class NginxClient:
             subfilter_rule = f"""
     proxy_set_header Accept-Encoding "";{subfilter_rule}
     sub_filter_once off;"""
+
+        websocket_rule = ""
+        if websocket:
+            websocket_rule = """
+    set $proxy_connection "upgrade";
+    if ($http_upgrade = '') {
+        set $proxy_connection "close";
+    }
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $proxy_connection;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+    proxy_buffering off;"""
 
         if operate not in ["add","edit","del"]:return False,"操作动作错误"
         
@@ -822,7 +859,7 @@ location ^~ {proxyPath} {{
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_http_version 1.1;
+    proxy_http_version 1.1;{websocket_rule}
     {"proxy_ssl_server_name on;\n" if sniEnable else ""}{subfilter_rule if subfilter_rule else ""}{cache_content if cache else no_cache_content}
 }}
 #RUYI-PROXY-END"""
@@ -845,6 +882,7 @@ location ^~ {proxyPath} {{
                 'cacheTime':cacheTime,
                 'cacheUnit':cacheUnit,
                 'sniEnable':sniEnable,
+                'websocket':websocket,
                 'status':status,
                 'advanced':advanced,
                 'subFilters':subFilters, 
@@ -861,6 +899,7 @@ location ^~ {proxyPath} {{
                     rc['cacheTime'] = cacheTime
                     rc['cacheUnit'] = cacheUnit
                     rc['sniEnable'] = sniEnable
+                    rc['websocket'] = websocket
                     rc['status'] = status
                     rc['advanced'] = advanced
                     rc['subFilters'] = subFilters
@@ -897,6 +936,7 @@ location ^~ {proxyPath} {{
             "key":"",
             "cert":"",
             "certinfo":{},
+            "root_password":"",
             "expire_days":0,#距离过期剩余天数,0表示过期
         }
         if os.path.exists(self.sslBasePath):
@@ -908,12 +948,15 @@ location ^~ {proxyPath} {{
                 info_path = self.sslBasePath+"/info.json"
                 if os.path.exists(info_path):
                     data['certinfo'] = json.loads(ReadFile(info_path))
+                    data['root_password'] = data['certinfo'].get('root_password',"")
                 else:
                     data['certinfo'] = getCertInfo(mode="content",cert_content=ReadFile(cert_path,mode="rb"))
                 expiry_date = datetime.strptime(data['certinfo']['not_valid_after'], "%Y-%m-%d %H:%M:%S")
                 today_date = datetime.today()
                 data['expire_days'] = (expiry_date - today_date).days
                 if data['expire_days'] <0:data['expire_days']=0
+                if not data['root_password'] and data['certinfo'].get('type',"") == "自签证书":
+                    data['root_password'] = ReadFile(settings.RUYI_ROOTPFX_PASSWORD_PATH_FILE)
                 if is_simple:
                     data['key'] = "is_simple"
                     data['cert'] = "is_simple"
@@ -1002,12 +1045,15 @@ location ^~ {proxyPath} {{
         """
         cert = cont.get('cert',"")
         key = cont.get('key',"")
+        root_password = cont.get('root_password',"")
         if not os.path.exists(self.sslBasePath): os.makedirs(self.sslBasePath)
         if (key.find('KEY') == -1): return False, '私钥格式错误'
         if (cert.find('CERTIFICATE') == -1): return False, '证书格式错误'
         certinfo = getCertInfo(cert_content=cert.encode('utf-8'),mode=None)
         if not certinfo:
             return False,"证书解析错误"
+        if root_password:
+            certinfo['root_password'] = root_password
         WriteFile(self.sslBasePath + '/info.json',json.dumps(certinfo))
         cert_path = self.sslBasePath+"/certificate.pem"
         key_path = self.sslBasePath+"/privateKey.pem"
@@ -1083,4 +1129,184 @@ location ^~ {proxyPath} {{
         with open(filename, 'w',encoding="utf-8") as file:
             file.writelines(lines)
         return True
+    
+    def set_site_waf(self, enabled=True, site_id=None):
+        """
+        @name 设置站点WAF
+        @author lybbn<2025-02-15>
+        @param enabled 是否启用WAF
+        @param site_id 站点ID
+        """
+        waf_conf_path = self.extensionBasePath + "/waf.conf"
         
+        if enabled:
+            if not os.path.exists(self.extensionBasePath):
+                self.create_extension_dir()
+            site_id_str = str(site_id) if site_id else "0"
+            waf_conf = f'''# WAF Protection - Generated by Ruyi Panel
+# DO NOT DELETE THIS FILE
+set $site_id {site_id_str};
+access_by_lua_block {{
+    local waf_check = require("waf_check")
+    waf_check.check()
+}}
+'''
+            WriteFile(waf_conf_path, waf_conf)
+        else:
+            DeleteFile(waf_conf_path, empty_tips=False)
+        
+        return True, "ok"
+    
+    def get_site_waf(self):
+        """
+        @name 获取站点WAF状态
+        @author lybbn<2025-02-15>
+        @return dict {'enabled': bool, 'conf_path': str}
+        """
+        waf_conf_path = self.extensionBasePath + "/waf.conf"
+        return {
+            'enabled': os.path.exists(waf_conf_path),
+            'conf_path': waf_conf_path if os.path.exists(waf_conf_path) else None
+        }
+    
+    @staticmethod
+    def migrate_all_sites_extension_include():
+        """
+        @name 批量迁移所有站点配置，添加扩展配置目录 include 语句
+        @author lybbn<2025-02-24>
+        @description 为所有老站点配置文件添加 extension include 语句，用于WAF等功能
+        @return tuple (migrated_count, skipped_count, failed_count)
+        """
+        from apps.system.models import Sites
+        from django.conf import settings
+        
+        conf_base_path = settings.RUYI_VHOST_PATH.replace("\\", "/") + "/nginx"
+        if not os.path.exists(conf_base_path):
+            return 0, 0, 0
+        
+        sites = Sites.objects.all()
+        migrated_count = 0
+        skipped_count = 0
+        failed_count = 0
+        
+        for site in sites:
+            try:
+                client = NginxClient(siteName=site.name, sitePath=site.path)
+                conf_path = client.confPath
+                
+                # 读取配置文件
+                content = ReadFile(conf_path)
+                if not content:
+                    skipped_count += 1
+                    continue
+                
+                # 检查是否已包含 extension include
+                if f"/extension/{site.name}/" in content:
+                    skipped_count += 1
+                    continue
+                
+                # 确保扩展目录存在
+                client.create_extension_dir()
+                
+                # 构建 include 语句
+                include_line = f"""    #扩展配置目录（WAF等）
+    include {client.confBasePath}/extension/{site.name}/*.conf;"""
+                
+                # 在 server_name 行后插入
+                pattern = r"(server_name\s+.+;)"
+                match = re.search(pattern, content)
+                if match:
+                    insert_pos = match.end()
+                    new_content = content[:insert_pos] + "\n\n" + include_line + content[insert_pos:]
+                    WriteFile(conf_path, new_content)
+                    migrated_count += 1
+                else:
+                    # 备选：在第一个 listen 行后插入
+                    pattern = r"(listen\s+\d+[^;]*;)"
+                    match = re.search(pattern, content)
+                    if match:
+                        insert_pos = match.end()
+                        new_content = content[:insert_pos] + "\n" + include_line + content[insert_pos:]
+                        WriteFile(conf_path, new_content)
+                        migrated_count += 1
+                    else:
+                        failed_count += 1
+                        
+            except Exception as e:
+                failed_count += 1
+                continue
+        
+        return migrated_count, skipped_count, failed_count
+    
+    def create_php_proxy_conf(self, domains=None, fpm_port=9000, conf_path=None, is_windows=True):
+        """
+        @name 创建PHP站点的Nginx配置文件（含PHP-FPM反向代理）
+        @author lybbn<2025-05-06>
+        @param domains 域名端口列表[{'domain':xxx,'port':xxx}]
+        @param fpm_port PHP-FPM监听端口
+        @param conf_path 配置文件路径
+        @param is_windows 是否Windows
+        """
+        if not domains:
+            domains = [{'domain':'_','port':80}]
+        if not conf_path:
+            conf_path = self.confPath
+        
+        server_names = " ".join(d['domain'] for d in domains)
+        l_ports = list(set([d['port'] for d in domains]))
+        listen_ports = "\n".join(f"    listen {d};" for d in l_ports)
+        error_log_off = "off" if is_windows else "/dev/null"
+        
+        fpm_socket = f"127.0.0.1:{fpm_port}"
+        
+        conf = f"""server 
+{{
+{listen_ports}
+    server_name {server_names};
+    root {self.sitePath};
+    index index.html index.htm index.php default.php default.htm default.html; 
+    access_log {self.logAccessPath};
+    error_log {self.logErrorPath};
+    
+    #扩展配置目录（WAF等）
+    include {self.confBasePath}/extension/{self.siteName}/*.conf;
+    
+    {self.replaceLine2Key} 禁止删除本行，自动插入配置使用，否则会导致部分功能失效
+    
+    {self.replaceLine1Key} 禁止删除本行，自动插入配置使用，否则会导致部分功能失效
+    
+    #禁止访问 文件或目录
+    location ~ ^/(\.htaccess|\.git|\.env|\.svn|\.project|LICENSE|README.md|readme.md) {{
+        return 404;
+    }}
+
+    #申请SSL证书验证目录
+    location ^~ /.well-known {{
+        allow all; 
+    }}
+    
+    location ~ [^/]\.php(/|$) {{
+        try_files $uri =404;
+        fastcgi_pass {fpm_socket};
+        fastcgi_index index.php;
+        include fastcgi.conf;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }}
+    
+    #图片资源文件 缓存和日志策略 (需要时开启)
+    #location ~ .*\\.(gif|jpg|jpeg|png|bmp|swf)$ {{
+    #    expires      20d;
+    #    error_log {error_log_off};
+    #    access_log off;
+    #}}
+    
+    #js css 资源文件 缓存和日志策略 (需要时开启)
+    #location ~ .*\\.(js|css)?$ {{
+    #    expires      6h;
+    #    error_log {error_log_off};
+    #    access_log off;
+    #}}
+    
+}}"""
+        WriteFile(conf_path, conf)
+        return True

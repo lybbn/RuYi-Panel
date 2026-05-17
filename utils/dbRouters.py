@@ -30,6 +30,16 @@ class RuyiDatabasesRouter:
             return 'backup'
         elif model._meta.app_label == 'sysdocker':
             return 'docker'
+        elif model._meta.app_label == 'sysmonitor':
+            return 'monitor'
+        elif model._meta.app_label == 'sysalert':
+            return 'alert'
+        elif model._meta.app_label == 'syswaf':
+            if model.__name__ == 'WafAttackLog':
+                return 'waf_logs'
+            return 'waf'
+        elif model._meta.app_label == 'sysai':
+            return 'ai'
         return 'default'
 
     def db_for_write(self, model, **hints):
@@ -43,6 +53,16 @@ class RuyiDatabasesRouter:
             return 'backup'
         elif model._meta.app_label == 'sysdocker':
             return 'docker'
+        elif model._meta.app_label == 'sysmonitor':
+            return 'monitor'
+        elif model._meta.app_label == 'sysalert':
+            return 'alert'
+        elif model._meta.app_label == 'syswaf':
+            if model.__name__ == 'WafAttackLog':
+                return 'waf_logs'
+            return 'waf'
+        elif model._meta.app_label == 'sysai':
+            return 'ai'
         return 'default'
 
     def allow_migrate(self, db, app_label, model_name=None, **hints):
@@ -58,5 +78,15 @@ class RuyiDatabasesRouter:
             return db == 'backup'
         elif app_label == 'sysdocker':
             return db == 'docker'
+        elif app_label == 'sysmonitor':
+            return db == 'monitor'
+        elif app_label == 'sysalert':
+            return db == 'alert'
+        elif app_label == 'syswaf':
+            if model_name == 'wafattacklog':
+                return db == 'waf_logs'
+            return db == 'waf'
+        elif app_label == 'sysai':
+            return db == 'ai'
         else:
             return db == 'default'

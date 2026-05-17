@@ -9,7 +9,11 @@ PANEL_PATH="/ruyi/server/ruyi"
 #修复部分linux中\r换行报错
 sed -i 's/\r//' ${PANEL_PATH}/ruyi-cmd.sh
 chmod +x ${PANEL_PATH}/ruyi-cmd.sh
-ln -s ${PANEL_PATH}/ruyi-cmd.sh /usr/local/bin/ruyi-cmd
+rm -f /usr/local/bin/ruyi-cmd
+echo '#!/bin/bash' > /usr/local/bin/ruyi-cmd
+echo "sed -i 's/\r//' ${PANEL_PATH}/ruyi-cmd.sh" >> /usr/local/bin/ruyi-cmd
+echo "${PANEL_PATH}/ruyi-cmd.sh \"\$@\"" >> /usr/local/bin/ruyi-cmd
+chmod +x /usr/local/bin/ruyi-cmd
 
 rypython -m pip install --upgrade pip
 
@@ -19,3 +23,5 @@ rypip install -r ${PANEL_PATH}/requirements.txt -i https://mirrors.aliyun.com/py
 #同步数据
 cd ${PANEL_PATH}
 rypython manage.py syncdb
+#升级初始化数据
+rypython manage.py upgrade_init

@@ -667,7 +667,7 @@ def GetFirewallRules(param = {"dir":"in"}):
         return []
     newData = []
     for d in data:
-        if d['port'] == "all" or d['port'].find('-') != -1 or d['port'].find(':') != -1:
+        if d['port'] == "all" or d['port'] == "any" or d['port'].find('-') != -1 or d['port'].find(':') != -1:
             d['status'] = -1
         else:
             if is_service_running(int(d['port'])):
@@ -702,6 +702,7 @@ def GetFirewallRules(param = {"dir":"in"}):
             else:
                 continue
         newData.append(d)
+    newData.reverse()
     return newData
 
 def GetFirewallStatus():
@@ -1313,6 +1314,136 @@ def AddBinToPath(bin_dir):
         return True
     else:
         raise Exception("无/etc/profile文件")
+
+
+def get_service_status(name: str) -> dict:
+    """
+    获取 Linux 系统服务状态
+    返回:
+        {
+            'service_name': str,
+            'is_active': bool,
+            'is_enabled': bool,
+            'pid': int or None,
+            'status_output': str,
+        }
+    """
+    try:
+        stdout, stderr = RunCommand(
+            f'systemctl status {name} 2>/dev/null || service {name} status 2>/dev/null',
+            timeout=10,
+        )
+
+        is_active = 'active (running)' in stdout
+        is_enabled = 'enabled' in stdout
+
+        pid = None
+        for line in stdout.split('\n'):
+            if 'Main PID' in line:
+                try:
+                    pid = int(line.split(':')[1].strip().split()[0])
+                except (ValueError, IndexError):
+                    pass
+                break
+
+        return {
+            'service_name': name,
+            'is_active': is_active,
+            'is_enabled': is_enabled,
+            'pid': pid,
+            'status_output': stdout[:3000],
+        }
+    except Exception as e:
+        return {'error': f'获取服务状态失败: {str(e)}'}
+
+
+def set_service_status(name: str, action: str):
+    """
+    设置 Linux 服务状态 (start/stop/restart/reload/enable/disable)
+    返回: (bool, str) - (是否成功, 消息)
+    """
+    valid_actions = ['start', 'stop', 'restart', 'reload', 'enable', 'disable']
+    if action not in valid_actions:
+        return False, f'无效操作: {action}，可用操作: {", ".join(valid_actions)}'
+
+    try:
+        stdout, stderr = RunCommand(
+            f'systemctl {action} {name} 2>&1',
+            timeout=30,
+        )
+
+        success = not stderr or 'not found' not in stderr.lower()
+
+        check_stdout, _ = RunCommand(
+            f'systemctl is-active {name} 2>/dev/null',
+            timeout=5,
+        )
+        current_status = check_stdout.strip()
+
+        msg = stdout.strip() or stderr.strip() or ('操作成功' if success else '操作失败')
+        return success, msg
+    except Exception as e:
+        return False, f'服务操作失败: {str(e)}'
+
+
+def list_services(service_type: str = 'running') -> dict:
+    """
+    列出 Linux 系统服务
+    返回: {'services': list, 'total': int}
+    """
+    try:
+        if service_type == 'running':
+            cmd = 'systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null'
+        elif service_type == 'stopped':
+            cmd = 'systemctl list-units --type=service --state=stopped --no-pager --no-legend 2>/dev/null'
+        else:
+            cmd = 'systemctl list-units --type=service --all --no-pager --no-legend 2>/dev/null'
+
+        stdout, stderr = RunCommand(cmd, timeout=15)
+
+        services = []
+        for line in stdout.strip().split('\n'):
+            if not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) >= 4:
+                services.append({
+                    'name': parts[0].replace('.service', ''),
+                    'load': parts[1],
+                    'active': parts[2],
+                    'sub': parts[3],
+                    'description': ' '.join(parts[4:]) if len(parts) > 4 else '',
+                })
+
+        return {
+            'service_type': service_type,
+            'services': services[:100],
+            'total': len(services),
+        }
+    except Exception as e:
+        return {'error': f'获取服务列表失败: {str(e)}'}
+
+
+def get_service_logs(name: str, lines: int = 50, since: str = '1 hour ago') -> dict:
+    """
+    获取 Linux 服务日志 (journalctl)
+    返回: {'service_name': str, 'lines': int, 'since': str, 'content': str, 'truncated': bool}
+    """
+    try:
+        stdout, stderr = RunCommand(
+            f'journalctl -u {name} -n {lines} --since "{since}" --no-pager 2>/dev/null',
+            timeout=15,
+        )
+
+        return {
+            'service_name': name,
+            'lines': lines,
+            'since': since,
+            'content': stdout[:15000],
+            'truncated': len(stdout) > 15000,
+        }
+    except Exception as e:
+        return {'error': f'获取服务日志失败: {str(e)}'}
 
 
     

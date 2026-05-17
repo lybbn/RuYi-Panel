@@ -21,7 +21,7 @@
 import os
 import re
 import time
-from utils.common import check_url_site_canuse,ReadFile,is_service_running,GetTmpPath,GetRootPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,DeleteDir,RunCommand,GetProcessNameInfo,is_admin
+from utils.common import check_url_site_canuse,ReadFile,is_service_running,GetTmpPath,GetRootPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,DeleteDir,RunCommand,GetProcessNameInfo,is_admin,ConvertToUnixLineEndings
 from utils.security.files import download_url_file,get_file_name_from_url,get_github_quick_downloadurl,download_url_file_wget
 from pathlib import Path
 import subprocess
@@ -213,8 +213,7 @@ def Install_Docker(type=2,version={},is_windows=True,call_back=None):
             WriteFile(log_path,"开始下载【%s】安装文件,文件地址：%s\n"%(name,download_url),mode='a',write=is_write_log)
             filename = get_file_name_from_url(download_url)
             save_path = os.path.join(save_directory, filename)
-            #开始下载
-            ok,msg = download_url_file_wget(url=download_url,save_path=save_path,process=True,log_path=log_path)
+            ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
             if not ok:
                 if "github.com" in download_url:
                     WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
@@ -233,7 +232,7 @@ def Install_Docker(type=2,version={},is_windows=True,call_back=None):
             installation_dir = os.path.join(install_directory,'docker')
             #,f"--wsl-default-data-root={data_root}","--relaunch-as-admin"
             command = [save_path, "install", "--quiet", "--accept-license","--always-run-service","--backend=wsl-2",f"--installation-dir={installation_dir}"]#--backend=hyper-v
-            r_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,universal_newlines=True, text=True,bufsize=1, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+            r_process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, text=True, bufsize=1, encoding='utf-8', errors='replace', creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
             job_subprocess_add(version['job_id'],r_process)
             install_log_p = "C:/ProgramData/DockerDesktop/install-log-admin.txt"
             WriteFile(log_path,f"请查看Dokcer Desktop安装进度日志：{install_log_p}\n",mode='a',write=is_write_log)
@@ -265,7 +264,10 @@ def Install_Docker(type=2,version={},is_windows=True,call_back=None):
             DeleteFile(save_path,empty_tips=False)
             WriteFile(log_path,"已删除下载的临时安装文件，并回调\n",mode='a',write=is_write_log)
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/docker.sh','install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            # 转换脚本换行符为 Unix 格式
+            script_path = GetInstallPath()+'/ruyi/utils/install/bash/docker.sh'
+            ConvertToUnixLineEndings(script_path)
+            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
             job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
@@ -389,7 +391,10 @@ def Install_Docker_bak(type=2,version={},is_windows=True,call_back=None):
             bin_path = os.path.join(install_directory,'docker')
             system.AddBinToPath(bin_path)
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/docker.sh','install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            # 转换脚本换行符为 Unix 格式
+            script_path = GetInstallPath()+'/ruyi/utils/install/bash/docker.sh'
+            ConvertToUnixLineEndings(script_path)
+            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
             job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
@@ -429,25 +434,51 @@ def Uninstall_Docker(is_windows=True):
     soft_paths = get_docker_path_info()
     install_path = soft_paths['install_abspath_path']
     if is_windows:
-        if os.path.exists(install_path):
-            Stop_Docker(is_windows=is_windows)
-            exe_path = soft_paths['windows_abspath_uninstall_bin']
-            if os.path.exists(exe_path):
-                time.sleep(0.5)
-                if is_docker_running():
-                    time.sleep(3)
-                try:
-                    subprocess.run([exe_path,'uninstall',"--quiet","--force"], capture_output=False, text=True)
-                except Exception as e:
-                    print(f"卸载dokcer-desktop失败：{e}")
-                time.sleep(2)
-            if not os.path.exists(exe_path):
+        exe_path = soft_paths['windows_abspath_docker_bin']
+        uninstall_exe = soft_paths['windows_abspath_uninstall_bin']
+        version_file = os.path.join(install_path, 'version.ry')
+        
+        if not os.path.exists(exe_path) and not os.path.exists(uninstall_exe):
+            if os.path.exists(version_file):
+                os.remove(version_file)
+            if os.path.exists(install_path):
                 system.ForceRemoveDir(install_path)
-            else:
+            return True
+        
+        if os.path.exists(uninstall_exe):
+            Stop_Docker(is_windows=is_windows)
+            time.sleep(0.5)
+            if is_docker_running():
+                time.sleep(3)
+            try:
+                subprocess.run([uninstall_exe,'uninstall',"--quiet","--force"], capture_output=False, text=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                pass
+            except Exception as e:
+                print(f"卸载dokcer-desktop失败：{e}")
+            
+            time.sleep(2)
+            
+            if os.path.exists(version_file):
+                os.remove(version_file)
+            
+            if not os.path.exists(exe_path) and not os.path.exists(uninstall_exe):
+                return True
+            
+            if os.path.exists(exe_path) or os.path.exists(uninstall_exe):
                 raise ValueError("Docker Desktop正在卸载中，请稍后再试")
+        else:
+            Stop_Docker(is_windows=is_windows)
+            if os.path.exists(version_file):
+                os.remove(version_file)
+            if os.path.exists(install_path):
+                system.ForceRemoveDir(install_path)
     else:
         try:
-            subprocess.run(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","docker.sh"),'uninstall'], capture_output=False, text=True)
+            # 转换脚本换行符为 Unix 格式
+            script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","docker.sh")
+            ConvertToUnixLineEndings(script_path)
+            subprocess.run(['bash', script_path,'uninstall'], capture_output=False, text=True)
             DeleteDir(install_path)
         except Exception as e:
             raise ValueError(e)
@@ -496,7 +527,10 @@ def Start_Docker(is_windows=True):
         if os.path.exists(exe_path):
             try:
                 if not is_docker_running(is_windows=False,simple_check=True):
-                    subprocess.run(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","docker.sh"),'start'], capture_output=False, text=True,timeout=20)
+                    # 转换脚本换行符为 Unix 格式
+                    script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","docker.sh")
+                    ConvertToUnixLineEndings(script_path)
+                    subprocess.run(['bash', script_path,'start'], capture_output=False, text=True,timeout=20)
                 else:
                     r_status = True
                     return True
@@ -528,7 +562,10 @@ def Stop_Docker(is_windows=True):
     else:
         if is_docker_running(is_windows=is_windows):
             try:
-                subprocess.run(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","docker.sh"),'stop'], capture_output=False, text=True)
+                # 转换脚本换行符为 Unix 格式
+                script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","docker.sh")
+                ConvertToUnixLineEndings(script_path)
+                subprocess.run(['bash', script_path,'stop'], capture_output=False, text=True)
                 time.sleep(1)
                 if is_docker_running(is_windows=False):
                     return False
@@ -549,7 +586,10 @@ def Restart_Docker(is_windows=True):
         Start_Docker(is_windows=is_windows)
     else:
         try:
-            subprocess.run(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","docker.sh"),'restart'], capture_output=False, text=True)
+            # 转换脚本换行符为 Unix 格式
+            script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","docker.sh")
+            ConvertToUnixLineEndings(script_path)
+            subprocess.run(['bash', script_path,'restart'], capture_output=False, text=True)
             time.sleep(0.5)
             if is_docker_running(is_windows=False):
                 return False
@@ -600,7 +640,9 @@ def RY_GET_DOCKER_DEFAULT_CONF(is_windows=True):
         }}
     }},
     "registry-mirrors": [
-        "https://docker.1ms.run"
+        "https://docker-0.unsee.tech",
+        "https://docker.1ms.run",
+        "https://docker.xuanyuan.me/"
     ]
 }}"""
     else:

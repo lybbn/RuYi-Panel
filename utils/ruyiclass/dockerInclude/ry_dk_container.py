@@ -18,6 +18,7 @@
 # Docker 容器类
 # ------------------------------
 import time
+import os
 import docker.types
 from utils.common import ast_convert,is_service_running
 from utils.ruyiclass.dockerInclude.ry_dk_common import format_to_dict,get_sys_cpumem_info
@@ -322,3 +323,308 @@ class main:
         if not self.client:
             return []
         return self.client.containers.list()
+
+    def edit(self, cont={}):
+        """
+        编辑容器配置（需要先停止、删除、重新创建）
+        """
+        try:
+            id = cont.get('id', "")
+            if not id:
+                return False, "缺少容器ID"
+            
+            # 获取原容器信息
+            try:
+                old_container = self.client.containers.get(id)
+                old_attrs = old_container.attrs
+            except Exception as e:
+                return False, f"获取容器信息失败：{e}"
+            
+            # 获取原容器配置
+            old_name = old_attrs['Name'].lstrip('/')
+            old_image = old_attrs['Config']['Image']
+            old_status = old_attrs['State']['Status']
+            
+            # 获取新配置
+            cpu_quota = int(cont.get('cpu_quota', 0))
+            mem_limit = int(cont.get('mem_limit', 0))
+            ports = ast_convert(cont.get('ports', []))
+            networks = ast_convert(cont.get('networks', []))
+            volumes = ast_convert(cont.get('volumes', []))
+            restart_policy = cont.get('restart_policy', old_attrs['HostConfig']['RestartPolicy']['Name'])
+            
+            # 验证配置
+            syscpumeminfo = get_sys_cpumem_info()
+            total_memory = syscpumeminfo['total_memory']
+            cpu_count = syscpumeminfo['cpu_count']
+            
+            if cpu_quota:
+                if cpu_quota > cpu_count:
+                    return False, "CPU限制已超过可用内核数"
+                cpu_quota = cpu_quota * 100000
+            
+            if mem_limit:
+                mem_limit_byte = mem_limit * 1024 * 1024
+                if mem_limit_byte > total_memory:
+                    return False, "内存限制已超过可用量"
+                if mem_limit_byte < 6291456:
+                    return False, "内存限制不能小于6MB"
+            else:
+                mem_limit = None
+            
+            # 处理端口映射
+            new_ports = {}
+            if ports:
+                for pt in ports:
+                    hostPort = pt["hostPort"]
+                    containerPort = pt["containerPort"]
+                    protocol = pt["protocol"]
+                    if ":" in hostPort or "-" in hostPort:
+                        return False, "暂不支持此格式端口"
+                    if ":" in containerPort or "-" in containerPort:
+                        return False, "暂不支持此格式端口"
+                    if protocol not in ["tcp", "udp"]:
+                        return False, "协议错误"
+                    # 检查端口是否被其他服务占用（排除当前容器）
+                    if is_service_running(port=int(hostPort)):
+                        # 检查是否是当前容器占用的端口
+                        old_ports = old_attrs['HostConfig']['PortBindings'] or {}
+                        port_in_use_by_self = False
+                        for old_container_port, old_host_bindings in old_ports.items():
+                            if old_host_bindings:
+                                for binding in old_host_bindings:
+                                    if binding and binding.get('HostPort') == hostPort:
+                                        port_in_use_by_self = True
+                                        break
+                        if not port_in_use_by_self:
+                            return False, f"{hostPort}端口已被占用，请更换！！！"
+                    new_ports[str(containerPort) + "/" + protocol] = int(hostPort)
+            
+            # 处理网络配置
+            networking_config = {}
+            network = None
+            if networks:
+                for ntw in networks:
+                    name = ntw["name"]
+                    ipv4_address = ntw.get("ipv4_address", "")
+                    tmp_ipdict = {"ipv4_address": ipv4_address} if ipv4_address else {}
+                    networking_config[name] = tmp_ipdict
+                network = networks[0]["name"]
+            else:
+                # 使用原网络配置
+                old_networks = old_attrs['NetworkSettings']['Networks']
+                if old_networks:
+                    for net_name, net_config in old_networks.items():
+                        network = net_name
+                        break
+            
+            # 处理挂载配置
+            new_volumes = {}
+            if volumes:
+                for item in volumes:
+                    if item["type"] not in ["volume", "localdir"]:
+                        return False, "挂载参数错误"
+                    new_volumes[item["local_dir"]] = {
+                        "bind": item["container_dir"],
+                        "mode": item["mode"]
+                    }
+            else:
+                # 使用原挂载配置
+                old_mounts = old_attrs['Mounts']
+                for mount in old_mounts:
+                    if mount['Type'] == 'bind':
+                        new_volumes[mount['Source']] = {
+                            "bind": mount['Destination'],
+                            "mode": 'rw' if mount['RW'] else 'ro'
+                        }
+            
+            # 处理重启策略
+            if restart_policy == "on-failure":
+                restart_policy = {"Name": "on-failure", "MaximumRetryCount": 5}
+            else:
+                restart_policy = {"Name": restart_policy}
+            
+            # 获取其他配置（保持原配置）
+            command = old_attrs['Config']['Cmd']
+            entrypoint = old_attrs['Config']['Entrypoint']
+            env = old_attrs['Config']['Env'] or []
+            labels = old_attrs['Config']['Labels'] or {}
+            tty = old_attrs['Config']['Tty']
+            stdin_open = old_attrs['Config']['OpenStdin']
+            privileged = old_attrs['HostConfig']['Privileged']
+            auto_remove = old_attrs['HostConfig']['AutoRemove']
+            publish_all_ports = old_attrs['HostConfig']['PublishAllPorts']
+            
+            # 停止原容器
+            if old_status == 'running':
+                try:
+                    old_container.stop(timeout=10)
+                    time.sleep(1)
+                except Exception as e:
+                    return False, f"停止原容器失败：{e}"
+            
+            # 删除原容器
+            try:
+                old_container.remove(force=True)
+                time.sleep(1)
+            except Exception as e:
+                return False, f"删除原容器失败：{e}"
+            
+            # 创建新容器
+            new_container = self.client.containers.create(
+                name=old_name,
+                image=old_image,
+                restart_policy=restart_policy,
+                command=command,
+                entrypoint=entrypoint,
+                environment=env,
+                labels=labels,
+                ports=new_ports,
+                network=network,
+                networking_config=networking_config if networking_config else None,
+                volumes=new_volumes if new_volumes else None,
+                cpu_quota=int(cpu_quota) or 0,
+                cpu_shares=1024,
+                mem_limit=mem_limit,
+                publish_all_ports=publish_all_ports,
+                detach=True,
+                stdin_open=stdin_open,
+                tty=tty,
+                privileged=privileged,
+                auto_remove=auto_remove
+            )
+            
+            # 如果原容器是运行状态，启动新容器
+            if old_status == 'running':
+                try:
+                    new_container.start()
+                    time.sleep(1)
+                    res = self.client.containers.get(new_container.id)
+                    if res.attrs['State']['Status'] != "running":
+                        return False, "容器已重建但启动失败，请检查配置"
+                except Exception as e:
+                    return False, f"容器已重建但启动失败：{e}"
+            
+            return True, "修改成功"
+        except Exception as e:
+            return False, f"修改失败：{e}"
+
+    def logs(self, cont={}):
+        """
+        获取容器日志
+        """
+        try:
+            id = cont.get('id', "")
+            since = cont.get('since', None)
+            tail = cont.get('tail', "all")
+            timestamps = cont.get('timestamps', True)
+
+            # 优化策略：如果指定了行数，优先按行数截取，忽略时间范围，以提升性能
+            if tail != "all":
+                try:
+                    tail = int(tail)
+                    since = None # 强制忽略 since
+                except:
+                    tail = "all"
+
+            container = self.client.containers.get(id)
+            
+            # 优化：如果是按行数获取（通常行数不会太大，如 500/1000/2000），直接使用非流式读取
+            # 这样可以避免建立流的开销和 Python 逐行循环的低效
+            if isinstance(tail, int) and tail <= 5000:
+                try:
+                    # stream=False 返回 bytes
+                    logs_bytes = container.logs(stdout=True, stderr=True, stream=False, timestamps=timestamps, tail=tail, since=since)
+                    return True, logs_bytes.decode('utf-8', errors='ignore')
+                except Exception:
+                    # 如果直接读取失败，回退到流式读取
+                    pass
+
+            # 使用 stream=True 流式读取，避免一次性加载大文件导致内存溢出或阻塞
+            # 即使 tail=500，Docker 守护进程也可能需要时间准备流
+            log_generator = container.logs(stdout=True, stderr=True, stream=True, timestamps=timestamps, tail=tail, since=since)
+            
+            log_content = []
+            max_lines = 5000 # 硬性限制最大返回行数，防止前端渲染卡死
+            count = 0
+            
+            # 增加超时控制，防止后端长时间阻塞
+            start_time = time.time()
+            timeout_limit = 15 # 15秒超时
+            
+            try:
+                for line in log_generator:
+                    # 检查超时
+                    if time.time() - start_time > timeout_limit:
+                        log_content.append(f"\n[系统提示] 日志读取超时（{timeout_limit}s），仅显示部分内容...\n")
+                        break
+                    
+                    # 解码
+                    try:
+                        line_str = line.decode('utf-8', errors='ignore')
+                    except:
+                        line_str = str(line)
+                        
+                    log_content.append(line_str)
+                    count += 1
+                    
+                    if count >= max_lines:
+                        log_content.append(f"\n[系统提示] 日志内容过长，已截断显示前 {max_lines} 行...\n")
+                        break
+            except Exception as e:
+                # 流读取过程中可能发生错误（如容器突然停止）
+                log_content.append(f"\n[系统提示] 日志流读取中断: {str(e)}\n")
+
+            return True, "".join(log_content)
+        except Exception as e:
+            return False, f"获取日志失败：{e}"
+
+    def stats(self, cont={}):
+        """
+        获取容器实时监控数据
+        """
+        try:
+            id = cont.get('id',"")
+            container = self.client.containers.get(id)
+            # stream=False to get a single snapshot
+            stats = container.stats(stream=False)
+            return True, stats
+        except Exception as e:
+            return False, f"获取监控数据失败：{e}"
+
+    def clear_logs(self, cont={}):
+        """
+        清空容器日志
+        """
+        try:
+            id = cont.get('id', "")
+            container = self.client.containers.get(id)
+            log_path = container.attrs.get('LogPath', "")
+            
+            if not log_path:
+                return False, "无法获取日志路径或未启用日志"
+            
+            # 简单判断 log_path 是否看起来像是有日志
+            if log_path.endswith(".log"):
+                log_dir = os.path.dirname(log_path)
+                log_filename = os.path.basename(log_path)
+                
+                # 使用临时容器清空日志，兼容性最好
+                try:
+                    # 使用 sh -c "> path" 清空文件
+                    cmd = f"sh -c '> /log_mount/{log_filename}'"
+                    
+                    self.client.containers.run(
+                        "alpine", 
+                        cmd,
+                        volumes={log_dir: {'bind': '/log_mount', 'mode': 'rw'}},
+                        remove=True
+                    )
+                    return True, "日志已清空"
+                except Exception as e:
+                    return False, f"清空失败: {e}"
+            else:
+                return False, "非文件日志，无法清空"
+
+        except Exception as e:
+            return False, f"操作失败：{e}"

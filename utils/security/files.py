@@ -21,13 +21,16 @@ import shutil
 import datetime
 import mimetypes
 import requests
+import json
+import uuid
 from natsort import natsorted, ns
 from utils.server.system import system
 from utils.security.no_delete_list import check_no_delete,check_in_black_list
-from utils.common import ast_convert,GetTmpPath,WriteFile,RunCommand,current_os
+from utils.common import ast_convert,GetTmpPath,WriteFile,ReadFile,RunCommand,current_os
 from itertools import chain
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from django.conf import settings
 
 def get_file_name_from_url(url):
     """
@@ -64,66 +67,119 @@ def get_github_quick_downloadurl(url):
         return None
     return f"${baseurl}/{url}"
 
-def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8192):
+def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8192,max_retries=6):
     """
     @name 下载网络文件
     @save_path 下载本地路径名称（包含文件名），为空则默认存储在tmp中
     @author lybbn<2024-02-22>
     @process 是否显示进度
     @log_path 记录日志路径(包含文件名),process True时有效
+    @max_retries 最大重试次数
     """
-    try:
-        if not save_path:
-            save_directory = GetTmpPath()
-            if not os.path.exists(save_directory):
-                os.makedirs(save_directory)
-            filename = get_file_name_from_url(url)
-            save_path = os.path.join(save_directory, filename)
-        else:
-            save_directory = os.path.dirname(save_path)
-            if not os.path.exists(save_directory):
-                os.makedirs(save_directory)
+    if not save_path:
+        save_directory = GetTmpPath()
+        if not os.path.exists(save_directory):
+            os.makedirs(save_directory)
+        filename = get_file_name_from_url(url)
+        save_path = os.path.join(save_directory, filename)
+    else:
+        save_directory = os.path.dirname(save_path)
+        if not os.path.exists(save_directory):
+            os.makedirs(save_directory)
 
-        buffered_logs = []
-        # headers = {}
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0 ruyi",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-            "Accept-Encoding":"gzip, deflate, br, zstd",
-            "Sec-Ch-Ua":'"Chromium";v="134", "Not:A-Brand";v="24", "Microsoft Edge";v="134"',
-            "Sec-Ch-Ua-Mobile":"?0"
-        }
-        downloaded_size = 0
-        if os.path.exists(save_path):
-            downloaded_size = os.path.getsize(save_path)
-            headers['Range'] = 'bytes={}-'.format(downloaded_size)
-        r = requests.get(url, headers=headers, stream=True)
-        total_size = int(r.headers.get('content-length', 0))
-        if total_size == 0:
-            WriteFile(log_path, f"检测到已下载的文件，已跳过\n", mode='a', write=True)
-            return True,"下载成功"
-        with open(save_path, 'ab') as f:
-            for chunk in r.iter_content(chunk_size=chunk_size):
-                if chunk:
-                    f.write(chunk)
+    buffered_logs = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0 ruyi",
+        "Accept": "*/*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+        "Accept-Encoding":"identity",
+        "Connection":"keep-alive"
+    }
+    
+    retries = 0
+    last_error = None
+    use_range = True
+    
+    while retries < max_retries:
+        try:
+            downloaded_size = 0
+            request_headers = headers.copy()
+            
+            if os.path.exists(save_path):
+                downloaded_size = os.path.getsize(save_path)
+                if downloaded_size > 0 and use_range:
+                    request_headers['Range'] = 'bytes={}-'.format(downloaded_size)
                     if process:
-                        downloaded_size += len(chunk)
-                        # 计算进度百分比
-                        progress = (downloaded_size / total_size) * 100
-                        if progress> 100:progress=100
-                        logs = f'Downloaded {downloaded_size} of {total_size} bytes ({progress:.2f}%)\n'
-                        buffered_logs.append(logs)
-                        # 仅当缓存达到一定大小时才写入日志
-                        if len(buffered_logs) >= 10:
-                            WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
-                            buffered_logs.clear()
-            # 写入剩余的日志
-            if buffered_logs:
-                WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
-        return True,"下载成功"
-    except:
-        return False,"网络文件错误"
+                        WriteFile(log_path, f"检测到已下载 {downloaded_size} 字节，尝试断点续传...\n", mode='a', write=True)
+            
+            with requests.Session() as session:
+                session.headers.update(request_headers)
+                r = session.get(url, stream=True, timeout=(30, 120))
+                
+                if r.status_code == 416:
+                    if use_range and downloaded_size > 0:
+                        WriteFile(log_path, f"服务器不支持断点续传，重新下载...\n", mode='a', write=True)
+                        use_range = False
+                        if os.path.exists(save_path):
+                            os.remove(save_path)
+                        downloaded_size = 0
+                        continue
+                    else:
+                        r.raise_for_status()
+                
+                r.raise_for_status()
+                
+                total_size = int(r.headers.get('content-length', 0))
+                
+                if r.status_code == 206:
+                    if total_size == 0 and downloaded_size > 0:
+                        WriteFile(log_path, f"文件已下载完成，跳过\n", mode='a', write=True)
+                        return True,"下载成功"
+                    total_size = downloaded_size + total_size
+                    file_mode = 'ab'
+                    if process:
+                        WriteFile(log_path, f"断点续传成功，剩余 {total_size - downloaded_size} 字节\n", mode='a', write=True)
+                else:
+                    if downloaded_size > 0:
+                        WriteFile(log_path, f"服务器不支持断点续传，重新下载...\n", mode='a', write=True)
+                        downloaded_size = 0
+                    file_mode = 'wb'
+                
+                with open(save_path, file_mode) as f:
+                    for chunk in r.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            f.write(chunk)
+                            f.flush()
+                            if process:
+                                downloaded_size += len(chunk)
+                                if total_size > 0:
+                                    progress = (downloaded_size / total_size) * 100
+                                    if progress > 100: progress = 100
+                                    logs = f'Downloaded {downloaded_size} of {total_size} bytes ({progress:.2f}%)\n'
+                                else:
+                                    logs = f'Downloaded {downloaded_size} bytes...\n'
+                                buffered_logs.append(logs)
+                                if len(buffered_logs) >= 10:
+                                    WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
+                                    buffered_logs.clear()
+                
+                if buffered_logs:
+                    WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
+                
+                return True,"下载成功"
+                
+        except Exception as e:
+            last_error = e
+            retries += 1
+            import time
+            if retries < max_retries:
+                wait_time = min(retries * 3, 15)
+                WriteFile(log_path, f"下载中断({type(e).__name__})，{wait_time}秒后重试 ({retries}/{max_retries})...\n", mode='a', write=True)
+                time.sleep(wait_time)
+            else:
+                WriteFile(log_path, f"下载失败(已重试{max_retries}次): {str(e)}\n", mode='a', write=True)
+    
+    return False, f"网络文件错误: {str(last_error)}"
 
 def download_url_file_wget(url, save_path="", process=False, log_path=None,chunk_size=32768):
     """
@@ -289,11 +345,9 @@ def download_url_file_m(url, save_path="", process=False, log_path=None, num_thr
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0 ruyi",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept": "*/*",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
-            "Accept-Encoding":"gzip, deflate, br, zstd",
-            "Sec-Ch-Ua":'"Chromium";v="134", "Not:A-Brand";v="24", "Microsoft Edge";v="134"',
-            "Sec-Ch-Ua-Mobile":"?0"
+            "Accept-Encoding":"identity",
         }
 
         # 获取文件总大小
@@ -592,14 +646,65 @@ def list_files_in_directory(dst_path,sort="name",is_reverse=False,is_windows=Fal
         for root, dirs, files in os.walk(dst_path):
             if count_limit >= max_limit:
                 break
-            for entry in chain((os.path.join(root, f) for f in files), 
-                             (os.path.join(root, d) for d in dirs)):
+            # 处理文件
+            for file in files:
                 if count_limit >= max_limit:
                     break
-                info = process_entry(os.DirEntry(entry))
-                if info:
-                    data.append(info)
-                    count_limit += 1
+                file_path = os.path.join(root, file)
+                file_info = os.stat(file_path)
+                modified_time = datetime.datetime.fromtimestamp(file_info.st_mtime)
+                formatted_time = modified_time.strftime("%Y-%m-%d %H:%M:%S")
+                gid = file_info.st_gid
+                group_name = "" if is_windows else system.GetGroupidName(file_path, gid)
+                
+                if search and search.lower() not in file.lower():
+                    continue
+                if isDir:
+                    continue
+                    
+                item = {
+                    "name": file,
+                    "type": "file",
+                    "path": windows_path_replace(file_path, is_windows=is_windows),
+                    "size": file_info.st_size,
+                    "permissions": oct(file_info.st_mode)[-3:],
+                    "owner_uid": file_info.st_uid,
+                    "owner": system.GetUidName(file_path, file_info.st_uid),
+                    "gid": gid,
+                    "group": group_name,
+                    "modified": formatted_time
+                }
+                data.append(item)
+                count_limit += 1
+            
+            # 处理目录
+            for dir_name in dirs:
+                if count_limit >= max_limit:
+                    break
+                dir_path = os.path.join(root, dir_name)
+                dir_info = os.stat(dir_path)
+                modified_time = datetime.datetime.fromtimestamp(dir_info.st_mtime)
+                formatted_time = modified_time.strftime("%Y-%m-%d %H:%M:%S")
+                gid = dir_info.st_gid
+                group_name = "" if is_windows else system.GetGroupidName(dir_path, gid)
+                
+                if search and search.lower() not in dir_name.lower():
+                    continue
+                    
+                item = {
+                    "name": dir_name,
+                    "type": "dir",
+                    "path": windows_path_replace(dir_path, is_windows=is_windows),
+                    "size": None,
+                    "permissions": oct(dir_info.st_mode)[-3:],
+                    "owner_uid": dir_info.st_uid,
+                    "owner": system.GetUidName(dir_path, dir_info.st_uid),
+                    "gid": gid,
+                    "group": group_name,
+                    "modified": formatted_time
+                }
+                data.append(item)
+                count_limit += 1
 
         # 对结果进行排序
         if sort == "name":
@@ -619,6 +724,7 @@ def list_files_in_directory(dst_path,sort="name",is_reverse=False,is_windows=Fal
         'dir_nums': dir_nums,
         'total_nums': file_nums + dir_nums
     }
+
 def list_files_in_directory_old(dst_path,sort="name",is_reverse=False,is_windows=False,search=None,containSub=False,isDir=False):
     """
     @name 列出指定目录下文件\目录名列表，包含文件\目录属性（大小、路径、权限、所属者）
@@ -875,6 +981,158 @@ def delete_file(path,is_windows=False):
     check_no_delete(path,is_windows)
     
     os.remove(path)
+
+def get_recycle_config_path():
+    return os.path.join(settings.RUYI_DATA_BASE_PATH, 'recycle_config.json')
+
+def get_recycle_bin_path():
+    recycle_path = os.path.join(settings.RUYI_DATA_BASE_PATH, 'recycle_bin')
+    if not os.path.exists(recycle_path):
+        os.makedirs(recycle_path)
+    return recycle_path
+
+def get_recycle_config():
+    config_path = get_recycle_config_path()
+    if not os.path.exists(config_path):
+        return {"enable": True}
+    content = ReadFile(config_path)
+    if not content:
+        return {"enable": True}
+    try:
+        data = json.loads(content)
+        if 'enable' not in data:
+            return {"enable": True}
+        return data
+    except:
+        return {"enable": True}
+
+def set_recycle_config(enable=True):
+    config = {"enable": True if enable else False}
+    WriteFile(get_recycle_config_path(), json.dumps(config))
+    return config
+
+def is_recycle_enabled():
+    config = get_recycle_config()
+    return True if config.get('enable', True) else False
+
+def move_to_recycle(path,is_windows=False):
+    if not os.path.exists(path) and not os.path.islink(path):
+        raise ValueError("文件不存在")
+    check_no_delete(path,is_windows)
+    recycle_path = get_recycle_bin_path()
+    r_path = path.replace('\\', '/')
+    if r_path.startswith(recycle_path.replace('\\', '/') + '/'): 
+        raise ValueError("回收站目录不支持移入")
+    item_id = uuid.uuid4().hex
+    item_dir = os.path.join(recycle_path, item_id)
+    os.makedirs(item_dir)
+    item_path = os.path.join(item_dir, 'item')
+    shutil.move(path, item_path)
+    is_dir = os.path.isdir(item_path)
+    size = get_directory_size(item_path) if is_dir else os.path.getsize(item_path)
+    meta = {
+        "id": item_id,
+        "name": os.path.basename(r_path.rstrip('/')),
+        "origin_path": r_path,
+        "is_dir": is_dir,
+        "size": size,
+        "delete_time": int(datetime.datetime.now().timestamp())
+    }
+    WriteFile(os.path.join(item_dir, 'meta.json'), json.dumps(meta))
+    return meta
+
+def load_recycle_meta(item_id):
+    item_dir = os.path.join(get_recycle_bin_path(), item_id)
+    meta_path = os.path.join(item_dir, 'meta.json')
+    if not os.path.exists(meta_path):
+        return None
+    content = ReadFile(meta_path)
+    if not content:
+        return None
+    try:
+        return json.loads(content)
+    except:
+        return None
+
+def list_recycle_items(page=1,limit=50,search=""):
+    recycle_path = get_recycle_bin_path()
+    items = []
+    search_lower = str(search).lower() if search else ""
+    if os.path.exists(recycle_path):
+        for item_id in os.listdir(recycle_path):
+            item_dir = os.path.join(recycle_path, item_id)
+            if not os.path.isdir(item_dir):
+                continue
+            meta = load_recycle_meta(item_id)
+            if not meta:
+                continue
+            delete_time = meta.get('delete_time', 0)
+            meta['delete_time_text'] = datetime.datetime.fromtimestamp(delete_time).strftime('%Y-%m-%d %H:%M:%S') if delete_time else ''
+            meta['type'] = 'dir' if meta.get('is_dir') else 'file'
+            if search_lower:
+                name_text = str(meta.get('name','')).lower()
+                origin_text = str(meta.get('origin_path','')).lower()
+                if search_lower not in name_text and search_lower not in origin_text:
+                    continue
+            items.append(meta)
+    items.sort(key=lambda x: x.get('delete_time', 0), reverse=True)
+    total = len(items)
+    if limit:
+        start = (page - 1) * limit
+        end = start + limit
+        items = items[start:end]
+    return items, total
+
+def restore_recycle_item(item_id,is_windows=False):
+    meta = load_recycle_meta(item_id)
+    if not meta:
+        raise ValueError("回收站文件不存在")
+    item_dir = os.path.join(get_recycle_bin_path(), item_id)
+    item_path = os.path.join(item_dir, 'item')
+    if not os.path.exists(item_path):
+        raise ValueError("回收站文件不存在")
+    origin_path = meta.get('origin_path')
+    if not origin_path:
+        raise ValueError("原路径不存在")
+    if os.path.exists(origin_path):
+        raise ValueError("目标已存在")
+    parent_dir = os.path.dirname(origin_path)
+    if parent_dir and not os.path.exists(parent_dir):
+        os.makedirs(parent_dir, exist_ok=True)
+    shutil.move(item_path, origin_path)
+    shutil.rmtree(item_dir)
+    return meta
+
+def delete_recycle_item(item_id):
+    item_dir = os.path.join(get_recycle_bin_path(), item_id)
+    if not os.path.exists(item_dir):
+        raise ValueError("回收站文件不存在")
+    shutil.rmtree(item_dir)
+
+def clear_recycle_items():
+    recycle_path = get_recycle_bin_path()
+    if not os.path.exists(recycle_path):
+        return
+    for item_id in os.listdir(recycle_path):
+        item_dir = os.path.join(recycle_path, item_id)
+        if os.path.isdir(item_dir):
+            shutil.rmtree(item_dir)
+
+def batch_recycle_move(paths,is_windows=False):
+    results = []
+    for p in paths:
+        results.append(move_to_recycle(p, is_windows=is_windows))
+    return results
+
+def batch_recycle_restore(ids,is_windows=False):
+    results = []
+    for item_id in ids:
+        results.append(restore_recycle_item(item_id, is_windows=is_windows))
+    return results
+
+def batch_recycle_delete(ids):
+    for item_id in ids:
+        delete_recycle_item(item_id)
 
 def rename_file(sPath,dPath,is_windows=False):
     """

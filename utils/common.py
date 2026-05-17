@@ -356,6 +356,9 @@ def ReadFile(filename,mode='r'):
     """
     content=None
     try:
+        if 'b' in mode:
+            with open(filename, mode) as file:
+                return file.read()
         detected_encoding = detect_file_encoding(filename)
         if detected_encoding:
             with open(filename, mode, encoding=detected_encoding) as file:
@@ -364,6 +367,12 @@ def ReadFile(filename,mode='r'):
             content = file.read()
             return content
     except:
+        if 'b' in mode:
+            try:
+                with open(filename, mode) as file:
+                    return file.read()
+            except:
+                return None
         encodings = ['utf-8', 'gbk']  # 优先级从高到低
         for encoding in encodings:
             try:
@@ -410,6 +419,39 @@ def DeleteFile(path,empty_tips=True):
         os.remove(path)
     if os.path.exists(path):
         os.remove(path)
+
+def ConvertToUnixLineEndings(file_path):
+    """
+    @name 将文件的 Windows 换行符(CRLF)转换为 Unix 换行符(LF)
+    @author lybbn<2024-02-22>
+    @param file_path: 文件路径
+    @return: 是否成功转换
+    """
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(file_path):
+            print(f"[ConvertToUnixLineEndings] 文件不存在: {file_path}")
+            return False
+        
+        # 以二进制模式读取文件，确保能检测到所有换行符
+        with open(file_path, 'rb') as f:
+            content_bytes = f.read()
+        
+        # 检查是否包含 Windows 换行符
+        if b'\r\n' in content_bytes:
+            # 转换换行符
+            content_bytes = content_bytes.replace(b'\r\n', b'\n')
+            # 以二进制模式写回
+            with open(file_path, 'wb') as f:
+                f.write(content_bytes)
+            print(f"[ConvertToUnixLineEndings] 成功转换文件换行符: {file_path}")
+            return True
+        else:
+            print(f"[ConvertToUnixLineEndings] 文件已经是 Unix 换行符或没有换行符: {file_path}")
+            return True
+    except Exception as e:
+        print(f"[ConvertToUnixLineEndings] 转换失败: {file_path}, 错误: {str(e)}")
+        return False
 
 def DeleteDir(path):
     """
@@ -1003,6 +1045,62 @@ def GetProcessNameInfo(process_name,process_info,is_windows=True):
     except:
         return []
     
+def repair_json(json_str):
+    """
+    尝试修复不规范的 JSON 字符串
+    """
+    if not json_str:
+        return {}
+    if isinstance(json_str, dict):
+        return json_str
+    
+    # 移除 Markdown 代码块标记
+    json_str = json_str.strip()
+    if json_str.startswith('```'):
+        lines = json_str.split('\n')
+        if lines[0].startswith('```json'):
+            json_str = '\n'.join(lines[1:-1])
+        elif lines[0].startswith('```'):
+            json_str = '\n'.join(lines[1:-1])
+    json_str = json_str.strip()
+
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        # 尝试修复常见的 JSON 错误
+        try:
+            # 1. 处理未闭合的大括号
+            fixed = json_str
+            open_braces = fixed.count('{')
+            close_braces = fixed.count('}')
+            if open_braces > close_braces:
+                fixed += '}' * (open_braces - close_braces)
+            elif close_braces > open_braces:
+                fixed = '{' * (close_braces - open_braces) + fixed
+            
+            # 2. 处理 Python 风格的布尔值和 None
+            fixed = fixed.replace('True', 'true').replace('False', 'false').replace('None', 'null')
+            
+            # 3. 移除末尾多余的逗号
+            fixed = re.sub(r',\s*([\]}])', r'\1', fixed)
+            
+            return json.loads(fixed)
+        except Exception:
+            # 4. 终极手段：使用正则表达式提取内容
+            try:
+                # 寻找第一个 { 和最后一个 }
+                start = json_str.find('{')
+                end = json_str.rfind('}')
+                if start != -1 and end != -1 and end > start:
+                    content = json_str[start:end+1]
+                    # 处理转义字符
+                    content = content.replace('\\n', '\n').replace('\\t', '\t')
+                    return json.loads(content)
+            except Exception:
+                pass
+            
+    return None
+
 def GetLocalSSHPort():
     """
     @name 获取本机SSH服务的端口

@@ -24,8 +24,10 @@ from utils.install.redis import *
 from utils.install.mysql import *
 from utils.install.python import *
 from utils.install.go import *
+from utils.install.php import *
 from utils.install.supervisor import *
 from utils.install.docker import *
+from utils.install.fail2ban import *
 
 def Check_Soft_Running(name="",is_windows = True,simple_check=False):
     if name == 'nginx':
@@ -38,6 +40,10 @@ def Check_Soft_Running(name="",is_windows = True,simple_check=False):
         return is_docker_running(is_windows=is_windows,simple_check=simple_check)
     elif name == 'supervisor':
         return is_supervisor_running(is_windows=is_windows)
+    elif name == 'fail2ban':
+        return is_fail2ban_running()
+    elif name == 'php':
+        return is_php_running(version="",is_windows=is_windows,simple_check=simple_check)
     return False
 
 def Check_Soft_Installed(name="",version=None,get_status=True,is_windows = True,simple_check=False):
@@ -72,8 +78,12 @@ def Ry_Install_Soft(type=2,name="",version={},is_windows=True,call_back=None):
         Install_Python(type=type,version=version,is_windows=is_windows,call_back=call_back)
     elif name == 'go':
         Install_Go(type=type,version=version,is_windows=is_windows,call_back=call_back)
+    elif name == 'php':
+        Install_PHP(type=type,version=version,is_windows=is_windows,call_back=call_back)
     elif name == 'supervisor':
         Install_Supervisor(type=type,version=version,is_windows=is_windows,call_back=call_back)
+    elif name == 'fail2ban':
+        Install_Fail2Ban(version=version,call_back=call_back)
     return True
 
 def Ry_Uninstall_Soft(name="",is_windows=True,version=None):
@@ -89,11 +99,15 @@ def Ry_Uninstall_Soft(name="",is_windows=True,version=None):
         Uninstall_Python(version=version,is_windows=is_windows)
     elif name == 'go':
         Uninstall_Go(version=version,is_windows=is_windows)
+    elif name == 'php':
+        Uninstall_PHP(version=version,is_windows=is_windows)
     elif name == 'supervisor':
         Uninstall_Supervisor(is_windows=is_windows)
+    elif name == 'fail2ban':
+        Uninstall_Fail2Ban()
     return True
 
-def Ry_Start_Soft(name="",is_windows=True):
+def Ry_Start_Soft(name="",is_windows=True,version=None):
     if name == 'nginx':
         Start_Nginx(is_windows=is_windows)
     elif name == 'redis':
@@ -104,9 +118,13 @@ def Ry_Start_Soft(name="",is_windows=True):
         Start_Docker(is_windows=is_windows)
     elif name == 'supervisor':
         Start_Supervisor(is_windows=is_windows)
+    elif name == 'fail2ban':
+        Start_Fail2Ban()
+    elif name == 'php':
+        Start_PHP(version=version,is_windows=is_windows)
     return True
 
-def Ry_Stop_Soft(name="",is_windows=True):
+def Ry_Stop_Soft(name="",is_windows=True,version=None):
     if name == 'nginx':
         Stop_Nginx(is_windows=is_windows)
     elif name == 'redis':
@@ -117,9 +135,13 @@ def Ry_Stop_Soft(name="",is_windows=True):
         Stop_Docker(is_windows=is_windows)
     elif name == 'supervisor':
         Stop_Supervisor(is_windows=is_windows)
+    elif name == 'fail2ban':
+        Stop_Fail2Ban()
+    elif name == 'php':
+        Stop_PHP(version=version,is_windows=is_windows)
     return True
 
-def Ry_Restart_Soft(name="",is_windows=True):
+def Ry_Restart_Soft(name="",is_windows=True,version=None):
     if name == 'nginx':
         Restart_Nginx(is_windows=is_windows)
     elif name == 'redis':
@@ -130,15 +152,23 @@ def Ry_Restart_Soft(name="",is_windows=True):
         Restart_Docker(is_windows=is_windows)
     elif name == 'supervisor':
         Restart_Supervisor(is_windows=is_windows)
+    elif name == 'fail2ban':
+        Restart_Fail2Ban()
+    elif name == 'php':
+        Restart_PHP(version=version,is_windows=is_windows)
     return True
 
-def Ry_Reload_Soft(name="",is_windows=True):
+def Ry_Reload_Soft(name="",is_windows=True,version=None):
     if name == 'nginx':
         Reload_Nginx(is_windows=is_windows)
     elif name == 'mysql':
         Reload_Mysql(is_windows=is_windows)
     elif name == 'supervisor':
         Reload_Supervisor(is_windows=is_windows)
+    elif name == 'fail2ban':
+        Reload_Fail2Ban()
+    elif name == 'php':
+        Reload_PHP(version=version,is_windows=is_windows)
     return True
 
 def Ry_Get_Soft_Info_Path(name="",type="all",version=None,is_windows=True):
@@ -174,12 +204,24 @@ def Ry_Get_Soft_Info_Path(name="",type="all",version=None,is_windows=True):
         allinfo = get_go_path_info(version)
         if type == 'all':
             return allinfo
+    elif name == 'php':
+        allinfo = get_php_path_info(version) if version else {}
+        if type == 'all':
+            return allinfo
+        elif type == 'error':
+            return allinfo.get('error_log_path','')
     elif name == 'supervisor':
         allinfo = get_supervisor_path_info()
         if type == 'all':
             return allinfo
         elif type == 'access':
             return RY_GET_SUPERVISOR_CONF_OPTIONS(is_windows=is_windows)['logfile']
+    elif name == 'fail2ban':
+        allinfo = get_fail2ban_path_info()
+        if type == 'all':
+            return allinfo
+        elif type == 'log':
+            return allinfo['log_path']
     return ""
 
 def Ry_Get_Soft_LoadStatus(name="",is_windows=True):
@@ -205,7 +247,7 @@ def Ry_Set_Soft_Performance(name="",cont={},is_windows=True):
         return RY_SET_MYSQL_PERFORMANCE(cont,is_windows=is_windows)
     return True
 
-def Ry_Get_Soft_Conf(name="",is_windows=True):
+def Ry_Get_Soft_Conf(name="",is_windows=True,version=None):
     if name == 'nginx':
         return RY_GET_NGINX_CONF(is_windows=is_windows)
     elif name == 'redis':
@@ -216,9 +258,13 @@ def Ry_Get_Soft_Conf(name="",is_windows=True):
         return RY_GET_DOCKER_CONF(is_windows=is_windows)
     elif name == 'supervisor':
         return RY_GET_SUPERVISOR_CONF(is_windows=is_windows)
+    elif name == 'fail2ban':
+        return Read_Jail_Config()
+    elif name == 'php':
+        return RY_GET_PHP_CONF(version=version,is_windows=is_windows)
     return ""
 
-def Ry_Save_Soft_Conf(name="",conf="",is_windows=True):
+def Ry_Save_Soft_Conf(name="",conf="",is_windows=True,version=None):
     if name == 'nginx':
         return RY_SAVE_NGINX_CONF(conf=conf,is_windows=is_windows)
     elif name == 'redis':
@@ -229,6 +275,10 @@ def Ry_Save_Soft_Conf(name="",conf="",is_windows=True):
         return RY_SAVE_DOCKER_CONF(conf=conf,is_windows=is_windows)
     elif name == 'supervisor':
         return RY_SAVE_SUPERVISOR_CONF(conf=conf,is_windows=is_windows)
+    elif name == 'fail2ban':
+        return Write_Jail_Config(content=conf)
+    elif name == 'php':
+        return RY_SAVE_PHP_CONF(version=version,conf=conf,is_windows=is_windows)
     return True
 
 def Ry_Get_Soft_Port(name="",is_windows=True):

@@ -139,7 +139,7 @@ class CustomModelViewSet(ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
-        return SuccessResponse(data=serializer.data, msg="获取成功")
+        return DetailResponse(data=serializer.data, msg="获取成功")
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)

@@ -20,7 +20,7 @@
 
 import os,platform
 import time
-from utils.common import ReadFile,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,RunCommand
+from utils.common import ReadFile,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,RunCommand,ConvertToUnixLineEndings
 from utils.security.files import download_url_file,get_file_name_from_url
 import subprocess
 import importlib
@@ -171,7 +171,7 @@ def _addProgramDynamicPath(install_dir):
 def _install_python_virtualenv_windows(install_dir,log_path=None):
     python_exe = os.path.join(install_dir, "python.exe")
     try:
-        subprocess.run([python_exe,"-m","pip","install","virtualenv","--no-warn-script-location","-i","https://mirrors.aliyun.com/pypi/simple/"], check=True,creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocess.run([python_exe,"-m","pip","install","virtualenv", "setuptools", "wheel","--no-warn-script-location","-i","https://mirrors.aliyun.com/pypi/simple/"], check=True,creationflags=subprocess.CREATE_NO_WINDOW)
         WriteFile(log_path,f"virtualenv 安装完成。\n",mode='a')
         return True
     except subprocess.CalledProcessError as e:
@@ -239,7 +239,10 @@ def Install_Python(type=2,version={},is_windows=True,call_back=None):
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/python.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            # 转换脚本换行符为 Unix 格式
+            script_path = GetInstallPath()+'/ruyi/utils/install/bash/python.sh'
+            ConvertToUnixLineEndings(script_path)
+            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
             job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
@@ -284,7 +287,10 @@ def Uninstall_Python(version=None,is_windows=True):
             system.ForceRemoveDir(install_path)
     else:
         try:
-            subprocess.run(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","python.sh"),'uninstall',version], capture_output=False, text=True)
+            # 转换脚本换行符为 Unix 格式
+            script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","python.sh")
+            ConvertToUnixLineEndings(script_path)
+            subprocess.run(['bash', script_path,'uninstall',version], capture_output=False, text=True)
         except Exception as e:
             raise ValueError(e)
     return True

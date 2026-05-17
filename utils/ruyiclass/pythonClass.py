@@ -217,17 +217,20 @@ class PythonClient:
         cont = self.project_config
         start_method = cont.get("start_method","command")
         pids = []
+        pyenv_path_match = self.pyenv_path.replace("\\", "/").lower()
+        site_path_match = self.sitePath.replace("\\", "/").lower()
         try:
             for i in psutil.process_iter(['pid', 'exe', 'cmdline']):
                 try:
                     if i.status() == psutil.STATUS_ZOMBIE:continue
-                    cmdlines = " ".join(i.cmdline())
+                    exe_path = (i.exe() or "").replace("\\", "/").lower()
+                    cmdlines = " ".join(i.cmdline()).replace("\\", "/").lower()
                     if start_method in ['command']:
-                        start_command = cont.get("start_command","")
-                        if self.pyenv_path in i.exe() and start_command in cmdlines:
+                        start_command = cont.get("start_command","").lower()
+                        if pyenv_path_match in exe_path and start_command in cmdlines:
                             pids.append(i.pid)
                     else:
-                        if self.pyenv_path in i.exe() and start_method in i.exe() and start_method in cmdlines and self.sitePath in cmdlines:
+                        if pyenv_path_match in exe_path and start_method in exe_path and start_method in cmdlines and site_path_match in cmdlines:
                             pids.append(i.pid)
                 except:
                     pass
@@ -300,7 +303,7 @@ class PythonClient:
             pypath = conf.get("pypath",None)
             env = os.environ.copy()
             clean_env = {
-                'PATH': self.pyenv_path+ "/Scripts",
+                'PATH': self.pyenv_path.replace("/", "\\") + "\\Scripts",
                 'SYSTEMROOT': env.get('SYSTEMROOT', ''),
                 'TEMP': env.get('TEMP', ''),
                 'VIRTUAL_ENV':self.pyenv_path
@@ -308,23 +311,24 @@ class PythonClient:
             process = subprocess.Popen(
                 ['cmd', '/c',bat_path],
                 shell=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 cwd=self.sitePath,
                 env=clean_env
             )
             
-            time.sleep(1)
+            time.sleep(2)
             
-            # 获取PID
-            pid = process.pid
+            pid = self.get_project_pid_process()
+            if not pid:
+                pid = process.pid
             
-            # 写入PID文件
-            with open(pid_file, 'w') as f:
-                f.write(str(pid))
+            if pid and pid_file:
+                with open(pid_file, 'w') as f:
+                    f.write(str(pid))
                 
             self.write_create_log(f"""==========启动成功==========
 --PID: {pid}
---PID文件: {os.path.abspath(pid_file)}
+--PID文件: {os.path.abspath(pid_file) if pid_file else ''}
 --bat脚本: {os.path.abspath(bat_path)}
 """)
             
@@ -1296,12 +1300,12 @@ keepalive = 3
         cont = self.project_config
         start_method = cont.get("start_method","")
         if self.is_windows:
-            if start_method in ["commnad"]:
+            if start_method in ["command"]:
                 script_name = f"{self.siteName}_cmd.bat"
             else:
                 script_name = f"{self.siteName}_{start_method}.bat"
         else:
-            if start_method in ["commnad"]:
+            if start_method in ["command"]:
                 script_name = f"{self.siteName}_cmd.sh"
             else:
                 script_name = f"{self.siteName}_{start_method}.sh"
@@ -1333,18 +1337,19 @@ keepalive = 3
         host = cont.get("host","127.0.0.1")
         if self.is_windows:
             log_path = conf[f'log_{start_method}']
+            pyenv_path_win = self.pyenv_path.replace("/", "\\")
             command_line = ""
             if start_method in ["command"]:
                 command_line = f"{start_command} >> {log_path} 2>&1"
             elif start_method =="daphne":
-                command_line = f"{self.pyenv_path}/Scripts/daphne -b {host} -p {port} --proxy-headers {application} >> {log_path} 2>&1"
+                command_line = f"{pyenv_path_win}\\Scripts\\daphne -b {host} -p {port} --proxy-headers {application} >> {log_path} 2>&1"
             
             content = fr"""
 @echo off
 chcp 65001 > nul
 cd /d {self.sitePath}
-call {self.pyenv_path}/venv/Scripts/activate.bat
-{command_line}
+call {pyenv_path_win}\Scripts\activate.bat
+start "" /b {command_line}
 """
         else:
             command_line = ""

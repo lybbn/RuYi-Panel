@@ -20,7 +20,7 @@
 
 import os
 import time
-from utils.common import ReadFile,get_python_pip,RunCommandReturnCode,DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand,GetRandomSet
+from utils.common import ReadFile,get_python_pip,RunCommandReturnCode,DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand,GetRandomSet,ConvertToUnixLineEndings
 from utils.security.files import download_url_file,get_file_name_from_url
 import subprocess
 import importlib
@@ -149,7 +149,10 @@ def Install_Supervisor(type=2,version={},is_windows=True,call_back=None):
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/supervisor.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            # 转换脚本换行符为 Unix 格式
+            script_path = GetInstallPath()+'/ruyi/utils/install/bash/supervisor.sh'
+            ConvertToUnixLineEndings(script_path)
+            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
             job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
@@ -204,7 +207,10 @@ def Uninstall_Supervisor(is_windows=True):
             system.ForceRemoveDir(install_path)
     else:
         try:
-            subprocess.run(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","supervisor.sh"),'uninstall'], capture_output=False, text=True)
+            # 转换脚本换行符为 Unix 格式
+            script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","supervisor.sh")
+            ConvertToUnixLineEndings(script_path)
+            subprocess.run(['bash', script_path,'uninstall'], capture_output=False, text=True)
         except Exception as e:
             raise ValueError(e)
     return True

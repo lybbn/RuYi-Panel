@@ -16,7 +16,6 @@ WITH_SSL=""
 
 setup_path=/ruyi/server/php/${php_version}
 
-# 检查是否以 root 用户运行
 if [ "$(id -u)" -ne 0 ]; then
     echo "请以 root 用户运行此脚本" >&2
     exit 1
@@ -25,18 +24,6 @@ fi
 if [ -z "${cpu_core}" ]; then
     cpu_core=1
 fi
-
-# # 获取内存大小（以 GB 为单位）
-# MEM_G=$(free -m | awk '/Mem/ {printf("%.f", \$2 / 1024)}')
-
-# # 如果 CPU 核心数和内存大小都有效
-# if [ "$cpu_core" -gt 1 ] && [ "$MEM_G" -gt 0 ]; then
-#     # 根据 CPU 核心数和内存大小，选择较小的值
-#     cpu_core=$((cpu_core > MEM_G ? MEM_G : cpu_core))
-# else
-#     # 如果 CPU 核心数小于等于 1 或内存为 0，设置 CPU 核心数为 1
-#     cpu_core=1
-# fi
 
 Service_Add() {
 	cat <<EOF > /etc/systemd/system/php-fpm-${php_version}.service
@@ -47,187 +34,302 @@ After=network.target
 [Service]
 Type=forking
 PIDFile=${setup_path}/var/run/php-fpm.pid
-ExecStart=${setup_path}/sbin/php-fpm --daemonize --fpm-config ${setup_path}/etc/php-fpm.conf --pid ${setup_path}/var/run/php-fpm.pidonf
+ExecStart=${setup_path}/sbin/php-fpm --fpm-config ${setup_path}/etc/php-fpm.conf --pid ${setup_path}/var/run/php-fpm.pid
 ExecReload=/bin/kill -USR2 \$MAINPID
+ExecStop=/bin/kill -SIGQUIT \$MAINPID
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # 重新加载 systemd 配置
     systemctl daemon-reload
     systemctl enable php-fpm-${php_version}.service
 }
 
 Service_Del() {
-	# 停止 Redis 服务
-    systemctl stop php-fpm-${php_version}.service
-
-    # 禁用 Redis 服务
-    systemctl disable php-fpm-${php_version}.service
-
-    # 删除 Redis 服务文件
+    systemctl stop php-fpm-${php_version}.service 2>/dev/null
+    systemctl disable php-fpm-${php_version}.service 2>/dev/null
     rm -f /etc/systemd/system/php-fpm-${php_version}.service
     rm -rf /etc/systemd/system/multi-user.target.wants/php-fpm-${php_version}.service
-
-    # 重新加载 systemd 配置
     systemctl daemon-reload
 }
 
 Install_Lib() {
     echo "安装系统依赖..."
-    if [ -f "/usr/bin/yum" ];then
-        yum install -y gcc gcc-c++ libsodium-devel re2c bison autoconf make libtool ccache libxml2-devel sqlite-devel openssl-devel gd-devel
-    elif [ -f "/usr/bin/apt-get" ];then
-        apt-get install -y gcc gcc-c++ pkg-config build-essential autoconf bison re2c libxml2-dev libsqlite3-dev libcurl4-openssl-dev libsodium-dev
+    if [ -f "/usr/bin/yum" ]; then
+        yum install -y gcc gcc-c++ make autoconf libtool re2c bison ccache \
+            libxml2-devel sqlite-devel openssl-devel bzip2-devel libcurl-devel \
+            libpng-devel libjpeg-devel freetype-devel libicu-devel oniguruma-devel \
+            libsodium-devel libzip-devel gd-devel libxslt-devel
+    elif [ -f "/usr/bin/apt-get" ]; then
+        apt-get update
+        apt-get install -y gcc g++ make autoconf libtool re2c bison \
+            libxml2-dev libsqlite3-dev libssl-dev libbz2-dev libcurl4-openssl-dev \
+            libpng-dev libjpeg-dev libfreetype6-dev libicu-dev oniguruma-dev \
+            libsodium-dev libzip-dev libgd-dev libxslt1-dev pkg-config
     fi
 }
 
 Install_Openssl() {
     echo "=============================================="
-    echo "正在安装OpenSSL..."
+    echo "正在检查OpenSSL..."
     echo "=============================================="
     local openssl_version
-    openssl_version=$(openssl version | awk '{print $2}')
-    # 提取主要和次要版本号
+    openssl_version=$(openssl version 2>/dev/null | awk '{print $2}')
     local major
     local minor
     major=$(echo $openssl_version | cut -d '.' -f 1)
     minor=$(echo $openssl_version | cut -d '.' -f 2)
-    if [ -f ${install_sys_path}/openssl/bin/openssl ] || [ $minor -ge 1 ];then
+    if [ -f ${install_sys_path}/openssl/bin/openssl ] || [ "${minor:-0}" -ge 1 ]; then
         echo "检测到OpenSSL版本符合要求，无需再安装"
         echo "=============================================="
-	 	return
-	fi
-	opensslVersion="1.1.1w"
-    mkdir -p ${install_sys_path}/openssl
-	cd ${install_sys_path}
-    wget https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-${opensslVersion}.tar.gz
-	tar -zxf openssl-${opensslVersion}.tar.gz
-    rm -f openssl-${opensslVersion}.tar.gz
-	cd openssl-${opensslVersion}
-    if [ "${IsAliYunOS}" ];then
-        ./config --prefix=${py_path}/openssl --openssldir=${py_path}/openssl zlib-dynamic -Wl,-rpath,${py_path}/openssl/lib
-        make -j${cpu_core}
-        make install
-    else
-        ./config --prefix=${install_sys_path}/openssl zlib-dynamic
-        make -j${cpu_core}
-        make install
-        echo "$install_sys_path/openssl/lib" >>/etc/ld.so.conf.d/ryopenssl111.conf
-        ldconfig
-        ldconfig /lib64
+        return
     fi
-	cd ..
-	rm -rf openssl-${opensslVersion}
+    opensslVersion="1.1.1w"
+    mkdir -p ${install_sys_path}/openssl
+    cd ${install_sys_path}
+    wget -q https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1w/openssl-${opensslVersion}.tar.gz
+    tar -zxf openssl-${opensslVersion}.tar.gz
+    rm -f openssl-${opensslVersion}.tar.gz
+    cd openssl-${opensslVersion}
+    ./config --prefix=${install_sys_path}/openssl zlib-dynamic
+    make -j${cpu_core}
+    make install
+    echo "${install_sys_path}/openssl/lib" >> /etc/ld.so.conf.d/ryopenssl111.conf
+    ldconfig
+    cd ..
+    rm -rf openssl-${opensslVersion}
     echo "=============================================="
     echo "OpenSSL $opensslVersion 安装完成"
     echo "=============================================="
 }
 
-Install_Openssl34() {
-    echo "=============================================="
-    echo "正在安装OpenSSL..."
-    echo "=============================================="
-    local openssl_version
-    openssl_version=$(openssl version | awk '{print $2}')
-    # 提取主要和次要版本号
-    local major
-    local minor
-    major=$(echo $openssl_version | cut -d '.' -f 1)
-    minor=$(echo $openssl_version | cut -d '.' -f 2)
-    if [ -f ${install_sys_path}/openssl34/bin/openssl ] || [ $minor -ge 1 ];then
-        echo "检测到OpenSSL版本符合要求，无需再安装"
-        echo "=============================================="
-	 	return
-	fi
-	opensslVersion="3.4.0"
-    mkdir -p ${install_sys_path}/openssl34
-	cd ${install_sys_path}
-    wget  https://github.com/openssl/openssl/releases/download/openssl-3.4.0/openssl-${opensslVersion}.tar.gz
-	tar -zxf openssl-${opensslVersion}.tar.gz
-    rm -f openssl-${opensslVersion}.tar.gz
-	cd openssl-${opensslVersion}
-	./config --prefix=${install_sys_path}/openssl34 zlib shared
-	make -j${cpu_core}
-	make install
-    echo "$install_sys_path/openssl34/lib64" >>/etc/ld.so.conf.d/ryopenssl34.conf
-	ldconfig
-    ldconfig /lib64
-	cd ..
-	rm -rf openssl-${opensslVersion}
-    echo "=============================================="
-    echo "OpenSSL $opensslVersion 安装完成"
-    echo "=============================================="
+Get_PHP_Major_Version() {
+    echo "$php_version" | cut -d '.' -f 1
+}
+
+Get_PHP_Minor_Version() {
+    echo "$php_version" | cut -d '.' -f 2
+}
+
+Build_PHP_7() {
+    echo "==================================================="
+    echo "正在配置 PHP ${php_version} (PHP7编译参数)..."
+    echo "==================================================="
+    soft_configure_str="--prefix=${setup_path} \
+        --with-config-file-path=${setup_path} \
+        --with-config-file-scan-dir=${setup_path}/lib/php/extensions \
+        --with-curl \
+        --with-freetype-dir \
+        --with-gd \
+        --with-gettext \
+        --with-iconv-dir \
+        --with-kerberos \
+        --with-libdir=lib64 \
+        --with-libxml-dir \
+        --with-mysqli=mysqlnd \
+        --with-openssl \
+        --with-pcre-regex \
+        --with-pdo-mysql=mysqlnd \
+        --with-pdo-sqlite \
+        --with-pear \
+        --with-png-dir \
+        --with-xmlrpc \
+        --with-xsl \
+        --with-zlib \
+        --with-bz2 \
+        --with-jpeg-dir \
+        --enable-fpm \
+        --enable-bcmath \
+        --enable-libxml \
+        --enable-inline-optimization \
+        --enable-gd-native-ttf \
+        --enable-mbregex \
+        --enable-mbstring \
+        --enable-opcache \
+        --enable-pcntl \
+        --enable-shmop \
+        --enable-soap \
+        --enable-sockets \
+        --enable-sysvsem \
+        --enable-xml \
+        --enable-zip \
+        --enable-intl \
+        --enable-exif \
+        --enable-fileinfo \
+        --disable-rpath"
+    echo "./configure ${soft_configure_str}"
+    ./configure $soft_configure_str
+}
+
+Build_PHP_8() {
+    echo "==================================================="
+    echo "正在配置 PHP ${php_version} (PHP8编译参数)..."
+    echo "==================================================="
+    local with_openssl=""
+    if [ -f "${install_sys_path}/openssl/bin/openssl" ]; then
+        with_openssl="--with-openssl-dir=${install_sys_path}/openssl"
+    fi
+    soft_configure_str="--prefix=${setup_path} \
+        --with-config-file-path=${setup_path} \
+        --with-config-file-scan-dir=${setup_path}/lib/php/extensions \
+        --with-curl \
+        --with-freetype \
+        --with-gettext \
+        --with-iconv \
+        --with-kerberos \
+        --with-libdir=lib64 \
+        --with-libxml \
+        --with-mysqli=mysqlnd \
+        --with-openssl \
+        ${with_openssl} \
+        --with-pdo-mysql=mysqlnd \
+        --with-pdo-sqlite \
+        --with-pear \
+        --with-xsl \
+        --with-zlib \
+        --with-bz2 \
+        --with-zip \
+        --enable-fpm \
+        --enable-bcmath \
+        --enable-mbstring \
+        --enable-opcache \
+        --enable-pcntl \
+        --enable-shmop \
+        --enable-soap \
+        --enable-sockets \
+        --enable-sysvsem \
+        --enable-xml \
+        --enable-intl \
+        --enable-exif \
+        --enable-fileinfo \
+        --enable-gd \
+        --with-jpeg \
+        --disable-rpath"
+    echo "./configure ${soft_configure_str}"
+    ./configure $soft_configure_str
 }
 
 Install_Soft() {
-    # current_swappiness=$(sysctl -n vm.swappiness)
-    # if [ -n "$current_swappiness" ]; then
-    #     echo "当前的 vm.swappiness 值为：$current_swappiness"
-        
-    #     echo "临时设置 vm.swappiness=0"
-    #     sysctl -w vm.swappiness=0
-
-    #     trap "echo '恢复原来的 vm.swappiness 值';sysctl -w vm.swappiness=$current_swappiness" EXIT SIGTERM SIGINT
-    # fi
     Install_Lib
+    Install_Openssl
+
     cd ${RUYI_TEMP_PATH}
     php_unzip_file_name=$(basename "$php_file_name" .tgz)
+    if [ ! -d "$php_unzip_file_name" ]; then
+        php_unzip_file_name=$(basename "$php_file_name" .tar.gz)
+    fi
+
+    echo "==================================================="
+    echo "正在解压 ${php_file_name}..."
+    echo "==================================================="
     rm -rf $php_unzip_file_name
+    rm -rf php-src-$php_unzip_file_name
     tar -zxf $php_file_name
-    
-    rm -rf $setup_path > /dev/null 2>&1
-    
-	mkdir -p ${setup_path}
-	echo "True" > ${setup_path}/disk.ry
-	if [ ! -w ${setup_path}/disk.ry ];then
-		echo "ERROR: Install php fielded." "ERROR: $setup_path 目录无法写入，请检查目录/用户/磁盘权限！" >&2
+
+    if [ ! -d "$php_unzip_file_name" ] && [ -d "php-src-$php_unzip_file_name" ]; then
+        mv php-src-$php_unzip_file_name $php_unzip_file_name
+    fi
+
+    if [ ! -d "$php_unzip_file_name" ]; then
+        echo "ERROR: 解压失败，找不到源码目录" >&2
         exit 1
-	fi
-	cd ${php_unzip_file_name}
-    echo "==================================================="
-    echo "正在配置..."
-    echo "==================================================="
-    soft_configure_str="--prefix=${setup_path} --with-config-file-path=${setup_path} --with-curl --with-freetype-dir --with-gd --with-gettext --with-iconv-dir --with-kerberos --with-libdir=lib64 --with-libxml-dir --with-mysqli --with-openssl --with-pcre-regex --with-pdo-mysql --with-pdo-sqlite --with-pear --with-png-dir --with-xmlrpc --with-xsl --with-zlib --with-mcrypt --enable-fpm --enable-bcmath --enable-libxml --enable-inline-optimization --enable-gd-native-ttf --enable-mbregex --enable-mbstring --enable-opcache --enable-pcntl --enable-shmop --enable-soap --enable-sockets --enable-sysvsem --enable-xml --enable-zip"
-    echo "当前工作目录：$(pwd) ，开始执行configure..."
-    echo "./configure ${soft_configure_str}"
-    ./configure $soft_configure_str
+    fi
+
+    rm -rf $setup_path > /dev/null 2>&1
+    mkdir -p ${setup_path}
+
+    echo "True" > ${setup_path}/disk.ry
+    if [ ! -w ${setup_path}/disk.ry ]; then
+        echo "ERROR: $setup_path 目录无法写入，请检查目录/用户/磁盘权限！" >&2
+        exit 1
+    fi
+
+    cd ${php_unzip_file_name}
+
+    local major_version
+    major_version=$(Get_PHP_Major_Version)
+
+    if [ "$major_version" -ge 8 ]; then
+        Build_PHP_8
+    else
+        Build_PHP_7
+    fi
+
+    if [ $? -ne 0 ]; then
+        echo "ERROR: configure 失败" >&2
+        exit 1
+    fi
+
     echo "==================================================="
     echo "正在编译..."
     echo "==================================================="
-	make -j${cpu_core}
+    make -j${cpu_core}
+    if [ $? -ne 0 ]; then
+        echo "ERROR: make 失败" >&2
+        exit 1
+    fi
+
     echo "==================================================="
     echo "正在安装..."
     echo "==================================================="
-	make install
-	if [ ! -e ${py_path}/bin/python3 ];then
-		rm -rf ${python_unzip_file_name}
-		echo "ERROR: Install python fielded." "ERROR: 安装python环境失败，请尝试重新安装！" >&2
+    make install
+    if [ $? -ne 0 ]; then
+        echo "ERROR: make install 失败" >&2
         exit 1
-	fi
+    fi
+
+    if [ ! -e ${setup_path}/bin/php ]; then
+        cd ..
+        rm -rf ${php_unzip_file_name}
+        echo "ERROR: 安装PHP失败，php可执行文件不存在" >&2
+        exit 1
+    fi
+
+    mkdir -p ${setup_path}/var/run
+    mkdir -p ${setup_path}/var/log
+    mkdir -p ${setup_path}/tmp
+    mkdir -p ${setup_path}/etc/php-fpm.d
+
+    if [ -f ${setup_path}/etc/php-fpm.conf.default ]; then
+        cp ${setup_path}/etc/php-fpm.conf.default ${setup_path}/etc/php-fpm.conf
+    fi
+    if [ -f ${setup_path}/etc/php-fpm.d/www.conf.default ]; then
+        cp ${setup_path}/etc/php-fpm.d/www.conf.default ${setup_path}/etc/php-fpm.d/www.conf
+    fi
+    if [ -f ${setup_path}/lib/php.ini-production ]; then
+        cp ${setup_path}/lib/php.ini-production ${setup_path}/lib/php.ini
+    elif [ -f ${setup_path}/lib/php.ini-development ]; then
+        cp ${setup_path}/lib/php.ini-development ${setup_path}/lib/php.ini
+    fi
+
+    Service_Add
+
     cd ..
-    rm -rf ${python_unzip_file_name}
+    rm -rf ${php_unzip_file_name}
     echo "==================================================="
-    echo "Python $python_version 安装完成"
+    echo "PHP ${php_version} 编译安装完成"
     echo "==================================================="
 }
 
 Uninstall_soft() {
-    rm -rf ${setup_path}
     Service_Del
+    rm -rf ${setup_path}
+    echo "==================================================="
+    echo "PHP ${php_version} 已卸载"
+    echo "==================================================="
 }
 
-if [ "$action_type" == 'install' ];then
-    if [ -z "${php_version}" ] || [ -z "${python_file_name}" ]; then
+if [ "$action_type" == 'install' ]; then
+    if [ -z "${php_version}" ] || [ -z "${php_file_name}" ]; then
         echo "参数错误" >&2
         exit 1
     fi
-	Install_Soft
-elif [ "$action_type" == 'uninstall' ];then
-    if [ -z "${php_version}" ];then
+    Install_Soft
+elif [ "$action_type" == 'uninstall' ]; then
+    if [ -z "${php_version}" ]; then
         echo "参数错误" >&2
         exit 1
     fi
-	Uninstall_soft
+    Uninstall_soft
 fi

@@ -97,7 +97,9 @@ EOF
         cat > /etc/docker/daemon.json <<EOF
 {
 "registry-mirrors": [
-    "https://docker.1ms.run"
+    "https://docker-0.unsee.tech",
+    "https://docker.1ms.run",
+    "https://docker.xuanyuan.me/"
 ]
 }
 EOF

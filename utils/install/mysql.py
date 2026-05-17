@@ -25,7 +25,7 @@ import zipfile
 import tarfile
 import psutil
 import configparser
-from utils.common import DeleteFile,GetRandomSet,ReadFile,GetBackupPath,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,generate_random_string
+from utils.common import DeleteFile,GetRandomSet,ReadFile,GetBackupPath,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,generate_random_string,ConvertToUnixLineEndings
 from utils.security.files import download_url_file,get_file_name_from_url,download_url_file_wget
 from pathlib import Path
 import subprocess
@@ -158,7 +158,10 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
             WriteFile(mysql_error_log_file_path,"")
             WriteFile(mysql_slow_file_path,"")
         else:
-            r_process = subprocess.Popen(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","mysql.sh"),'install',version['c_version'], str(type)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            # 转换脚本换行符为 Unix 格式
+            script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","mysql.sh")
+            ConvertToUnixLineEndings(script_path)
+            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'], str(type)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
             job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
@@ -237,7 +240,10 @@ def Uninstall_Mysql(is_windows=True):
             system.ForceRemoveDir(data_path)
     else:
         try:
-            subprocess.run(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","mysql.sh"),'uninstall'], capture_output=False, text=True)
+            # 转换脚本换行符为 Unix 格式
+            script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","mysql.sh")
+            ConvertToUnixLineEndings(script_path)
+            subprocess.run(['bash', script_path,'uninstall'], capture_output=False, text=True)
         except Exception as e:
             raise ValueError(e)
     return True

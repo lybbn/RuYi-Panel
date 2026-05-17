@@ -234,19 +234,19 @@ class DockerClient:
         container_list = self.local_containers_list()
         for image in images:
             i_attrs = image.attrs
-            tags = i_attrs['RepoTags']
+            tags = i_attrs.get('RepoTags', [])
             c_name =tags[0] if tags and len(tags)>0 else ""
             short_id = image.short_id
-            work_dir = i_attrs['GraphDriver']['Data'].get('WorkDir',"") if i_attrs['GraphDriver']['Data'] else ""
+            work_dir = i_attrs.get('GraphDriver', {}).get('Data', {}).get('WorkDir', "")
             l_data = {
                 'id': get_sha_id(short_id),#i_attrs.id
                 'used': "1" if self.is_image_in_use(container_list=container_list,image_id=image.id) else "0",
                 'name':c_name,
                 'tags': tags,
-                'size': i_attrs['Size'],
-                'created': i_attrs['Created'],
+                'size': i_attrs.get('Size', 0),
+                'created': i_attrs.get('Created', ""),
                 'work_dir': work_dir,
-                'hostname': i_attrs['Config']['Hostname']
+                'hostname': i_attrs.get('Config', {}).get('Hostname', "")
             }
             if search:
                 search = search.strip().lower()
@@ -434,6 +434,33 @@ class DockerClient:
         if action_type == "container":
             res,msg = dk_container.main(client=self.client).set_status(cont=cont)
         return res,msg
+
+    def edit(self,cont={}):
+        """
+        编辑容器配置
+        """
+        action_type = cont.get("action_type",None)
+        if not self.client:return False,"连接容器失败"
+        res=False
+        msg="类型错误"
+        if action_type == "container":
+            res,msg = dk_container.main(client=self.client).edit(cont=cont)
+        return res,msg
+
+    def get_container_logs(self,cont={}):
+        """获取容器日志"""
+        if not self.client:return False,"连接容器失败"
+        return dk_container.main(client=self.client).logs(cont=cont)
+
+    def get_container_stats(self,cont={}):
+        """获取容器监控"""
+        if not self.client:return False,"连接容器失败"
+        return dk_container.main(client=self.client).stats(cont=cont)
+
+    def clear_container_logs(self,cont={}):
+        """清空容器日志"""
+        if not self.client:return False,"连接容器失败"
+        return dk_container.main(client=self.client).clear_logs(cont=cont)
     
     def get_network_gateway(self,name):
         """

@@ -112,13 +112,14 @@ class GoClient:
         cont = self.project_config
         start_method = "command"
         pids = []
+        site_path_match = self.sitePath.replace("\\", "/").lower()
         try:
             for i in psutil.process_iter(['pid', 'exe', 'cmdline']):
                 try:
                     if i.status() == psutil.STATUS_ZOMBIE:continue
-                    cmdlines = " ".join(i.cmdline())
-                    start_command = cont.get("start_command","")
-                    if start_command in cmdlines:
+                    cmdlines = " ".join(i.cmdline()).replace("\\", "/").lower()
+                    start_command = cont.get("start_command","").lower()
+                    if start_command and start_command in cmdlines and site_path_match in cmdlines:
                         pids.append(i.pid)
                 except:
                     pass
@@ -180,7 +181,31 @@ class GoClient:
             if user:preexec_fn = self.get_preexec_fn(user)
             subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.PIPE,shell=shell,preexec_fn=preexec_fn, env=env)
         else:
-            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdout=subprocess.PIPE,stderr=subprocess.PIPE,shell=shell,env=env,creationflags=subprocess.DETACHED_PROCESS)
+            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdout=subprocess.PIPE,stderr=subprocess.PIPE,shell=shell,env=env,creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+    
+    def exec_bat(self, pid_file=None, bat_path=None):
+        if not os.path.exists(bat_path):
+            return
+        try:
+            env = os.environ.copy()
+            clean_env = {
+                'PATH': env.get('PATH', ''),
+                'SYSTEMROOT': env.get('SYSTEMROOT', ''),
+                'TEMP': env.get('TEMP', ''),
+            }
+            process = subprocess.Popen(
+                ['cmd', '/c', bat_path],
+                shell=True,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                cwd=self.sitePath,
+                env=clean_env
+            )
+            time.sleep(1)
+            pid = process.pid
+            with open(pid_file, 'w') as f:
+                f.write(str(pid))
+        except Exception:
+            pass
     
     def edit_site(self,is_need_time=True):
         """
@@ -226,7 +251,10 @@ class GoClient:
                 env = os.environ.copy()
                 env['PATH'] = conf['go_bin_path'] + ':' + env['PATH']  # 把虚拟环境的 bin 路径加入 PATH
 
-            self.ExecCommand([script_path],cwd=self.sitePath,user=start_user, env=env)
+            if self.is_windows:
+                self.exec_bat(bat_path=script_path, pid_file=sitepid)
+            else:
+                self.ExecCommand([script_path],cwd=self.sitePath,user=start_user, env=env)
             time.sleep(1)
 
             if self.is_project_running():
@@ -439,7 +467,7 @@ class GoClient:
 @echo off
 chcp 65001 > nul
 cd /d {self.sitePath}
-{command_line}
+start "" /b {command_line}
 """
         else:
             log_path = conf['log_command']
@@ -454,8 +482,8 @@ cd {self.sitePath}
 {command_line}
 {command_set_pid}
 """
-            script_path = self.get_run_script_path()
-            WriteFile(script_path,content)
+        script_path = self.get_run_script_path()
+        WriteFile(script_path,content)
 
     def autoStart(self):
         """

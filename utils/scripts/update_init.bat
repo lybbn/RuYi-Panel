@@ -33,6 +33,9 @@ echo 正在同步数据库...
 cd /d "%PANEL_PATH%"
 %PYTHON_EXE% manage.py syncdb
 
+echo 正在升级初始化数据...
+%PYTHON_EXE% manage.py upgrade_init
+
 echo 操作完成！
 
 endlocal

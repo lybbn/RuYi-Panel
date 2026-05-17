@@ -37,7 +37,6 @@ import json
 import base64
 import hashlib
 import requests
-import portalocker
 import binascii
 from utils.common import DeleteDir,GetLetsencryptPath,md5,WriteFile,GetLetsencryptLogPath,GetLetsencryptRootPath,ReadFile
 from cryptography.hazmat.backends import default_backend
@@ -169,10 +168,6 @@ class letsencryptTool:
         if not os.path.exists(self._config_file_path):
             WriteFile(self._config_file_path,"")
         WriteFile(self._config_file_path,json.dumps(self._config))
-        #with open(self._config_file_path, "w") as f:
-            # portalocker.lock(f, portalocker.LOCK_EX)
-            #f.write(json.dumps(self._config))
-            # portalocker.unlock(f)
 
     def _safe_base64(self,data):
         return base64.urlsafe_b64encode(data).decode('utf8').rstrip("=")
@@ -427,27 +422,66 @@ class letsencryptTool:
         if not order_no in self._config['orders']:
             raise Exception('该订单不存在')
         for auth in self._config['orders'][order_no]['auth_info_list']:
-            # 告知 ACME 服务器已准备好文件
-            payload = {"keyAuthorization": "{0}".format(auth['keyauthorization'])}
-            authorization_res = self.do_requests(auth['challenge_url'], payload)
-            authorization_resjson = authorization_res.json()
-            if authorization_resjson['status'] != "valid":
-                is_retry_ok = False
-                for i in range(5):
-                    self.write_log(f"----- 第{i+1}次尝试查询验证结果...")
-                    time.sleep(3)
-                    authorization_res = self.do_requests(auth['challenge_url'], payload)
-                    authorization_resjson = authorization_res.json()
-                    if authorization_resjson['status'] != "valid":
-                        self.write_log(f"----- 第{i+1}次查询验证失败 x")
-                        continue
-                    else:
-                        self.write_log(f"----- 第{i+1}次查询验证成功！")
-                        is_retry_ok = True
-                        break
-                if not is_retry_ok:
-                    raise ValueError("验证【%s】失败，当前验证返回：%s"%(auth['challenge_url'],authorization_resjson))
-            self.write_log(f"----- 验证【{auth['challenge_url']}】已通过")
+            # 先检查 authorization 的当前状态
+            auth_res = self.do_requests(auth['auth_url'], "")
+            auth_resjson = auth_res.json()
+            current_status = auth_resjson.get('status', 'pending')
+            
+            # 如果状态是 processing，直接等待验证结果，不再发送 POST 请求
+            if current_status == 'processing':
+                self.write_log(f"----- Authorization 状态为 processing，等待验证结果...")
+            elif current_status == 'valid':
+                self.write_log(f"----- Authorization 已验证通过")
+                continue
+            elif current_status == 'invalid':
+                raise ValueError("Authorization 状态为 invalid，验证失败：%s"%auth_resjson)
+            elif current_status == 'pending':
+                # 告知 ACME 服务器已准备好文件
+                payload = {"keyAuthorization": "{0}".format(auth['keyauthorization'])}
+                authorization_res = self.do_requests(auth['challenge_url'], payload)
+                authorization_resjson = authorization_res.json()
+            else:
+                raise ValueError("未知的 Authorization 状态：%s"%current_status)
+            
+            # 轮询查询验证结果
+            is_retry_ok = False
+            for i in range(5):
+                self.write_log(f"----- 第{i+1}次尝试查询验证结果...")
+                time.sleep(3)
+                # 查询 authorization 状态而不是 challenge 状态
+                auth_res = self.do_requests(auth['auth_url'], "")
+                auth_resjson = auth_res.json()
+                if auth_resjson['status'] != "valid":
+                    self.write_log(f"----- 第{i+1}次查询验证失败 x")
+                    continue
+                else:
+                    self.write_log(f"----- 第{i+1}次查询验证成功！")
+                    is_retry_ok = True
+                    break
+            if not is_retry_ok:
+                # 检查是否有具体的错误信息
+                error_detail = ""
+                if 'challenges' in auth_resjson:
+                    for challenge in auth_resjson['challenges']:
+                        if 'error' in challenge:
+                            error_detail = challenge['error'].get('detail', '')
+                            break
+                
+                error_msg = f"验证【{auth['domain']}】失败"
+                if error_detail:
+                    error_msg += f"\n错误详情：{error_detail}"
+                
+                # 提供常见问题的解决建议
+                if 'unauthorized' in str(auth_resjson) or '404' in str(auth_resjson):
+                    error_msg += "\n\n可能的原因："
+                    error_msg += "\n1. 验证文件未正确部署到网站根目录"
+                    error_msg += "\n2. 域名未正确解析到服务器"
+                    error_msg += "\n3. 防火墙或安全组未开放 80 端口"
+                    error_msg += "\n4. 域名未完成备案（国内服务器）"
+                    error_msg += "\n5. 网站配置问题，无法访问 .well-known 目录"
+                
+                raise ValueError(error_msg)
+            self.write_log(f"----- 验证【{auth['domain']}】已通过")
         self.write_log("----- 验证域名成功！")
     
     def create_certificate_key(self,order_no):

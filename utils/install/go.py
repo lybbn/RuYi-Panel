@@ -21,7 +21,7 @@
 import os,platform,re
 import time
 from pathlib import Path
-from utils.common import DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand,ReadFile
+from utils.common import DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand,ReadFile,ConvertToUnixLineEndings
 from utils.security.files import download_url_file,get_file_name_from_url
 import subprocess
 import importlib
@@ -164,7 +164,10 @@ def Install_Go(type=2,version={},is_windows=True,call_back=None):
             DeleteFile(save_path,empty_tips=False)
             WriteFile(log_path,"已删除下载的临时安装文件，并回调\n",mode='a',write=is_write_log)
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/go.sh','install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            # 转换脚本换行符为 Unix 格式
+            script_path = GetInstallPath()+'/ruyi/utils/install/bash/go.sh'
+            ConvertToUnixLineEndings(script_path)
+            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
             job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
@@ -208,7 +211,10 @@ def Uninstall_Go(version=None,is_windows=True):
             system.ForceRemoveDir(install_path)
     else:
         try:
-            subprocess.run(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","go.sh"),'uninstall',version], capture_output=False, text=True)
+            # 转换脚本换行符为 Unix 格式
+            script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","go.sh")
+            ConvertToUnixLineEndings(script_path)
+            subprocess.run(['bash', script_path,'uninstall',version], capture_output=False, text=True)
         except Exception as e:
             raise ValueError(e)
     return True

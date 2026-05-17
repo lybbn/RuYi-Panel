@@ -21,7 +21,7 @@
 import os
 import re
 import time
-from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,GetRandomSet
+from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,GetRandomSet,ConvertToUnixLineEndings
 from utils.security.files import download_url_file,get_file_name_from_url,get_github_quick_downloadurl
 from pathlib import Path
 import subprocess
@@ -123,7 +123,10 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
             WriteFile(version_file,version['c_version'])
             WriteFile(log_path,"正在配置redis...\n",mode='a',write=is_write_log)
         else:
-            r_process = subprocess.Popen(['bash', GetInstallPath()+'/ruyi/utils/install/bash/redis.sh','install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            # 转换脚本换行符为 Unix 格式
+            script_path = GetInstallPath()+'/ruyi/utils/install/bash/redis.sh'
+            ConvertToUnixLineEndings(script_path)
+            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
             job_subprocess_add(version['job_id'],r_process)
             # 持续读取输出
             while True:
@@ -157,7 +160,7 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
             soft_exe_path = soft_paths['windows_abspath_exe_path']
             conf_path = soft_paths['abspath_conf_path']
             soft_args = f'--service-run {conf_path} --loglevel verbose'
-            isok, msg = install_as_service(name=service_name,display_name=service_name,path=soft_exe_path,args=soft_args,description="Redis key-value store service",username=sys_username,password=sys_password,start_type=2)
+            isok, msg = install_as_service(name=service_name,display_name=service_name,path=soft_exe_path,args=soft_args,description="Redis key-value store service",username=sys_username,password=sys_password,start_type=3)
             if not isok:WriteFile(log_path,f"安装redis系统服务失败：{msg}\n",mode='a',write=is_write_log)
 
         # 删除下载的文件
@@ -192,7 +195,10 @@ def Uninstall_Redis(is_windows=True):
             system.ForceRemoveDir(install_path)
     else:
         try:
-            subprocess.run(['bash', os.path.join(settings.BASE_DIR,"utils","install","bash","redis.sh"),'uninstall'], capture_output=False, text=True)
+            # 转换脚本换行符为 Unix 格式
+            script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","redis.sh")
+            ConvertToUnixLineEndings(script_path)
+            subprocess.run(['bash', script_path,'uninstall'], capture_output=False, text=True)
         except Exception as e:
             raise ValueError(e)
     return True

@@ -255,6 +255,36 @@ class main:
         """
         app_path = self.get_dkapp_path(cont=cont)
         return app_path+"/dkapp_install.log"
+
+    def sync_app_install_status(self, app):
+        """
+        根据安装日志修正卡在 install/install_failed 的应用状态。
+        """
+        if not app or app.status not in ("install", "install_failed"):
+            return app.status if app else "install"
+
+        install_log_path = self.get_dkapp_install_logpath({
+            "appname": app.appname,
+            "name": app.name,
+        })
+        if not os.path.exists(install_log_path):
+            return app.status
+
+        try:
+            install_log = system.GetFileLastNumsLines(install_log_path, 200) or ""
+        except Exception:
+            install_log = ReadFile(install_log_path) or ""
+
+        next_status = app.status
+        if "ruyi_successful_flag" in install_log:
+            next_status = "running"
+        elif "ruyi_failed_flag" in install_log:
+            next_status = "install_failed"
+
+        if next_status != app.status:
+            app.status = next_status
+            app.save(update_fields=["status"])
+        return app.status
     
     def __check_compose_config(self, filename):
         """验证配置文件"""
@@ -318,6 +348,34 @@ class main:
             return self.set_frp_conf(cont=cont)
         elif appname == "discuz":
             return self.set_discuz_conf(cont=cont)
+        elif appname == "openclaw":
+            return self.set_openclaw_conf(cont=cont)
+        return True,"ok"
+
+    def set_openclaw_conf(self,cont={}):
+        app_path = self.get_dkapp_path(cont=cont)
+        return self.prepare_openclaw_runtime(app_path)
+
+    def prepare_openclaw_runtime(self, app_path):
+        config_path = f"{app_path}/config"
+        workspace_path = f"{app_path}/workspace"
+        qqbot_data_path = f"{config_path}/qqbot/data"
+
+        for path in [config_path, workspace_path, qqbot_data_path]:
+            os.makedirs(path, exist_ok=True)
+
+        if not self.is_windows:
+            RunCommand(f"chown -R 1000:1000 \"{config_path}\" \"{workspace_path}\"")
+
+        return True,"ok"
+
+    def prepare_runtime_by_compose_path(self, compose_conf_path):
+        if not compose_conf_path:
+            return True,"ok"
+        app_path = os.path.dirname(compose_conf_path).replace("\\", "/")
+        appname = os.path.basename(os.path.dirname(app_path))
+        if appname == "openclaw":
+            return self.prepare_openclaw_runtime(app_path)
         return True,"ok"
 
     def chmod_recursive(self,path, mode):
@@ -517,19 +575,38 @@ class main:
     def up_app_remove_orphans(self,compose_conf_path):
         if not compose_conf_path:return False,"无配置文件"
         if not os.path.exists(compose_conf_path): return False,"应用配置文件不存在"
+        isok0,msg0 = self.prepare_runtime_by_compose_path(compose_conf_path)
+        if not isok0:return False,msg0
         isok2,msg2 = self.__check_compose_config(compose_conf_path)
         if not isok2:return False,msg2
-        RunCommand(f"nohup {self.compose_bin} -f {compose_conf_path} up -d --remove-orphans")
+        app_path = os.path.dirname(compose_conf_path).replace("\\", "/")
+        appname = os.path.basename(os.path.dirname(app_path))
+        name = os.path.basename(app_path)
+        install_log_file = self.get_dkapp_install_logpath({"appname":appname,"name":name})
+        if not self.is_windows:
+            RunCommand(f"nohup {self.compose_bin} -f {compose_conf_path} up -d --remove-orphans >> {install_log_file} 2>&1 && echo 'ruyi_successful_flag' >> {install_log_file} || echo 'ruyi_failed_flag' >> {install_log_file} &")
+        else:
+            RunCommand(f'cmd /c "{self.compose_bin} -f {compose_conf_path} up -d --remove-orphans --timeout 600 >> {install_log_file} 2>&1 && echo ruyi_successful_flag >> {install_log_file} || echo ruyi_failed_flag >> {install_log_file}"')
         return True, "启动成功"
     
     def rebuild_app(self,compose_conf_path):
         self.stop_app(compose_conf_path)
-        self.up_app_remove_orphans(compose_conf_path)
+        app_path = os.path.dirname(compose_conf_path).replace("\\", "/")
+        appname = os.path.basename(os.path.dirname(app_path))
+        name = os.path.basename(app_path)
+        install_log_file = self.get_dkapp_install_logpath({"appname":appname,"name":name})
+        if not self.is_windows:
+            runcommand_str = f"nohup {self.compose_bin} -f {compose_conf_path} up -d --remove-orphans >> {install_log_file} 2>&1 && echo 'ruyi_successful_flag' >> {install_log_file} || echo 'ruyi_failed_flag' >> {install_log_file} &"
+        else:
+            runcommand_str = f'cmd /c "{self.compose_bin} -f {compose_conf_path} up -d --remove-orphans --timeout 600 >> {install_log_file} 2>&1 && echo ruyi_successful_flag >> {install_log_file} || echo ruyi_failed_flag >> {install_log_file}"'
+        subprocess.Popen(runcommand_str, shell=True)
         return True, "重建成功"
     
     def start_app(self,compose_conf_path):
         if not compose_conf_path:return False,"无配置文件"
         if not os.path.exists(compose_conf_path): return False,"应用配置文件不存在"
+        isok0,msg0 = self.prepare_runtime_by_compose_path(compose_conf_path)
+        if not isok0:return False,msg0
         isok2,msg2 = self.__check_compose_config(compose_conf_path)
         if not isok2:return False,msg2
         stdout, stderr = RunCommand(f"nohup {self.compose_bin} -f {compose_conf_path} start")
@@ -588,6 +665,8 @@ class main:
     def restart_app(self,compose_conf_path):
         if not compose_conf_path:return False,"无配置文件"
         if not os.path.exists(compose_conf_path): return False,"应用配置文件不存在"
+        isok0,msg0 = self.prepare_runtime_by_compose_path(compose_conf_path)
+        if not isok0:return False,msg0
         isok2,msg2 = self.__check_compose_config(compose_conf_path)
         if not isok2:return False,msg2
         o,e = RunCommand(f"{self.compose_bin} -f {compose_conf_path} restart")
@@ -640,7 +719,7 @@ class main:
         
         runcommand_str = "nohup"
         if self.is_windows:
-            runcommand_str = "start /B cmd /c"
+            runcommand_str = "start /B"
         
         #依赖服务和端口检查
         appid = cont.get("appid","")
@@ -688,7 +767,7 @@ class main:
             runcommand_str = f"{runcommand_str} {self.compose_bin} -f {compose_conf_path} up -d >> {install_log_file} 2>&1 && echo 'ruyi_successful_flag' >> {install_log_file} || echo 'ruyi_failed_flag' >> {install_log_file}"
             runcommand_str = f"{runcommand_str} &"
         else:
-            runcommand_str = f"{runcommand_str} {self.compose_bin} -f {compose_conf_path} up -d --timeout 600 >> {install_log_file} 2>&1 && echo 'ruyi_successful_flag' >> {install_log_file} || echo 'ruyi_failed_flag' >> {install_log_file}"
+            runcommand_str = f'{runcommand_str} cmd /c "{self.compose_bin} -f {compose_conf_path} up -d --timeout 600 >> {install_log_file} 2>&1 && echo ruyi_successful_flag >> {install_log_file} || echo ruyi_failed_flag >> {install_log_file}"'
 
         subprocess.Popen(runcommand_str, shell=True)
         return True,"创建并启动中，初次使用应用镜像可能需等待几分钟..."
@@ -720,7 +799,7 @@ class main:
             
             cmd = f"{self.compose_bin} -f {app_compose_path} logs {' '.join(cmd_params)}"
 
-            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1,universal_newlines=True)
+            process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, universal_newlines=True, encoding='utf-8', errors='replace')
             
             # 异步读取输出
             async def stream_output():
