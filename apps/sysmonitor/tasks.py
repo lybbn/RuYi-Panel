@@ -81,18 +81,15 @@ def collect_monitor_data():
     采集前检查监控是否启用
     """
     try:
-        # 检查监控是否启用
         config = get_monitor_config()
         if config and not config.is_enabled:
             logger.debug("监控功能已关闭，跳过数据采集")
             return
         
-        # 延迟导入避免循环依赖
         from apps.sysmonitor.views import MonitorDataCollector
         MonitorDataCollector.collect_all()
         logger.debug("监控数据采集完成")
         
-        # 触发告警检查（资源类告警）
         try:
             from apps.sysalert.tasks import check_resource_alert
             check_resource_alert()
@@ -101,6 +98,12 @@ def collect_monitor_data():
             
     except Exception as e:
         logger.error(f"监控数据采集失败: {e}")
+    finally:
+        try:
+            from django.db import connections
+            connections.close_all()
+        except Exception:
+            pass
 
 def remove_monitor_task():
     """

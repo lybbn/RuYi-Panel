@@ -154,7 +154,7 @@ class RYSysProcessOperateView(CustomAPIView):
         pid = reqData.get("pid","")
         if not pid:return ErrorResponse(msg="参数错误")
         if str(pid) == '1':return ErrorResponse(msg="无法终止初始进程")
-        pid == int(pid)
+        pid = int(pid)
         if action == "kill":
             isok,msg = kill_process(pid)
             if isok:

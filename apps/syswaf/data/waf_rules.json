@@ -756,6 +756,16 @@
       "targets": "[\"post\", \"cookie\"]",
       "description": "Java内存马植入行为检测",
       "is_builtin": true
+    },
+    {
+      "rule_id": "cve-2026-42945",
+      "name": "CVE-2026-42945 Nginx Rift堆溢出RCE",
+      "category_id": 99,
+      "severity": "critical",
+      "pattern": "(\\+{6,}|%{6,}|&{8,}| {6,}|[+%& ]{12,})",
+      "targets": "[\"url\"]",
+      "description": "Nginx ngx_http_rewrite_module堆缓冲区溢出漏洞防护，检测利用rewrite未命名捕获组中可转义字符(+%&)触发堆溢出的恶意请求",
+      "is_builtin": true
     }
   ]
 }

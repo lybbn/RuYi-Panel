@@ -18,6 +18,7 @@
 
 import os
 import uuid
+from datetime import datetime
 from rest_framework.views import APIView
 from utils.customView import CustomAPIView
 from utils.common import get_parameter_dic,formatdatetime,formatTimestamp2Datetime,GetLogsPath
@@ -84,31 +85,60 @@ class CrontabTaskViewSet(CustomModelViewSet):
     def create(self, request, *args, **kwargs):
         reqData = request.data
         type = int(reqData.get("type",0))
-        if type not in [0,1,2,3,4]:
+        if type not in [0,1,2,3,4,5]:
             return ErrorResponse(msg="type error")
-        cron_res = resolvingCron(reqData)
-        second = cron_res.get("second","*")
-        minute = cron_res.get("minute","*")
-        hour = cron_res.get("hour","*")
-        day = cron_res.get("day","*")
-        month = cron_res.get("month","*")
-        week = cron_res.get("week","*")
-        year = cron_res.get("year","*")
-        job_id = make_uuid()
         period_type = int(reqData.get("period_type",0))
-        #coalesce=True 积攒的任务只跑一次
-        #max_instances = 10 支持10个实例并发
-        #misfire_grace_time = 600 600秒的任务超时容错，超过这个时间认为该任务过期，不再执行
-        if period_type in [1,2,3,4]:
-            django_job = scheduler.add_job(cronTask,'cron',id=job_id,second=second, minute=minute, hour=hour, day=day, month=month, week=week, year=year,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
-        elif period_type == 5:
-            django_job = scheduler.add_job(cronTask,'interval',id=job_id,days=day,hours=hour,minutes=minute,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
-        elif period_type == 6:
-            django_job = scheduler.add_job(cronTask,'interval',id=job_id,hours=hour,minutes=minute,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
-        elif period_type == 7:
-            django_job = scheduler.add_job(cronTask,'interval',id=job_id,minutes=minute,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
-        elif period_type == 8:
-            django_job = scheduler.add_job(cronTask,'interval',id=job_id,seconds=second,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
+
+        if period_type == 9:
+            from apscheduler.triggers.date import DateTrigger
+            from django.conf import settings
+            from pytz import timezone as pytz_tz
+            run_at = reqData.get("run_at", "")
+            if not run_at:
+                return ErrorResponse(msg="一次性任务必须指定执行时间")
+            try:
+                run_at_dt = None
+                for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S', '%Y/%m/%d %H:%M', '%Y-%m-%d'):
+                    try:
+                        run_at_dt = datetime.strptime(str(run_at).strip(), fmt)
+                        break
+                    except ValueError:
+                        continue
+                if run_at_dt is None:
+                    return ErrorResponse(msg="无法解析执行时间")
+                run_at_dt = pytz_tz(settings.TIME_ZONE).localize(run_at_dt)
+            except Exception:
+                return ErrorResponse(msg="无法解析执行时间")
+            job_id = make_uuid()
+            django_job = scheduler.add_job(
+                cronTask, 'date', id=job_id,
+                run_date=run_at_dt,
+                args=[reqData, job_id],
+                max_instances=1, replace_existing=True,
+                misfire_grace_time=3600, coalesce=True,
+            )
+        else:
+            cron_res = resolvingCron(reqData)
+            second = cron_res.get("second","*")
+            minute = cron_res.get("minute","*")
+            hour = cron_res.get("hour","*")
+            day = cron_res.get("day","*")
+            month = cron_res.get("month","*")
+            week = cron_res.get("week","*")
+            year = cron_res.get("year","*")
+            job_id = make_uuid()
+            if period_type in [1,2,3,4]:
+                django_job = scheduler.add_job(cronTask,'cron',id=job_id,second=second, minute=minute, hour=hour, day=day, month=month, week=week, year=year,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
+            elif period_type == 5:
+                django_job = scheduler.add_job(cronTask,'interval',id=job_id,days=day,hours=hour,minutes=minute,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
+            elif period_type == 6:
+                django_job = scheduler.add_job(cronTask,'interval',id=job_id,hours=hour,minutes=minute,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
+            elif period_type == 7:
+                django_job = scheduler.add_job(cronTask,'interval',id=job_id,minutes=minute,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
+            elif period_type == 8:
+                django_job = scheduler.add_job(cronTask,'interval',id=job_id,seconds=second,args=[reqData,job_id],max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
+            else:
+                return ErrorResponse(msg="period_type error")
         reqData['job'] = django_job.id
         serializer = CrontabTasksSerializer(data=reqData)
         serializer.is_valid(raise_exception=True)
@@ -121,68 +151,101 @@ class CrontabTaskViewSet(CustomModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+        reqData = request.data
+        period_type = int(reqData.get("period_type",0))
+
+        job_id = instance.job_id
+        job = scheduler.get_job(job_id)
+        if not job:
+            raise ValueError("调度任务不存在，请重新创建")
+
+        try:
+            pause_task(job_id)
+            if period_type == 9:
+                from apscheduler.triggers.date import DateTrigger
+                from django.conf import settings
+                from pytz import timezone as pytz_tz
+                run_at = reqData.get("run_at", "")
+                if not run_at:
+                    raise ValueError("一次性任务必须指定执行时间")
+                try:
+                    run_at_dt = None
+                    for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S', '%Y/%m/%d %H:%M', '%Y-%m-%d'):
+                        try:
+                            run_at_dt = datetime.strptime(str(run_at).strip(), fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if run_at_dt is None:
+                        raise ValueError("无法解析执行时间")
+                    run_at_dt = pytz_tz(settings.TIME_ZONE).localize(run_at_dt)
+                except Exception:
+                    raise ValueError("无法解析执行时间")
+                trigger = DateTrigger(run_date=run_at_dt)
+                job.modify(trigger=trigger, args=[reqData, job_id])
+            else:
+                try:
+                    cron_res = resolvingCron(reqData)
+                except Exception as e:
+                    raise ValueError(f"Cron表达式解析失败: {str(e)}")
+                second = cron_res.get("second",None)
+                minute = cron_res.get("minute",None)
+                hour = cron_res.get("hour",None)
+                day = cron_res.get("day",None)
+                month = cron_res.get("month",None)
+                week = cron_res.get("week",None)
+                year = cron_res.get("year",None)
+
+                if period_type in [1,2,3,4]:
+                    if not day or day == "*":
+                        day = None
+                    if not hour or hour == "*":
+                        hour = None
+                    if not minute or minute == "*":
+                        minute = None
+                    if not second or second == "*":
+                        second = None
+                    if not month or month == "*":
+                        month = None
+                    if not week or week == "*":
+                        week = None
+                    if not year or year == "*":
+                        year = None
+                    trigger = CronTrigger(second=second, minute=minute, hour=hour, day=day, month=month, week=week, year=year)
+                    job.modify(trigger=trigger,args=[reqData,job_id])
+                elif period_type == 5:
+                    if not day or day == "*":
+                        day = 0
+                    if not hour or hour == "*":
+                        hour = 0
+                    if not minute or minute == "*":
+                        minute = 0
+                    trigger = IntervalTrigger(days=int(day),hours=int(hour),minutes=int(minute))
+                    job.modify(trigger=trigger,args=[reqData,job_id])
+                elif period_type == 6:
+                    if not hour or hour == "*":
+                        hour = 0
+                    if not minute or minute == "*":
+                        minute = 0
+                    trigger = IntervalTrigger(hours=int(hour),minutes=int(minute))
+                    job.modify(trigger=trigger,args=[reqData,job_id])
+                elif period_type == 7:
+                    trigger = IntervalTrigger(minutes=int(minute))
+                    job.modify(trigger=trigger,args=[reqData,job_id])
+                elif period_type == 8:
+                    trigger = IntervalTrigger(seconds=int(second))
+                    job.modify(trigger=trigger,args=[reqData,job_id])
+            resume_task(job_id)
+        except Exception:
+            resume_task(job_id)
+            raise
+
         serializer = self.get_serializer(instance, data=request.data, request=request, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
 
         if getattr(instance, '_prefetched_objects_cache', None):
-            # If 'prefetch_related' has been applied to a queryset, we need to
-            # forcibly invalidate the prefetch cache on the instance.
             instance._prefetched_objects_cache = {}
-        
-        reqData = request.data
-        cron_res = resolvingCron(reqData)
-        second = cron_res.get("second",None)
-        minute = cron_res.get("minute",None)
-        hour = cron_res.get("hour",None)
-        day = cron_res.get("day",None)
-        month = cron_res.get("month",None)
-        week = cron_res.get("week",None)
-        year = cron_res.get("year",None)
-        job_id = serializer.data.get("job")
-        job = scheduler.get_job(job_id)
-        period_type = int(reqData.get("period_type",0))
-        pause_task(job_id)
-        if period_type in [1,2,3,4]:
-            if not day or day == "*":
-                day = None
-            if not hour or hour == "*":
-                hour = None
-            if not minute or minute == "*":
-                minute = None
-            if not second or second == "*":
-                second = None
-            if not month or month == "*":
-                month = None
-            if not week or week == "*":
-                week = None
-            if not year or year == "*":
-                year = None
-            trigger = CronTrigger(second=second, minute=minute, hour=hour, day=day, month=month, week=week, year=year)
-            job.modify(trigger=trigger,args=[reqData,job_id])
-        elif period_type == 5:
-            if not day or day == "*":
-                day = 0
-            if not hour or hour == "*":
-                hour = 0
-            if not minute or minute == "*":
-                minute = 0
-            trigger = IntervalTrigger(days=int(day),hours=int(hour),minutes=int(minute))
-            job.modify(trigger=trigger,args=[reqData,job_id])
-        elif period_type == 6:
-            if not hour or hour == "*":
-                hour = 0
-            if not minute or minute == "*":
-                minute = 0
-            trigger = IntervalTrigger(hours=int(hour),minutes=int(minute))
-            job.modify(trigger=trigger,args=[reqData,job_id])
-        elif period_type == 7:
-            trigger = IntervalTrigger(minutes=int(minute))
-            job.modify(trigger=trigger,args=[reqData,job_id])
-        elif period_type == 8:
-            trigger = IntervalTrigger(seconds=int(second))
-            job.modify(trigger=trigger,args=[reqData,job_id])
-        resume_task(job_id)
         RuyiAddOpLog(request,msg="【计划任务】-【修改】=>"+serializer.data.get("name",""),module="taskmg")
         return DetailResponse(data=None, msg="更新成功")
 

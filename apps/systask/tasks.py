@@ -65,7 +65,7 @@ def resolvingCron(reqData):
     week = reqData.get("week","*")
     year = reqData.get("year","*")
     period_type = int(reqData.get("period_type",0))
-    if period_type not in [1,2,3,4,5,6,7,8]:
+    if period_type not in [1,2,3,4,5,6,7,8,9]:
         raise ValueError("period type error")
     if period_type == 1:#每天
         if int(minute) >59 or int(minute)<0:
@@ -145,6 +145,8 @@ def resolvingCron(reqData):
         day= "*"
         hour= "*"
         minute = "*"
+    elif period_type == 9:#一次性，不需要cron表达式
+        pass
 
     result = {
         "second":second,
@@ -181,7 +183,7 @@ def cronTask(obj,job_id):
         if db_ids == "ALL":
             db_ids_list = list(Databases.objects.filter(db_type=db_type,is_remote=False).values_list("id",flat=True))
         else:
-            db_ids_list = str(site_ids).split(",")
+            db_ids_list = str(db_ids).split(",")
         if not db_ids_list:
             taskloggers.info("暂无数据库需要备份，已跳过！！！")
         else:
@@ -282,6 +284,12 @@ def cronTask(obj,job_id):
         result = access_url(obj.get("url"))
         status_text = "成功" if result["status"] else "失败"
         taskloggers.info("【%s】任务执行成功，访问URL%s,返回内容：\n%s"%(job_name,status_text,result['content']))
+    elif type == 5:#ai_task
+        try:
+            from apps.systask.ai_cron_executor import run_ai_cron_task
+            run_ai_cron_task(obj, job_id)
+        except Exception as e:
+            taskloggers.info("【%s】AI任务执行异常：%s"%(job_name,str(e)))
     else:
         pass
     taskloggers.info("------------------------【%s】任务结束------------------------"%job_name)
@@ -296,6 +304,8 @@ def cronTask(obj,job_id):
     elif type == 4:#访问URL任务
         if not result["status"]:
             _trigger_cron_fail_alert(job_name, f"访问URL失败：{result['content']}")
+    elif type == 5:#ai_task - AI任务自行处理投递，无需额外告警
+        pass
 
 def _trigger_cron_fail_alert(job_name, error_msg):
     """
@@ -314,7 +324,7 @@ def installTask(job_id,job_func,func_args=[]):
     """
     # 创建一个 DateTrigger，设置为现在的时间
     trigger = DateTrigger(run_date=datetime.datetime.now())
-    django_job = scheduler.add_job(job_func,trigger,id=job_id,args=func_args,max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True)
+    django_job = scheduler.add_job(job_func,trigger,id=job_id,args=func_args,max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True,executor='processpool')
     return django_job
 
 def access_url(url):
@@ -379,27 +389,29 @@ def func_unzip(zip_filename,extract_path):
     @param zip_filename 压缩文件名（含路径）
     @param extract_path 需要解压的目标目录
     """
-    
-    try:
-        _, ext = os.path.splitext(zip_filename)
-        ext = ext.lower()
-        if ext in ['.tar.gz','.tgz','.tar.bz2','.tbz']:
-            with tarfile.open(zip_filename, 'r') as tar:
-                tar.extractall(extract_path)
-        elif ext == '.zip':
-            with zipfile.ZipFile(zip_filename, 'r') as zipf:
-                zipf.extractall(extract_path)
-        else:
-            raise ValueError("不支持的文件格式")
-    except PermissionError:
-        if current_os == "windows":
-            #解除占用
-            from utils.server.windows import kill_cmd_if_working_dir
-            kill_cmd_if_working_dir(extract_path)
-            # 再次尝试解压
-            func_unzip(zip_filename, extract_path)  # 递归调用
-    except Exception as e:
-        raise ValueError(e)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            _, ext = os.path.splitext(zip_filename)
+            ext = ext.lower()
+            if ext in ['.tar.gz','.tgz','.tar.bz2','.tbz']:
+                with tarfile.open(zip_filename, 'r') as tar:
+                    tar.extractall(extract_path)
+            elif ext == '.zip':
+                with zipfile.ZipFile(zip_filename, 'r') as zipf:
+                    zipf.extractall(extract_path)
+            else:
+                raise ValueError("不支持的文件格式")
+            return
+        except PermissionError:
+            if current_os == "windows":
+                from utils.server.windows import kill_cmd_if_working_dir
+                kill_cmd_if_working_dir(extract_path)
+                if attempt < max_retries - 1:
+                    continue
+            raise
+        except Exception as e:
+            raise ValueError(e)
 
 def zip_directories_and_files(zip_filename, items):
     with zipfile.ZipFile(zip_filename, 'w') as zipf:

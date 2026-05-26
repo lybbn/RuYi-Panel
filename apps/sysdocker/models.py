@@ -48,9 +48,14 @@ class RyDockerApps(BaseModel):
 
     STATUS_CHOICES = (
         ("install", "安装中"),
+        ("install_failed", "安装失败"),
         ("paused", "已暂停"),
         ("running", "已启动"),
         ("exited", "已停止"),
+        ("created", "已创建"),
+        ("restarting", "重启中"),
+        ("removing", "移除中"),
+        ("dead", "已结束"),
     )
     appid = models.IntegerField(verbose_name='所属应用id', default=0,null=True,blank=True)
     appname = models.CharField(verbose_name='所属应用名称',max_length=100,null=True,blank=True)

@@ -97,6 +97,8 @@ class AlertTask(BaseModel):
     is_enabled = models.BooleanField(default=True, verbose_name='是否启用')
     last_trigger = models.DateTimeField(null=True, blank=True, verbose_name='最近触发时间')
     silence_minutes = models.IntegerField(default=30, verbose_name='静默时间(分钟)')
+    push_count = models.IntegerField(default=10, verbose_name='每日推送上限', help_text='0表示不限制')
+    is_alerting = models.BooleanField(default=False, verbose_name='当前是否告警中')
     # 检查频率（仅部分类型可配置）
     check_interval = models.IntegerField(default=300, verbose_name='检查间隔(秒)', help_text='仅网站宕机类型可配置')
     
@@ -136,7 +138,8 @@ class AlertLog(BaseModel):
     
     task = models.ForeignKey(AlertTask, on_delete=models.CASCADE, verbose_name='告警任务')
     content = models.TextField(verbose_name='告警内容')
-    channels = models.TextField(verbose_name='实际发送渠道', help_text='逗号分隔')
+    channels = models.TextField(verbose_name='实际发送渠道', help_text='渠道名称')
+    channel_type = models.CharField(max_length=20, default='', verbose_name='渠道类型')
     status = models.SmallIntegerField(choices=STATUS_CHOICES, default=0, verbose_name='发送状态')
     response = models.TextField(null=True, blank=True, verbose_name='响应信息')
     

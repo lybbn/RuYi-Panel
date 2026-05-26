@@ -29,10 +29,20 @@ def tasklogger(job_id):
     @author lybbn<2024-02-07>
     """
 
-    # 检查字典中是否已存在 Logger 实例
+    if len(settings.TASK_LOGGERS_DIC) > 50:
+        _cleanup_old_loggers()
+
     if job_id in settings.TASK_LOGGERS_DIC:
         return settings.TASK_LOGGERS_DIC[job_id]
 
+    tasklogger = logging.getLogger(job_id)
+    # tasklogger = logging.getLogger("apscheduler.scheduler")#可能出现互相记录情况
+    tasklogger.setLevel(logging.INFO)
+    # 设置 'propagate' 为 False，防止日志传播到父日志记录器
+    tasklogger.propagate = False
+    if tasklogger.handlers:
+        settings.TASK_LOGGERS_DIC[job_id] = tasklogger
+        return tasklogger
     task_log_root_path = os.path.join(GetLogsPath(),"ruyitask")
     if not os.path.exists(task_log_root_path):
         os.makedirs(task_log_root_path)
@@ -40,11 +50,6 @@ def tasklogger(job_id):
     if not os.path.exists(task_log_path):
         with open(task_log_path, 'w', encoding="utf-8") as f:
             pass
-    tasklogger = logging.getLogger(job_id)
-    # tasklogger = logging.getLogger("apscheduler.scheduler")#可能出现互相记录情况
-    tasklogger.setLevel(logging.INFO)
-    # 设置 'propagate' 为 False，防止日志传播到父日志记录器
-    tasklogger.propagate = False
     file_handler = RotatingFileHandler(
         task_log_path,
         maxBytes=1024 * 1024 * 50,  # 每个日志文件的最大大小
@@ -56,13 +61,28 @@ def tasklogger(job_id):
     file_handler.setFormatter(formatter)
     tasklogger.addHandler(file_handler)
     
-    # 获取 'apscheduler.scheduler' 记录器并将其 handler 添加到当前 tasklogger（在apscheduler.scheduler也记录一份）
-    apscheduler_logger = logging.getLogger('apscheduler.scheduler')
-    if apscheduler_logger:
-        tasklogger.addHandler(apscheduler_logger.handlers[0])  # 将 'apscheduler.scheduler' 的 handler 添加到当前日志记录器
-    
     settings.TASK_LOGGERS_DIC[job_id] = tasklogger
     return tasklogger
+
+def _cleanup_old_loggers():
+    """
+    @name 清理过多的Logger实例，释放内存
+    @author lybbn<2024-02-18>
+    """
+    try:
+        keys_to_remove = list(settings.TASK_LOGGERS_DIC.keys())[:30]
+        for key in keys_to_remove:
+            tl = settings.TASK_LOGGERS_DIC[key]
+            for handler in tl.handlers[:]:
+                if isinstance(handler, logging.handlers.RotatingFileHandler):
+                    handler.flush()
+                    handler.close()
+                tl.removeHandler(handler)
+            for f in tl.filters[:]:
+                tl.removeFilter(f)
+            del settings.TASK_LOGGERS_DIC[key]
+    except Exception:
+        pass
 
 def deleteTaskLogs(job_id):
     """

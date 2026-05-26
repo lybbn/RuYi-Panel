@@ -84,7 +84,8 @@ ALERT_NOTIFY_CONFIGS = [
             "corpId": "",
             "agentId": "",
             "secret": "",
-            "toUser": ""
+            "toUser": "",
+            "msgType": "text"
         }
     },
     {

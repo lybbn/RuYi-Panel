@@ -41,4 +41,3 @@ def executeNextTask(check_task=False):
             next_task.execute_task()
     logger.info("安装任务检查执行完毕！！！")
     return True
-    

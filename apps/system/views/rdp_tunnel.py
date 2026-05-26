@@ -24,6 +24,8 @@ class GuacamoleProtocolError(Exception):
 class GuacamoleInstructionCodec:
     """Incrementally parses and encodes Guacamole instructions."""
 
+    MAX_BUFFER_SIZE = 1024 * 1024
+
     def __init__(self):
         self.buffer = ""
         self.decoder = codecs.getincrementaldecoder("utf-8")()
@@ -44,6 +46,8 @@ class GuacamoleInstructionCodec:
     def feed_text(self, text):
         if text:
             self.buffer += text
+        if len(self.buffer) > self.MAX_BUFFER_SIZE:
+            self.buffer = self.buffer[-self.MAX_BUFFER_SIZE // 2:]
 
         instructions = []
         while True:

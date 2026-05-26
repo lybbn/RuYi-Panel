@@ -318,7 +318,7 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
                     await self.send_message(action='error', message=f"输出读取错误: {str(e)}")
 
                 # 处理错误输出
-                error_output = await process.stderr.read()
+                error_output = await process.stderr.read(2000)
                 if error_output:
                     await self.send_message(action='error', message=error_output.decode().strip())
                 else:

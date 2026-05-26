@@ -17,7 +17,6 @@ natsort
 chardet
 redis
 qqwry-py3
-portalocker
 configobj
 pywin32 ; sys_platform == 'win32'
 PyMySQL
@@ -30,3 +29,8 @@ pycryptodome
 pycryptodomex
 docker
 nvidia-ml-py
+wget
+geoip2
+openai
+tiktoken
+httpx-sse

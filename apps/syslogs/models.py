@@ -15,6 +15,8 @@ class OperationLog(models.Model):
         ("taskmg", "计划任务"),
         ("dockermg", "容器"),
         ("cmdmg", "执行命令"),
+        ("wafmg", "WAF防护"),
+        ("monitormg", "系统监控"),
     )
 
     username = models.CharField(max_length=255, verbose_name="用户名", null=True, blank=True)

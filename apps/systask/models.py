@@ -12,7 +12,7 @@ class CrontabTask(BaseModel):
         (2, "bk_website"),
         (3, "bk_dir"),
         (4, "access_url"),
-        
+        (5, "ai_task"),
     )
     PERIOD_TYPE_CHOICES = (
         (0, ""),
@@ -24,6 +24,7 @@ class CrontabTask(BaseModel):
         (6, "每隔N时"),
         (7, "每隔N分"),
         (8, "每隔N秒"),
+        (9, "一次性"),
     )
     TARGETBK_TYPE_CHOICES = (
         (0, ""),
@@ -32,6 +33,16 @@ class CrontabTask(BaseModel):
 
     DB_TYPE_CHOICES = (
         (0, "mysql"),
+    )
+
+    DELIVER_CHOICES = (
+        ('none', '不投递'),
+        ('all', '所有已启用渠道'),
+        ('email', '邮件'),
+        ('dingtalk', '钉钉'),
+        ('feishu', '飞书'),
+        ('wechat', '企业微信'),
+        ('webhook', 'Webhook'),
     )
 
     job = models.OneToOneField(DjangoJob,db_constraint=False,on_delete=models.DO_NOTHING,verbose_name="关联DjangoJob",null=True,blank=True)
@@ -56,6 +67,14 @@ class CrontabTask(BaseModel):
     db_type = models.SmallIntegerField(choices=DB_TYPE_CHOICES, verbose_name="备份数据库类型", default=0)
     backup_to = models.SmallIntegerField(choices=TARGETBK_TYPE_CHOICES, verbose_name="备份到目标", default=0)
     saveNums = models.IntegerField(default=0,verbose_name="保留份数")
+
+    ai_prompt = models.TextField(verbose_name="AI任务提示词",null=True,blank=True,help_text="AI执行模式的提示词，AI将根据此提示自主完成任务")
+    ai_deliver = models.CharField(max_length=100,verbose_name="结果投递渠道",default='none',help_text="任务执行结果投递到哪个通知渠道，逗号分隔多个渠道")
+    ai_silent = models.BooleanField(default=False,verbose_name="静默模式",help_text="AI返回[SILENT]时不投递通知")
+    ai_context_from = models.CharField(max_length=255,verbose_name="上游任务ID",null=True,blank=True,help_text="从指定任务的最近执行结果获取上下文")
+    ai_timeout = models.IntegerField(default=300,verbose_name="AI执行超时(秒)",help_text="AI Agent执行超时时间，默认300秒")
+    ai_last_result = models.TextField(verbose_name="最近AI执行结果",null=True,blank=True)
+    run_at = models.DateTimeField(verbose_name="一次性执行时间",null=True,blank=True,help_text="period_type=9时指定执行时间")
 
     class Meta:
         db_table = table_prefix + "crontab_task"

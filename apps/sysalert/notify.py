@@ -19,12 +19,29 @@ import json
 import requests
 import smtplib
 import logging
+import time
+import re
 from datetime import datetime, time as dt_time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from django.utils import timezone
 
 logger = logging.getLogger('apscheduler.scheduler')
+
+_wechat_token_cache = {}
+
+
+def _camel_to_snake(name):
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+
+
+def _normalize_config(config_dict):
+    normalized = {}
+    for key, value in config_dict.items():
+        snake_key = _camel_to_snake(key)
+        normalized[snake_key] = value
+    return normalized
 
 
 class AlertNotifier:
@@ -88,7 +105,7 @@ class AlertNotifier:
         
         # 根据渠道类型发送
         channel_type = config.channel_type
-        config_dict = config.get_config()
+        config_dict = _normalize_config(config.get_config())
         
         try:
             if channel_type == 'email':
@@ -118,11 +135,14 @@ class AlertNotifier:
     @staticmethod
     def _send_email(config, title, content):
         """发送邮件"""
-        smtp_server = config.get('smtp_server') or config.get('smtpServer')
-        smtp_port = config.get('smtp_port') or config.get('smtpPort', 465)
+        smtp_server = config.get('smtp_server')
+        smtp_port = config.get('smtp_port', 465)
         sender = config.get('sender')
         password = config.get('password')
         receivers = config.get('receivers', [])
+        
+        if isinstance(receivers, str):
+            receivers = [r.strip() for r in receivers.split(',') if r.strip()]
         
         if not all([smtp_server, sender, password, receivers]):
             return False, "邮件配置不完整"
@@ -168,7 +188,7 @@ class AlertNotifier:
         """发送钉钉机器人消息"""
         webhook = config.get('webhook')
         secret = config.get('secret', '')
-        msg_type = config.get('msg_type') or config.get('msgType', 'text')
+        msg_type = config.get('msg_type', 'text')
         
         if not webhook:
             return False, "Webhook地址不能为空"
@@ -219,7 +239,7 @@ class AlertNotifier:
         """发送飞书机器人消息"""
         webhook = config.get('webhook')
         secret = config.get('secret', '')
-        msg_type = config.get('msg_type') or config.get('msgType', 'text')
+        msg_type = config.get('msg_type', 'text')
         
         if not webhook:
             return False, "Webhook地址不能为空"
@@ -286,35 +306,56 @@ class AlertNotifier:
     @staticmethod
     def _send_wechat(config, title, content):
         """发送企业微信消息"""
-        corp_id = config.get('corp_id') or config.get('corpId')
-        agent_id = config.get('agent_id') or config.get('agentId')
+        corp_id = config.get('corp_id')
+        agent_id = config.get('agent_id')
         secret = config.get('secret')
-        to_user = config.get('to_user') or config.get('toUser', '@all')
+        to_user = config.get('to_user', '@all')
+        msg_type = config.get('msg_type', 'text')
         
         if not all([corp_id, agent_id, secret]):
             return False, "企业微信配置不完整"
         
         try:
-            # 获取access_token
-            token_url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={corp_id}&corpsecret={secret}"
-            token_response = requests.get(token_url, timeout=10)
-            token_result = token_response.json()
+            agent_id = int(agent_id)
             
-            if token_result.get('errcode') != 0:
-                return False, f"获取access_token失败: {token_result.get('errmsg')}"
-            
-            access_token = token_result.get('access_token')
-            
-            # 发送消息
-            send_url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={access_token}"
-            data = {
-                "touser": to_user,
-                "msgtype": "text",
-                "agentid": agent_id,
-                "text": {
-                    "content": f"【如意面板告警】{title}\n{content}\n发送时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            cache_key = f"{corp_id}_{secret}"
+            cached = _wechat_token_cache.get(cache_key)
+            if cached and cached.get('expires_at', 0) > time.time():
+                access_token = cached['token']
+            else:
+                token_url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={corp_id}&corpsecret={secret}"
+                token_response = requests.get(token_url, timeout=10)
+                token_result = token_response.json()
+                
+                if token_result.get('errcode') != 0:
+                    return False, f"获取access_token失败: {token_result.get('errmsg')}"
+                
+                access_token = token_result.get('access_token')
+                _wechat_token_cache[cache_key] = {
+                    'token': access_token,
+                    'expires_at': time.time() + 7000
                 }
-            }
+            
+            send_url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={access_token}"
+            
+            if msg_type == 'markdown':
+                data = {
+                    "touser": to_user,
+                    "msgtype": "markdown",
+                    "agentid": agent_id,
+                    "markdown": {
+                        "content": f"## 如意面板告警通知\n> **告警标题：** {title}\n> **告警内容：** {content}\n> **发送时间：** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    }
+                }
+            else:
+                data = {
+                    "touser": to_user,
+                    "msgtype": "text",
+                    "agentid": agent_id,
+                    "text": {
+                        "content": f"【如意面板告警】{title}\n{content}\n发送时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    }
+                }
             
             response = requests.post(send_url, json=data, timeout=10)
             result = response.json()
@@ -330,37 +371,300 @@ class AlertNotifier:
     def _send_sms(config, title, content):
         """发送短信"""
         provider = config.get('provider')
-        access_key = config.get('access_key') or config.get('accessKey')
-        access_secret = config.get('access_secret') or config.get('accessSecret')
-        sign_name = config.get('sign_name') or config.get('signName')
-        template_code = config.get('template_code') or config.get('templateCode')
+        access_key = config.get('access_key')
+        access_secret = config.get('access_secret')
+        sign_name = config.get('sign_name')
+        template_code = config.get('template_code')
         phones = config.get('phones', [])
+        
+        if isinstance(phones, str):
+            phones = [p.strip() for p in phones.split(',') if p.strip()]
         
         if not all([provider, access_key, access_secret, sign_name, template_code, phones]):
             return False, "短信配置不完整"
         
-        # 这里需要根据具体短信服务商实现
-        # 阿里云、腾讯云、华为云等
         try:
             if provider == 'aliyun':
-                # 阿里云短信实现
-                return AlertNotifier._send_sms_aliyun(config, title, content)
+                return AlertNotifier._send_sms_aliyun(config, title, content, phones)
             elif provider == 'tencent':
-                # 腾讯云短信实现
-                return False, "腾讯云短信暂未实现"
+                return AlertNotifier._send_sms_tencent(config, title, content, phones)
             elif provider == 'huawei':
-                # 华为云短信实现
-                return False, "华为云短信暂未实现"
+                return AlertNotifier._send_sms_huawei(config, title, content, phones)
             else:
                 return False, f"未知的短信服务商: {provider}"
         except Exception as e:
             return False, f"短信发送失败: {str(e)}"
     
     @staticmethod
-    def _send_sms_aliyun(config, title, content):
+    def _send_sms_aliyun(config, title, content, phones):
         """发送阿里云短信"""
-        # 简化实现，实际需要接入阿里云SDK
-        return True, "短信发送成功（模拟）"
+        import hmac
+        import hashlib
+        import base64
+        import uuid
+        
+        access_key_id = config.get('access_key')
+        access_key_secret = config.get('access_secret')
+        sign_name = config.get('sign_name')
+        template_code = config.get('template_code')
+        
+        api_url = 'https://dysmsapi.aliyuncs.com/'
+        
+        template_param = json.dumps({
+            'title': title,
+            'content': content[:80],
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }, ensure_ascii=False)
+        
+        success_count = 0
+        fail_count = 0
+        errors = []
+        
+        for phone in phones:
+            try:
+                params = {
+                    'PhoneNumbers': phone,
+                    'SignName': sign_name,
+                    'TemplateCode': template_code,
+                    'TemplateParam': template_param,
+                    'Action': 'SendSms',
+                    'Version': '2017-05-25',
+                    'Format': 'JSON',
+                    'AccessKeyId': access_key_id,
+                    'SignatureMethod': 'HMAC-SHA1',
+                    'SignatureVersion': '1.0',
+                    'SignatureNonce': str(uuid.uuid4()),
+                    'Timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    'RegionId': 'cn-hangzhou',
+                }
+                
+                sorted_params = sorted(params.items())
+                query_string = '&'.join([
+                    f'{AlertNotifier._aliyun_percent_encode(k)}={AlertNotifier._aliyun_percent_encode(v)}'
+                    for k, v in sorted_params
+                ])
+                
+                string_to_sign = 'GET&%2F&' + AlertNotifier._aliyun_percent_encode(query_string)
+                
+                sign = base64.b64encode(
+                    hmac.new(
+                        (access_key_secret + '&').encode('utf-8'),
+                        string_to_sign.encode('utf-8'),
+                        digestmod=hashlib.sha1
+                    ).digest()
+                ).decode('utf-8')
+                
+                params['Signature'] = sign
+                
+                response = requests.get(api_url, params=params, timeout=10)
+                result = response.json()
+                
+                if result.get('Code') == 'OK':
+                    success_count += 1
+                else:
+                    fail_count += 1
+                    errors.append(f"{phone}: {result.get('Message', '未知错误')}")
+            except Exception as e:
+                fail_count += 1
+                errors.append(f"{phone}: {str(e)}")
+        
+        if success_count > 0 and fail_count == 0:
+            return True, f"阿里云短信发送成功({success_count}条)"
+        elif success_count > 0:
+            return True, f"阿里云短信部分成功({success_count}条)，失败: {'; '.join(errors)}"
+        else:
+            return False, f"阿里云短信发送失败: {'; '.join(errors)}"
+    
+    @staticmethod
+    def _aliyun_percent_encode(s):
+        import urllib.parse
+        if not isinstance(s, str):
+            s = str(s)
+        encoded = urllib.parse.quote(s, safe='')
+        return encoded.replace('+', '%20').replace('*', '%2A').replace('%7E', '~')
+    
+    @staticmethod
+    def _send_sms_tencent(config, title, content, phones):
+        """发送腾讯云短信"""
+        import hashlib
+        import hmac
+        import time
+        
+        secret_id = config.get('access_key')
+        secret_key = config.get('access_secret')
+        sign_name = config.get('sign_name')
+        template_code = config.get('template_code')
+        sdk_app_id = config.get('sdk_app_id', '')
+        
+        if not sdk_app_id:
+            return False, "腾讯云短信缺少SdkAppId配置"
+        
+        host = 'sms.tencentcloudapi.com'
+        service = 'sms'
+        action = 'SendSms'
+        version = '2021-01-11'
+        region = 'ap-guangzhou'
+        
+        template_param_set = [title, content[:80], datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+        
+        success_count = 0
+        fail_count = 0
+        errors = []
+        
+        for phone in phones:
+            try:
+                if not phone.startswith('+'):
+                    phone = '+86' + phone
+                
+                timestamp = int(time.time())
+                date_stamp = datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime('%Y-%m-%d')
+                
+                payload = json.dumps({
+                    'PhoneNumberSet': [phone],
+                    'SmsSdkAppId': sdk_app_id,
+                    'SignName': sign_name,
+                    'TemplateId': template_code,
+                    'TemplateParamSet': template_param_set,
+                })
+                
+                http_request_method = 'POST'
+                canonical_uri = '/'
+                canonical_querystring = ''
+                content_type = 'application/json; charset=utf-8'
+                canonical_headers = f'content-type:{content_type}\nhost:{host}\nx-tc-action:{action.lower()}\n'
+                signed_headers = 'content-type;host;x-tc-action'
+                hashed_payload = hashlib.sha256(payload.encode('utf-8')).hexdigest()
+                canonical_request = f'{http_request_method}\n{canonical_uri}\n{canonical_querystring}\n{canonical_headers}\n{signed_headers}\n{hashed_payload}'
+                
+                algorithm = 'TC3-HMAC-SHA256'
+                credential_scope = f'{date_stamp}/{service}/tc3_request'
+                hashed_canonical_request = hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()
+                string_to_sign = f'{algorithm}\n{timestamp}\n{credential_scope}\n{hashed_canonical_request}'
+                
+                secret_date = hmac.new(f'TC3{secret_key}'.encode('utf-8'), date_stamp.encode('utf-8'), hashlib.sha256).digest()
+                secret_service = hmac.new(secret_date, service.encode('utf-8'), hashlib.sha256).digest()
+                secret_signing = hmac.new(secret_service, 'tc3_request'.encode('utf-8'), hashlib.sha256).digest()
+                signature = hmac.new(secret_signing, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
+                
+                authorization = f'{algorithm} Credential={secret_id}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}'
+                
+                headers = {
+                    'Authorization': authorization,
+                    'Content-Type': content_type,
+                    'Host': host,
+                    'X-TC-Action': action,
+                    'X-TC-Timestamp': str(timestamp),
+                    'X-TC-Version': version,
+                    'X-TC-Region': region,
+                }
+                
+                response = requests.post(f'https://{host}', headers=headers, data=payload, timeout=10)
+                result = response.json()
+                
+                response_status = result.get('Response', {})
+                send_status_set = response_status.get('SendStatusSet', [])
+                
+                if send_status_set and send_status_set[0].get('Code') == 'Ok':
+                    success_count += 1
+                else:
+                    fail_count += 1
+                    err_msg = send_status_set[0].get('Message', response_status.get('Error', {}).get('Message', '未知错误')) if send_status_set else response_status.get('Error', {}).get('Message', '未知错误')
+                    errors.append(f"{phone}: {err_msg}")
+            except Exception as e:
+                fail_count += 1
+                errors.append(f"{phone}: {str(e)}")
+        
+        if success_count > 0 and fail_count == 0:
+            return True, f"腾讯云短信发送成功({success_count}条)"
+        elif success_count > 0:
+            return True, f"腾讯云短信部分成功({success_count}条)，失败: {'; '.join(errors)}"
+        else:
+            return False, f"腾讯云短信发送失败: {'; '.join(errors)}"
+    
+    @staticmethod
+    def _send_sms_huawei(config, title, content, phones):
+        """发送华为云短信"""
+        import hashlib
+        import hmac
+        import base64
+        import time
+        
+        app_key = config.get('access_key')
+        app_secret = config.get('access_secret')
+        sign_name = config.get('sign_name')
+        template_code = config.get('template_code')
+        sender = config.get('sender', '88230102099')
+        
+        api_url = config.get('api_url', 'https://smsapi.cn-north-4.myhuaweicloud.com:443/sms/batchSendSms/v1')
+        
+        template_var_values = json.dumps([title, content[:80], datetime.now().strftime('%Y-%m-%d %H:%M:%S')], ensure_ascii=False)
+        
+        success_count = 0
+        fail_count = 0
+        errors = []
+        
+        for phone in phones:
+            try:
+                if not phone.startswith('+'):
+                    phone = '+86' + phone
+                
+                wsse_header = AlertNotifier._build_huawei_wsse_header(app_key, app_secret)
+                
+                body_data = {
+                    'from': sender,
+                    'to': phone,
+                    'templateId': template_code,
+                    'templateParas': template_var_values,
+                    'signature': sign_name,
+                }
+                
+                headers = {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Authorization': 'WSSE realm="SDP",profile="UsernameToken",type="Appkey"',
+                    'X-WSSE': wsse_header,
+                }
+                
+                response = requests.post(api_url, data=body_data, headers=headers, timeout=10)
+                result = response.json()
+                
+                code = result.get('code', '')
+                if code == '000000':
+                    success_count += 1
+                else:
+                    fail_count += 1
+                    errors.append(f"{phone}: {result.get('description', code)}")
+            except Exception as e:
+                fail_count += 1
+                errors.append(f"{phone}: {str(e)}")
+        
+        if success_count > 0 and fail_count == 0:
+            return True, f"华为云短信发送成功({success_count}条)"
+        elif success_count > 0:
+            return True, f"华为云短信部分成功({success_count}条)，失败: {'; '.join(errors)}"
+        else:
+            return False, f"华为云短信发送失败: {'; '.join(errors)}"
+    
+    @staticmethod
+    def _build_huawei_wsse_header(app_key, app_secret):
+        import hashlib
+        import hmac
+        import base64
+        import time
+        import uuid
+        
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        nonce = str(uuid.uuid4())
+        
+        digest = hashlib.sha256((nonce + now).encode('utf-8')).digest()
+        password_digest = base64.b64encode(digest).decode('utf-8')
+        
+        wsse = (
+            f'UsernameToken Username="{app_key}",'
+            f'PasswordDigest="{password_digest}",'
+            f'Nonce="{nonce}",'
+            f'Created="{now}"'
+        )
+        return wsse
     
     @staticmethod
     def _send_webhook(config, title, content):
@@ -368,7 +672,7 @@ class AlertNotifier:
         url = config.get('url')
         method = config.get('method', 'POST')
         headers = config.get('headers', '{}')
-        body_template = config.get('body_template') or config.get('bodyTemplate', '')
+        body_template = config.get('body_template', '')
         
         if not url:
             return False, "Webhook URL不能为空"
@@ -403,10 +707,10 @@ class AlertNotifier:
             else:
                 response = requests.post(url, json=data, headers=headers_dict, timeout=10)
             
-            if response.status_code == 200:
+            if 200 <= response.status_code < 300:
                 return True, f"Webhook发送成功: {response.text[:200]}"
             else:
-                return False, f"Webhook发送失败: HTTP {response.status_code}"
+                return False, f"Webhook发送失败: HTTP {response.status_code} - {response.text[:200]}"
         except Exception as e:
             return False, f"Webhook发送失败: {str(e)}"
 
@@ -416,7 +720,7 @@ def send_alert(task, content):
     发送告警通知（入口函数）
     :param task: AlertTask 实例
     :param content: 告警内容
-    :return: list of (success, response)
+    :return: list of (success, response, channel_name, channel_type)
     """
     from .models import AlertNotifyConfig
     
@@ -424,12 +728,21 @@ def send_alert(task, content):
     channel_ids = task.get_channel_ids()
     
     if not channel_ids:
-        return [(False, "未配置通知渠道")]
+        return [(False, "未配置通知渠道", "", "")]
     
-    configs = AlertNotifyConfig.objects.filter(id__in=channel_ids, is_enabled=True)
+    configs = AlertNotifyConfig.objects.filter(id__in=channel_ids)
+    enabled_ids = set()
     
     for config in configs:
+        if not config.is_enabled:
+            results.append((False, f"渠道 [{config.name}] 已禁用，已跳过", config.name, config.channel_type))
+            continue
+        enabled_ids.add(config.id)
         success, response = AlertNotifier.send(config, task.name, content)
-        results.append((success, response))
+        results.append((success, response, config.name, config.channel_type))
+    
+    skipped_ids = set(channel_ids) - enabled_ids - {c.id for c in configs}
+    for sid in skipped_ids:
+        results.append((False, f"渠道ID [{sid}] 不存在，已跳过", str(sid), ""))
     
     return results

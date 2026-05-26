@@ -61,7 +61,10 @@ def get_all_network_info(pid_filter=None,name_filter=None,port_filter=None):
         
         # 获取进程信息
         pid = conn.pid
-        pname = psutil.Process(pid).name() if pid else ""
+        try:
+            pname = psutil.Process(pid).name() if pid else ""
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pname = ""
         simplified_proto = "TCP" if conn.type == socket.SOCK_STREAM else "UDP"
         # 过滤条件
         if pid_filter and str(pid) != str(pid_filter):
@@ -141,7 +144,7 @@ class RYSysNetworkOperateView(CustomAPIView):
         pid = reqData.get("pid","")
         if not pid:return ErrorResponse(msg="参数错误")
         if str(pid) == '1':return ErrorResponse(msg="无法终止初始进程")
-        pid == int(pid)
+        pid = int(pid)
         if action == "kill":
             isok,msg = kill_process(pid)
             if isok:

@@ -27,15 +27,15 @@ def get_default_crontab_tasks():
     plat = platform.system().lower()
     
     if plat == 'windows':
-        shell_body1 = f"cd {root_path}\npython manage.py checkSitesEnd"
-        shell_body2 = f"cd {root_path}\npython manage.py renewSSL"
-        shell_body3 = f"cd {root_path}\npython manage.py cleanMonitor"
-        shell_body4 = f"cd {root_path}\npython manage.py cleanWafLogs"
+        shell_body1 = f'cd /d "{root_path}"\npython manage.py checkSitesEnd'
+        shell_body2 = f'cd /d "{root_path}"\npython manage.py renewSSL'
+        shell_body3 = f'cd /d "{root_path}"\npython manage.py cleanMonitor'
+        shell_body4 = f'cd /d "{root_path}"\npython manage.py cleanWafLogs'
     else:
-        shell_body1 = f"cd {root_path}\n/usr/local/ruyi/python/bin/python3 manage.py checkSitesEnd"
-        shell_body2 = f"cd {root_path}\n/usr/local/ruyi/python/bin/python3 manage.py renewSSL"
-        shell_body3 = f"cd {root_path}\n/usr/local/ruyi/python/bin/python3 manage.py cleanMonitor"
-        shell_body4 = f"cd {root_path}\n/usr/local/ruyi/python/bin/python3 manage.py cleanWafLogs"
+        shell_body1 = f'cd "{root_path}" && /usr/local/ruyi/python/bin/python3 manage.py checkSitesEnd'
+        shell_body2 = f'cd "{root_path}" && /usr/local/ruyi/python/bin/python3 manage.py renewSSL'
+        shell_body3 = f'cd "{root_path}" && /usr/local/ruyi/python/bin/python3 manage.py cleanMonitor'
+        shell_body4 = f'cd "{root_path}" && /usr/local/ruyi/python/bin/python3 manage.py cleanWafLogs'
     
     return [
         {
@@ -144,6 +144,10 @@ def init_crontab_tasks(force=False):
             id=task_id,
             defaults=task_data
         )
+        
+        if not created and obj.shell_body != shell_body:
+            obj.shell_body = shell_body
+            obj.save(update_fields=['shell_body'])
         
         if created or force:
             # 注册定时任务到调度器

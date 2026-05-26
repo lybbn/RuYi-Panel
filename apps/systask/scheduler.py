@@ -22,8 +22,8 @@ from apscheduler.executors.pool import ProcessPoolExecutor, ThreadPoolExecutor
 
 class Scheduler:
     
-    TASK_THREAD_EXECUTOR_MAX_WORKERS = 10
-    TASK_PROCESS_EXECUTOR_MAX_WORKERS = 10
+    TASK_THREAD_EXECUTOR_MAX_WORKERS = 5
+    TASK_PROCESS_EXECUTOR_MAX_WORKERS = 2
     TASK_THREAD_STATUS = True
     TASK_PROCESS_STATUS = True
     

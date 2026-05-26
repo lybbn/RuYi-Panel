@@ -32,6 +32,7 @@ from apps.sysmonitor.models import (
     MonitorConfig, MonitorCpu, MonitorMemory, MonitorDiskIO,
     MonitorNetwork, MonitorLoad
 )
+from apps.syslogs.logutil import RuyiAddOpLog
 
 plat = platform.system().lower()
 
@@ -142,6 +143,7 @@ class MonitorConfigView(CustomAPIView):
             logger = logging.getLogger('sysmonitor')
             logger.error(f"更新监控任务失败: {e}")
         
+        RuyiAddOpLog(request, msg="【系统监控】-【保存监控配置】", module="monitormg")
         return SuccessResponse(msg="保存成功")
     
     def _format_bytes(self, size):
@@ -180,6 +182,7 @@ class MonitorClearLogsView(CustomAPIView):
         except Exception as e:
             print(f"执行 VACUUM 失败: {e}")
         
+        RuyiAddOpLog(request, msg="【系统监控】-【清空监控日志】", module="monitormg")
         return SuccessResponse(msg="日志已清空")
 
 
@@ -370,6 +373,7 @@ class MonitorCollectDataView(CustomAPIView):
     def post(self, request):
         """手动触发数据采集"""
         MonitorDataCollector.collect_all()
+        RuyiAddOpLog(request, msg="【系统监控】-【手动触发数据采集】", module="monitormg")
         return SuccessResponse(msg="数据采集完成")
 
 
@@ -377,6 +381,7 @@ class MonitorDataCollector:
     """
     监控数据采集器（供定时任务调用）
     """
+    _last_clean_time = None
     
     @classmethod
     def collect_all(cls):
@@ -394,6 +399,8 @@ class MonitorDataCollector:
         
         if plat != 'windows':
             cls._collect_load(now)
+        
+        cls._auto_clean(config, now)
         
         return True
     
@@ -477,11 +484,9 @@ class MonitorDataCollector:
         参考宝塔面板：使用差值计算获取每秒速率
         """
         try:
-            # 获取采集间隔（默认60秒）
             config = MonitorConfig.objects.first()
             interval = config.collect_interval if config else 60
             
-            # 获取磁盘过滤配置
             disk_filter = []
             if config and config.disk_devices:
                 try:
@@ -589,11 +594,9 @@ class MonitorDataCollector:
         参考宝塔面板：使用差值计算获取每秒速率，支持多网卡
         """
         try:
-            # 获取采集间隔（默认60秒）
             config = MonitorConfig.objects.first()
             interval = config.collect_interval if config else 60
             
-            # 获取网口过滤配置
             interface_filter = []
             if config and config.network_interfaces:
                 try:
@@ -732,33 +735,19 @@ class MonitorDataCollector:
     
     @classmethod
     def _get_top_processes(cls, sort_by='cpu', limit=5):
-        """获取占用资源最高的进程（优化版，减少系统调用）"""
+        """获取占用资源最高的进程（参考宝塔：直接读/proc减少对象创建）"""
         processes = []
         try:
-            # 只获取必要的属性，减少系统调用
-            attrs = ['pid', 'name', 'cpu_percent', 'memory_percent', 'memory_info', 'username']
-            
-            for proc in psutil.process_iter(attrs):
+            my_pid = os.getpid()
+            for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'memory_info', 'username']):
                 try:
                     pinfo = proc.info
-                    # 跳过无效进程
-                    if pinfo['pid'] == 0:
+                    if pinfo['pid'] == 0 or pinfo['pid'] == my_pid:
                         continue
-                        
+                    
                     memory_rss = 0
                     if pinfo.get('memory_info'):
                         memory_rss = pinfo['memory_info'].rss / 1024 / 1024
-                    
-                    # 磁盘IO只在需要时获取
-                    disk_read = 0
-                    disk_write = 0
-                    if sort_by == 'disk':
-                        try:
-                            io_counters = proc.io_counters()
-                            disk_read = io_counters.read_bytes
-                            disk_write = io_counters.write_bytes
-                        except:
-                            pass
                     
                     processes.append({
                         'pid': pinfo['pid'],
@@ -767,23 +756,31 @@ class MonitorDataCollector:
                         'memory_percent': pinfo['memory_percent'] or 0,
                         'memory_rss': round(memory_rss, 2),
                         'username': pinfo['username'] or '',
-                        'disk_read': disk_read,
-                        'disk_write': disk_write
                     })
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
             
-            # 排序
             if sort_by == 'cpu':
                 processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
             elif sort_by == 'memory':
                 processes.sort(key=lambda x: x['memory_rss'], reverse=True)
-            elif sort_by == 'disk':
-                processes.sort(key=lambda x: x['disk_read'] + x['disk_write'], reverse=True)
             
-            return processes[:limit]
+            return [p for p in processes[:limit] if p['cpu_percent'] > 0 or p['memory_rss'] > 0]
         except Exception:
             return []
+    
+    @classmethod
+    def _auto_clean(cls, config, now):
+        """自动清理过期数据（参考宝塔：每小时检查一次，每周VACUUM一次）"""
+        try:
+            if cls._last_clean_time and (now - cls._last_clean_time).total_seconds() < 3600:
+                return
+            cls._last_clean_time = now
+            
+            days = config.log_save_days if config else 30
+            cls.clean_old_data(days)
+        except Exception as e:
+            print(f"自动清理监控数据失败: {e}")
     
     @classmethod
     def clean_old_data(cls, days):
@@ -796,13 +793,23 @@ class MonitorDataCollector:
             MonitorNetwork.objects.filter(record_time__lt=expire_time).delete()
             MonitorLoad.objects.filter(record_time__lt=expire_time).delete()
             
-            # 尝试执行 VACUUM 释放空间 (仅限 SQLite)
             try:
                 db_config = settings.DATABASES.get('monitor')
                 if db_config and db_config['ENGINE'] == 'django.db.backends.sqlite3':
-                    from django.db import connections
-                    with connections['monitor'].cursor() as cursor:
-                        cursor.execute("VACUUM")
+                    vacuum_file = os.path.join(settings.BASE_DIR, 'data', 'db', 'monitor_vacuum.ry')
+                    do_vacuum = False
+                    if not os.path.exists(vacuum_file):
+                        with open(vacuum_file, 'w') as f:
+                            f.write(str(int(time.time())))
+                        do_vacuum = True
+                    elif os.path.getmtime(vacuum_file) < time.time() - 86400 * 7:
+                        with open(vacuum_file, 'w') as f:
+                            f.write(str(int(time.time())))
+                        do_vacuum = True
+                    if do_vacuum:
+                        from django.db import connections
+                        with connections['monitor'].cursor() as cursor:
+                            cursor.execute("VACUUM")
             except Exception as e:
                 print(f"执行 VACUUM 失败: {e}")
                 

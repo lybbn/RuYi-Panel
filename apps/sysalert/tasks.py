@@ -20,6 +20,7 @@ import re
 import os
 from datetime import datetime, timedelta
 from django.utils import timezone
+from django.db.models import Avg as DjangoAvg, Q
 from apps.systask.scheduler import scheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -165,6 +166,10 @@ def check_resource_alert():
                     _check_memory_alert(task, threshold, duration)
                 elif task.task_type == 'disk_usage':
                     _check_disk_alert(task, threshold)
+                elif task.task_type == 'disk_io':
+                    _check_disk_io_alert(task, threshold)
+                elif task.task_type == 'network_io':
+                    _check_network_io_alert(task, threshold)
                 elif task.task_type == 'load_avg':
                     _check_load_alert(task, threshold)
                     
@@ -178,21 +183,24 @@ def check_resource_alert():
 def _check_cpu_alert(task, threshold, duration):
     """检查CPU告警"""
     from apps.sysmonitor.models import MonitorCpu
-    from .notify import send_alert
     
-    # 获取最近N分钟的数据
     time_threshold = timezone.now() - timedelta(minutes=duration)
     records = MonitorCpu.objects.filter(record_time__gte=time_threshold).order_by('-record_time')
     
     if not records.exists():
         return
     
-    # 检查是否持续超过阈值
     over_threshold_count = records.filter(usage_percent__gt=threshold).count()
-    if over_threshold_count >= records.count() * 0.8:  # 80%的时间超过阈值
-        avg_usage = records.aggregate(avg=models.Avg('usage_percent'))['avg']
+    is_over = over_threshold_count >= records.count() * 0.8
+    
+    if is_over:
+        avg_usage = records.aggregate(avg=DjangoAvg('usage_percent'))['avg']
         content = f"CPU使用率持续超过{threshold}%，当前平均使用率：{avg_usage:.1f}%"
         _trigger_alert(task, content)
+    elif task.is_alerting:
+        avg_usage = records.aggregate(avg=DjangoAvg('usage_percent'))['avg']
+        content = f"CPU使用率已恢复正常，当前平均使用率：{avg_usage:.1f}%"
+        _trigger_recovery(task, content)
 
 
 def _check_memory_alert(task, threshold, duration):
@@ -206,10 +214,16 @@ def _check_memory_alert(task, threshold, duration):
         return
     
     over_threshold_count = records.filter(usage_percent__gt=threshold).count()
-    if over_threshold_count >= records.count() * 0.8:
-        avg_usage = records.aggregate(avg=models.Avg('usage_percent'))['avg']
+    is_over = over_threshold_count >= records.count() * 0.8
+    
+    if is_over:
+        avg_usage = records.aggregate(avg=DjangoAvg('usage_percent'))['avg']
         content = f"内存使用率持续超过{threshold}%，当前平均使用率：{avg_usage:.1f}%"
         _trigger_alert(task, content)
+    elif task.is_alerting:
+        avg_usage = records.aggregate(avg=DjangoAvg('usage_percent'))['avg']
+        content = f"内存使用率已恢复正常，当前平均使用率：{avg_usage:.1f}%"
+        _trigger_recovery(task, content)
 
 
 def _check_disk_alert(task, threshold):
@@ -218,12 +232,21 @@ def _check_disk_alert(task, threshold):
     
     try:
         disk_info = system.GetDiskInfo()
+        has_over = False
+        over_disks = []
         for disk in disk_info:
             usage_percent = disk.get('usage_percent', 0)
             if usage_percent > threshold:
+                has_over = True
                 path = disk.get('path', '/')
-                content = f"磁盘 {path} 使用率超过{threshold}%，当前使用率：{usage_percent}%"
-                _trigger_alert(task, content)
+                over_disks.append(f"{path}({usage_percent}%)")
+        
+        if has_over:
+            content = f"以下磁盘使用率超过{threshold}%：{', '.join(over_disks)}"
+            _trigger_alert(task, content)
+        elif task.is_alerting:
+            content = f"磁盘使用率已恢复正常，所有磁盘使用率均低于{threshold}%"
+            _trigger_recovery(task, content)
     except Exception as e:
         logger.error(f"检查磁盘告警失败: {e}")
 
@@ -233,15 +256,69 @@ def _check_load_alert(task, threshold):
     import psutil
     
     try:
-        load_avg = psutil.getloadavg()[0]  # 1分钟平均负载
+        load_avg = psutil.getloadavg()[0]
         cpu_count = psutil.cpu_count()
+        load_threshold = cpu_count * (threshold / 100)
+        is_over = load_avg > load_threshold
         
-        # 负载超过CPU核心数 * 阈值比例
-        if load_avg > cpu_count * (threshold / 100):
+        if is_over:
             content = f"系统负载过高，当前负载：{load_avg:.2f}，CPU核心数：{cpu_count}"
             _trigger_alert(task, content)
+        elif task.is_alerting:
+            content = f"系统负载已恢复正常，当前负载：{load_avg:.2f}，CPU核心数：{cpu_count}"
+            _trigger_recovery(task, content)
     except Exception as e:
         logger.error(f"检查负载告警失败: {e}")
+
+
+def _check_disk_io_alert(task, threshold):
+    """检查磁盘IO告警（使用MonitorDiskIO速率数据）"""
+    from apps.sysmonitor.models import MonitorDiskIO
+    
+    try:
+        time_threshold = timezone.now() - timedelta(minutes=5)
+        records = MonitorDiskIO.objects.filter(record_time__gte=time_threshold).order_by('-record_time')
+        
+        if not records.exists():
+            return
+        
+        avg_read = records.aggregate(avg=DjangoAvg('read_bytes'))['avg'] or 0
+        avg_write = records.aggregate(avg=DjangoAvg('write_bytes'))['avg'] or 0
+        avg_total_mbps = (avg_read + avg_write) / (1024 * 1024)
+        
+        if avg_total_mbps > threshold:
+            content = f"磁盘IO过高，最近5分钟平均读写速率：{avg_total_mbps:.1f}MB/s，阈值：{threshold}MB/s"
+            _trigger_alert(task, content)
+        elif task.is_alerting:
+            content = f"磁盘IO已恢复正常，当前平均读写速率：{avg_total_mbps:.1f}MB/s"
+            _trigger_recovery(task, content)
+    except Exception as e:
+        logger.error(f"检查磁盘IO告警失败: {e}")
+
+
+def _check_network_io_alert(task, threshold):
+    """检查网络流量告警（使用MonitorNetwork速率数据）"""
+    from apps.sysmonitor.models import MonitorNetwork
+    
+    try:
+        time_threshold = timezone.now() - timedelta(minutes=5)
+        records = MonitorNetwork.objects.filter(record_time__gte=time_threshold).order_by('-record_time')
+        
+        if not records.exists():
+            return
+        
+        avg_up = records.aggregate(avg=DjangoAvg('up_bytes'))['avg'] or 0
+        avg_down = records.aggregate(avg=DjangoAvg('down_bytes'))['avg'] or 0
+        avg_total_mbps = (avg_up + avg_down) / (1024 * 1024)
+        
+        if avg_total_mbps > threshold:
+            content = f"网络流量过高，最近5分钟平均速率：{avg_total_mbps:.1f}MB/s，阈值：{threshold}MB/s"
+            _trigger_alert(task, content)
+        elif task.is_alerting:
+            content = f"网络流量已恢复正常，当前平均速率：{avg_total_mbps:.1f}MB/s"
+            _trigger_recovery(task, content)
+    except Exception as e:
+        logger.error(f"检查网络流量告警失败: {e}")
 
 
 def check_ssl_expire():
@@ -380,7 +457,6 @@ def check_ssh_security():
 def _check_ssh_fail(task, threshold):
     """检查SSH登录失败"""
     try:
-        # 分析 /var/log/secure 或 /var/log/auth.log
         log_files = ['/var/log/secure', '/var/log/auth.log']
         log_file = None
         
@@ -392,28 +468,87 @@ def _check_ssh_fail(task, threshold):
         if not log_file:
             return
         
-        # 读取最近5分钟的日志
         time_threshold = datetime.now() - timedelta(minutes=5)
         fail_count = 0
         
         with open(log_file, 'r') as f:
             for line in f:
                 if 'Failed password' in line or 'authentication failure' in line:
-                    fail_count += 1
+                    line_time = _parse_syslog_time(line)
+                    if line_time and line_time >= time_threshold:
+                        fail_count += 1
+                    elif not line_time:
+                        fail_count += 1
         
         if fail_count >= threshold:
             content = f"检测到SSH登录失败 {fail_count} 次，可能存在暴力破解"
             _trigger_alert(task, content)
+        elif task.is_alerting:
+            content = f"SSH登录失败次数已恢复正常，最近5分钟失败 {fail_count} 次"
+            _trigger_recovery(task, content)
             
     except Exception as e:
         logger.error(f"检查SSH登录失败失败: {e}")
 
 
+def _parse_syslog_time(line):
+    """解析syslog行的时间戳"""
+    try:
+        current_year = datetime.now().year
+        if re.match(r'^\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}', line):
+            time_str = line[:15]
+            return datetime.strptime(f"{current_year} {time_str}", "%Y %b %d %H:%M:%S")
+        elif re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}', line):
+            time_str = line[:19]
+            return datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        pass
+    return None
+
+
 def _check_ssh_new_ip(task):
     """检查SSH新IP登录"""
-    # 需要维护已知的IP白名单，检测到新IP时告警
-    # 简化实现，实际需要记录历史登录IP
-    pass
+    try:
+        from .models import AlertNotifyConfig
+        
+        config = task.get_config()
+        known_ips = config.get('known_ips', [])
+        
+        log_files = ['/var/log/secure', '/var/log/auth.log']
+        log_file = None
+        
+        for f in log_files:
+            if os.path.exists(f):
+                log_file = f
+                break
+        
+        if not log_file:
+            return
+        
+        time_threshold = datetime.now() - timedelta(minutes=5)
+        new_ips = set()
+        
+        with open(log_file, 'r') as f:
+            for line in f:
+                if 'Accepted password' in line or 'Accepted publickey' in line:
+                    line_time = _parse_syslog_time(line)
+                    if line_time and line_time < time_threshold:
+                        continue
+                    
+                    ip_match = re.search(r'from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', line)
+                    if ip_match:
+                        ip = ip_match.group(1)
+                        if known_ips and ip not in known_ips:
+                            new_ips.add(ip)
+        
+        if new_ips:
+            content = f"检测到新IP通过SSH登录：{', '.join(new_ips)}，请确认是否为授权访问"
+            _trigger_alert(task, content)
+        elif task.is_alerting:
+            content = "SSH新IP登录告警已解除，最近5分钟无异常IP登录"
+            _trigger_recovery(task, content)
+    except Exception as e:
+        logger.error(f"检查SSH新IP登录失败: {e}")
 
 
 def check_panel_login():
@@ -429,17 +564,19 @@ def check_panel_login():
                 config = task.get_config()
                 threshold = config.get('threshold', 5)
                 
-                # 查询最近5分钟的登录失败记录
                 time_threshold = timezone.now() - timedelta(minutes=5)
                 fail_count = OperationLog.objects.filter(
                     create_at__gte=time_threshold,
                     module='login',
-                    # 需要添加失败标记字段
+                    status__in=['fail', 'failed', 0, False],
                 ).count()
                 
                 if fail_count >= threshold:
                     content = f"面板登录失败 {fail_count} 次，请检查是否存在暴力破解"
                     _trigger_alert(task, content)
+                elif task.is_alerting:
+                    content = f"面板登录失败次数已恢复正常，最近5分钟失败 {fail_count} 次"
+                    _trigger_recovery(task, content)
                     
             except Exception as e:
                 logger.error(f"检查面板登录告警任务失败 [{task.name}]: {e}")
@@ -448,7 +585,7 @@ def check_panel_login():
         logger.error(f"面板登录检测失败: {e}")
 
 
-def check_cron_fail(task_id, error_msg):
+def check_cron_fail(error_msg):
     """检查定时任务失败（由任务系统调用）"""
     try:
         from .models import AlertTask
@@ -479,27 +616,75 @@ def _trigger_alert(task, content):
             if timezone.now() < silence_end:
                 return  # 在静默期内，不发送
         
+        # 检查任务级别每日推送上限
+        today = timezone.now().date()
+        today_count = AlertLog.objects.filter(task=task, create_at__date=today, status=0).count()
+        if task.push_count > 0 and today_count >= task.push_count:
+            return  # 已达到今日推送上限
+        
         # 发送通知
         results = send_alert(task, content)
         
-        # 记录日志
-        for success, response in results:
+        # 记录日志（每条日志对应一个实际发送渠道）
+        for success, response, channel_name, channel_type in results:
             AlertLog.objects.create(
                 task=task,
                 content=content,
-                channels=task.channels,
+                channels=channel_name or task.channels,
+                channel_type=channel_type,
                 status=0 if success else 1,
                 response=response[:500] if response else None
             )
         
         # 更新最后触发时间
         task.last_trigger = timezone.now()
-        task.save(update_fields=['last_trigger'])
+        task.is_alerting = True
+        task.save(update_fields=['last_trigger', 'is_alerting'])
         
         logger.info(f"告警触发 [{task.name}]: {content}")
         
     except Exception as e:
         logger.error(f"触发告警失败 [{task.name}]: {e}")
+
+
+def _trigger_recovery(task, content):
+    """
+    触发告警恢复通知
+    :param task: AlertTask 实例
+    :param content: 恢复内容
+    """
+    from .models import AlertLog
+    from .notify import send_alert
+    
+    try:
+        today = timezone.now().date()
+        today_count = AlertLog.objects.filter(task=task, create_at__date=today, status=0).count()
+        if task.push_count > 0 and today_count >= task.push_count:
+            logger.info(f"告警恢复 [{task.name}]: 已达今日推送上限，跳过恢复通知")
+            task.is_alerting = False
+            task.save(update_fields=['is_alerting'])
+            return
+        
+        results = send_alert(task, content)
+        
+        for success, response, channel_name, channel_type in results:
+            AlertLog.objects.create(
+                task=task,
+                content=content,
+                channels=channel_name or task.channels,
+                channel_type=channel_type,
+                status=0 if success else 1,
+                response=response[:500] if response else None
+            )
+        
+        task.is_alerting = False
+        task.last_trigger = timezone.now()
+        task.save(update_fields=['is_alerting', 'last_trigger'])
+        
+        logger.info(f"告警恢复 [{task.name}]: {content}")
+        
+    except Exception as e:
+        logger.error(f"触发恢复通知失败 [{task.name}]: {e}")
 
 
 def register_website_check_task(task_id, interval_seconds):
@@ -552,6 +737,11 @@ def check_single_website(task_id):
         config = task.get_config()
         urls = config.get('urls', [])
         timeout = config.get('timeout', 10)
+        slow_threshold = config.get('slow_threshold', 5)
+        
+        has_alert = False
+        alert_contents = []
+        recovery_contents = []
         
         for url in urls:
             try:
@@ -559,26 +749,33 @@ def check_single_website(task_id):
                 response = requests.get(url, timeout=timeout, allow_redirects=True)
                 response_time = (datetime.now() - start_time).total_seconds()
                 
-                # 检查宕机
                 if task.task_type == 'site_down':
                     if response.status_code >= 400:
-                        content = f"网站 {url} 访问异常，状态码：{response.status_code}"
-                        _trigger_alert(task, content)
+                        has_alert = True
+                        alert_contents.append(f"网站 {url} 访问异常，状态码：{response.status_code}")
+                    elif task.is_alerting:
+                        recovery_contents.append(f"网站 {url} 已恢复正常，状态码：{response.status_code}")
                 
-                # 检查响应慢
                 elif task.task_type == 'site_slow':
-                    slow_threshold = config.get('slow_threshold', 5)
                     if response_time > slow_threshold:
-                        content = f"网站 {url} 响应缓慢，响应时间：{response_time:.2f}秒"
-                        _trigger_alert(task, content)
+                        has_alert = True
+                        alert_contents.append(f"网站 {url} 响应缓慢，响应时间：{response_time:.2f}秒")
+                    elif task.is_alerting:
+                        recovery_contents.append(f"网站 {url} 响应已恢复正常，响应时间：{response_time:.2f}秒")
                         
             except requests.RequestException as e:
                 if task.task_type == 'site_down':
-                    content = f"网站 {url} 无法访问，错误：{str(e)}"
-                    _trigger_alert(task, content)
+                    has_alert = True
+                    alert_contents.append(f"网站 {url} 无法访问，错误：{str(e)}")
+                elif task.task_type == 'site_slow' and task.is_alerting:
+                    pass
+        
+        if has_alert:
+            _trigger_alert(task, '；'.join(alert_contents))
+        elif task.is_alerting and recovery_contents:
+            _trigger_recovery(task, '；'.join(recovery_contents))
                     
     except AlertTask.DoesNotExist:
-        # 任务不存在，移除调度
         remove_website_check_task(task_id)
     except Exception as e:
         logger.error(f"检查网站失败 [{task_id}]: {e}")

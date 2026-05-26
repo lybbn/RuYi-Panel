@@ -151,6 +151,17 @@ if object.{key}:
         categories, rules, config, ip_group, from_remote = init_waf_data(force=self.delete)
         print(f"初始化完成【WAF数据】: 分类{categories}个, 规则{rules}条, 配置{config}, IP组{ip_group}")
 
+    def init_ai(self):
+        """
+        初始化AI模块数据
+        包括：工具配置表、AI全局配置
+        """
+        from apps.sysai.init_data import init_ai_data
+        
+        print(f"正在初始化【AI模块数据】")
+        tool_created, tool_skipped, config_created = init_ai_data(force=self.delete)
+        print(f"初始化完成【AI模块数据】: 工具配置新建{tool_created}个/跳过{tool_skipped}个, 系统配置{'新建' if config_created else '已存在'}")
+
     def run(self):
         self.init_users()
         self.init_config()
@@ -159,6 +170,7 @@ if object.{key}:
         self.init_dockers_repo()
         self.init_alert_notify_config()
         self.init_waf()
+        self.init_ai()
 
 def main(delete=True,username=None,password=None):
     Initialize(delete=delete,username=username,password=password).run()

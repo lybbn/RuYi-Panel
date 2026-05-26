@@ -19,6 +19,8 @@ from apps.system.views.site_manage import RYSiteManageView,RYSiteDomainManageVie
 from apps.system.views.sys_firewall import RYSysFirewallView
 from apps.system.views.python_manage import RYPythonManageView,RYPythonSiteManageView
 from apps.system.views.go_manage import RYGoManageView,RYGoProjectManageView
+from apps.system.views.nodejs_manage import RYNodejsManageView,RYNodejsProjectManageView
+from apps.system.views.php_manage import RYPhpManageView,RYPhpProjectManageView
 from apps.system.views.supervisor_manage import RYSupervisorManageView
 from apps.system.views.sysLicenseView import RYSysImportLicenseView,RYSysUnBindLicenseView
 from apps.system.views.docker_manage import RYDockerManageView
@@ -69,6 +71,10 @@ urlpatterns = [
     path('pythonSiteMg/', RYPythonSiteManageView.as_view(), name='python项目站点管理'),
     path('golangmg/', RYGoManageView.as_view(), name='go项目管理'),
     path('gositemg/', RYGoProjectManageView.as_view(), name='go项目列表/操作'),
+    path('nodejsmg/', RYNodejsManageView.as_view(), name='nodejs项目管理'),
+    path('nodejssitemg/', RYNodejsProjectManageView.as_view(), name='nodejs项目列表/操作'),
+    path('phpmg/', RYPhpManageView.as_view(), name='php项目管理'),
+    path('phpsitemg/', RYPhpProjectManageView.as_view(), name='php项目列表/操作'),
     path('supervisormg/', RYSupervisorManageView.as_view(), name='supervisor管理'),
     path('fail2banmg/', RYFail2BanManageView.as_view(), name='fail2ban管理'),
     path('dockermg/', RYDockerManageView.as_view(), name='docker管理'),

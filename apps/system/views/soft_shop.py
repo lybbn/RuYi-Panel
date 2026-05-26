@@ -25,6 +25,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
 from utils.common import get_parameter_dic,GetSoftList,current_os,GetLogsPath,ast_convert
 from utils.install.install_soft import Ry_Get_Soft_Performance,Ry_Set_Soft_Performance,Ry_Uninstall_Soft,Check_Soft_Installed,Ry_Restart_Soft,Ry_Stop_Soft,Ry_Reload_Soft,Ry_Get_Soft_Info_Path,Ry_Get_Soft_LoadStatus,Ry_Get_Soft_Conf,Ry_Save_Soft_Conf
+from utils.install.php import RY_GET_PHP_INFO,RY_GET_PHP_FPM_CONF,RY_SAVE_PHP_FPM_CONF,RY_GET_PHP_EXTENSIONS,get_php_path_info,RY_GET_PHP_CONFIG_PARAMS,RY_SAVE_PHP_CONFIG_PARAMS,RY_GET_PHP_DISABLED_FUNCTIONS,RY_SAVE_PHP_DISABLED_FUNCTIONS,RY_GET_PHP_DANGEROUS_FUNCTIONS,RY_GET_PHP_FPM_POOL_PARAMS,RY_SAVE_PHP_FPM_POOL_PARAMS,RY_GET_PHP_FPM_PRESETS,RY_VALIDATE_PHP_CONFIG,RY_CLEAR_PHP_OPCACHE,RY_GET_PHP_SLOWLOG,RY_CLEAR_PHP_ERROR_LOG,RY_CLEAR_PHP_SLOWLOG,RY_GET_PHP_EXTENSION_LIST,RY_TOGGLE_PHP_EXTENSION,RY_GET_PHPINFO,RY_GET_PECL_EXTENSIONS,RY_INSTALL_PECL_EXTENSION,RY_UNINSTALL_PECL_EXTENSION,RY_GET_PHP_FPM_STATUS
 from apps.systask.models import SysTaskCenter
 import datetime
 from utils.server.system import system
@@ -36,6 +37,7 @@ from apps.syslogs.logutil import RuyiAddOpLog
 from utils.customView import CustomAPIView
 from apps.system.views.common import executeNextTask
 from apps.system.models import Databases
+from apps.systask.scheduler import scheduler
 
 def soft_install_callback(job_id="",version={},ok=True):
     try:
@@ -45,13 +47,17 @@ def soft_install_callback(job_id="",version={},ok=True):
             name = version['name']
             password = version.get('password',"")
             info = {}
-            for m in GetSoftList():
+            soft_list = GetSoftList()
+            for m in soft_list:
                 if m['name'] == name:
                     info = m
                     break
+            del soft_list
             info = json.dumps(info)
-            if name in ["python","go"]:
+            if name in ["python","go","php","nodejs"]:
                 if name == "go":
+                    RySoftShop.objects.filter(name=name).update(is_default=False)
+                if name == "nodejs":
                     RySoftShop.objects.filter(name=name).update(is_default=False)
                 if RySoftShop.objects.filter(name=name,install_version=version['c_version']).exists():
                     RySoftShop.objects.filter(name=name,install_version=version['c_version']).update(install_path=version['install_path'],installed=True,status=1,info=info,is_default=True)
@@ -63,7 +69,7 @@ def soft_install_callback(job_id="",version={},ok=True):
             task.status = 2
             name = version.get('name', '')
             if name:
-                detail_version = version.get('c_version') if name in ['python', 'go'] else None
+                detail_version = version.get('c_version') if name in ['python', 'go', 'php', 'nodejs'] else None
                 if detail_version:
                     RySoftShop.objects.filter(name=name, install_version=detail_version).delete()
                 else:
@@ -72,10 +78,25 @@ def soft_install_callback(job_id="",version={},ok=True):
         if task.exec_at:
             task.duration = (end_time - task.exec_at).total_seconds()
         task.save()
+        try:
+            scheduler.remove_job(job_id)
+        except:
+            pass
         #执行下一个任务
         executeNextTask()
     except:
         pass
+    finally:
+        try:
+            from django.db import connections
+            connections.close_all()
+        except:
+            pass
+        try:
+            from utils.common import ReleaseMemory
+            ReleaseMemory()
+        except:
+            pass
 
 #类型：
 #0 全部、1 已安装、2 数据库 3、Web服务器、4 运行环境、5 安全防护
@@ -97,12 +118,24 @@ class RYSoftShopListView(CustomAPIView):
             softlist = [item for item in softlist if (searchContent.lower() in item.get("title").lower()) or (searchContent.lower() in item.get("desc").lower())]
         if type == "0":
             pass
+        elif type == "1":
+            # 对于已安装列表，我们需要真实检测安装状态以进行准确过滤
+            def check_installed(p):
+                get_status = False  # 过滤阶段不需要获取运行状态，提升速度
+                c_version = None
+                if p['name'] in ["python", "go", "php", "nodejs"]:
+                    if p.get('versions'):
+                        c_version = p['versions'][0]['c_version']
+                installed, _, _, _ = Check_Soft_Installed(name=p['name'], is_windows=is_windows, version=c_version, get_status=get_status)
+                p['_is_installed_real'] = installed
+                return p
+
+            with ThreadPoolExecutor(max_workers=min(len(softlist), 20)) as executor:
+                softlist = list(executor.map(check_installed, softlist))
+            
+            softlist = [item for item in softlist if item.get('_is_installed_real')]
         else:
-            if type == "1":
-                soft_names = list(RySoftShop.objects.filter(installed=True).values_list("name",flat=True).order_by('id'))
-                softlist = [item for item in softlist if item.get("name") in soft_names]
-            else: 
-                softlist = [item for item in softlist if str(item.get("type")) == type]
+            softlist = [item for item in softlist if str(item.get("type")) == type]
         page = int(reqData.get("page",1))
         limit = int(reqData.get("limit",10))
         #一次最大条数限制
@@ -129,7 +162,10 @@ class RYSoftShopListView(CustomAPIView):
                 get_status = True
                 c_version = None
                 p['is_default'] = True
-                if p['name'] in ["python","go"]:
+                if p['name'] in ["python","go","nodejs"]:
+                    c_version = p['versions'][0]['c_version']
+                    get_status = False
+                elif p['name'] == "php":
                     c_version = p['versions'][0]['c_version']
                     get_status = False
                 p['installed'], p['version'], p['status'], p['install_path'] = Check_Soft_Installed(name=p['name'], is_windows=is_windows,version=c_version,get_status=get_status)
@@ -138,11 +174,16 @@ class RYSoftShopListView(CustomAPIView):
                         v['url'] = None
                         hidev = v.get("hide",None)
                         v['hide'] = True if hidev else False
-                if p['name'] in ["python","go"]:
+                if p['name'] in ["python","go","nodejs"]:
                     p['status']=True
                     if p['name'] == "go":
                         if not RySoftShop.objects.filter(name=p['name'],install_version=p['version'],is_default=True).exists():
                             p['is_default'] = False
+                    if p['name'] == "nodejs":
+                        if not RySoftShop.objects.filter(name=p['name'],install_version=p['version'],is_default=True).exists():
+                            p['is_default'] = False
+                elif p['name'] == "php":
+                    p['status'] = RySoftShop.objects.filter(name=p['name'],installed=True,status=True).exists()
                 return p
             with ThreadPoolExecutor(max_workers=data_nums) as executor:
                 paginated_data = list(executor.map(process_item, paginated_data))
@@ -183,9 +224,11 @@ class RYSoftShopManageView(CustomAPIView):
             if not version:
                 return ErrorResponse(msg="应用版本错误")
             version = version[0]
+            if soft['name'] == 'nginx' and version.get('version') != 'openresty':
+                return ErrorResponse(msg="Nginx仅支持安装OpenResty版本，请选择OpenResty版本安装")
             if SysTaskCenter.objects.filter(name__icontains="安装"+soft['name']+"-"+version['c_version'],status__in=[0,1]).exists():
                 return ErrorResponse(msg="该应用正在安装中，无需重复安装!!!")
-            detail_version =version['c_version'] if soft['name'] in ['python','go'] else None
+            detail_version =version['c_version'] if soft['name'] in ['python','go','php','nodejs'] else None
             s_installed,s_version,s_status,s_install_path = Check_Soft_Installed(name=soft['name'],is_windows=is_windows,version=detail_version)
             if s_installed:
                 return ErrorResponse(msg="该应用已安装，请勿重复安装!!!")
@@ -213,7 +256,7 @@ class RYSoftShopManageView(CustomAPIView):
             if soft['name'] == "mysql":
                 if Databases.objects.filter(db_type=0).exists():
                     return ErrorResponse(msg="当前已有数据库，请先删除再卸载！！！")
-            if soft['name'] in ["python","go"]:#允许多个版本存在
+            if soft['name'] in ["python","go","php","nodejs"]:#允许多个版本存在
                 version_post = reqData.get("version",None)#如果提供了版本（c_version），就卸载指定，没提供取第一个
                 version = version_post if version_post else soft["versions"][0]['c_version']
                 try:
@@ -244,29 +287,38 @@ class RYSoftShopManageView(CustomAPIView):
         elif action == "status":
             status = reqData.get("status",None)
             t_msg = "启动成功"
-            s_status = False
-            if status == "stop":
-                Ry_Stop_Soft(name=soft['name'],is_windows=is_windows)
-                s_status = False
+            s_status = 2
+            soft_version = reqData.get("version",None) if soft['name'] in ['python','go','php','nodejs'] else None
+            if status == "start":
+                Ry_Start_Soft(name=soft['name'],is_windows=is_windows,version=soft_version)
+                s_status = 1
+                t_msg = "启动成功"
+            elif status == "stop":
+                Ry_Stop_Soft(name=soft['name'],is_windows=is_windows,version=soft_version)
+                s_status = 2
                 t_msg = "停止成功"
             elif status == 'restart':
-                Ry_Restart_Soft(name=soft['name'],is_windows=is_windows)
-                s_status = True
+                Ry_Restart_Soft(name=soft['name'],is_windows=is_windows,version=soft_version)
+                s_status = 1
                 t_msg = "重启成功"
             elif status == 'reload':
-                Ry_Reload_Soft(name=soft['name'],is_windows=is_windows)
-                s_status = True
+                Ry_Reload_Soft(name=soft['name'],is_windows=is_windows,version=soft_version)
+                s_status = 1
                 t_msg = "重载成功"
             else:
                 return ErrorResponse(msg="类型错误")
-            RySoftShop.objects.filter(name=soft['name']).update(status=s_status)
+            if soft['name'] in ['python','go','php','nodejs'] and soft_version:
+                RySoftShop.objects.filter(name=soft['name'],install_version=soft_version).update(status=s_status)
+            else:
+                RySoftShop.objects.filter(name=soft['name']).update(status=s_status)
             RuyiAddOpLog(request,msg="【软件商店】=>【"+soft['name']+"】"+t_msg[:2],module="softmg")
             return DetailResponse(msg=t_msg)
         elif action == "get_error_log":
             soft_ins = RySoftShop.objects.filter(name=soft['name'],installed=True).first()
             if not soft_ins:
                 return ErrorResponse(msg="软件未安装")
-            error_log_path = Ry_Get_Soft_Info_Path(name=soft['name'],type="error",is_windows=is_windows)
+            soft_version = reqData.get("version",None) if soft['name'] in ['python','go','php','nodejs'] else None
+            error_log_path = Ry_Get_Soft_Info_Path(name=soft['name'],type="error",is_windows=is_windows,version=soft_version)
             num = 2000
             data = system.GetFileLastNumsLines(error_log_path,num)
             return DetailResponse(data=data,msg="success")
@@ -299,16 +351,271 @@ class RYSoftShopManageView(CustomAPIView):
             Ry_Reload_Soft(name=soft['name'],is_windows=is_windows)
             return DetailResponse(msg="设置成功")
         elif action == "get_conf":
-            data = Ry_Get_Soft_Conf(name=soft['name'],is_windows=is_windows)
+            soft_version = reqData.get("version",None) if soft['name'] in ['python','go','php','nodejs'] else None
+            data = Ry_Get_Soft_Conf(name=soft['name'],is_windows=is_windows,version=soft_version)
             return DetailResponse(data=data,msg="success")
         elif action == "save_conf":
             conf = reqData.get('conf',"")
             if not conf:
                 return ErrorResponse(msg="配置文件格式错误")
-            data = Ry_Save_Soft_Conf(name=soft['name'],conf=conf,is_windows=is_windows)
+            soft_version = reqData.get("version",None) if soft['name'] in ['python','go','php','nodejs'] else None
+            data = Ry_Save_Soft_Conf(name=soft['name'],conf=conf,is_windows=is_windows,version=soft_version)
             RuyiAddOpLog(request,msg="【软件商店】-【修改配置】=>"+soft['name'],module="softmg")
-            Ry_Reload_Soft(name=soft['name'],is_windows=is_windows)
+            Ry_Reload_Soft(name=soft['name'],is_windows=is_windows,version=soft_version)
+            return DetailResponse(data=data,msg="保存成功")
+        elif action == "get_php_info":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_GET_PHP_INFO(version=soft_version,is_windows=is_windows)
             return DetailResponse(data=data,msg="success")
+        elif action == "get_php_fpm_conf":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_GET_PHP_FPM_CONF(version=soft_version,is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "save_php_fpm_conf":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            conf = reqData.get('conf',"")
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            if not conf:
+                return ErrorResponse(msg="配置文件格式错误")
+            data = RY_SAVE_PHP_FPM_CONF(version=soft_version,conf=conf,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【修改PHP-FPM配置】=>"+soft_version,module="softmg")
+            Ry_Reload_Soft(name='php',is_windows=is_windows,version=soft_version)
+            return DetailResponse(data=data,msg="保存成功")
+        elif action == "get_php_extensions":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_GET_PHP_EXTENSIONS(version=soft_version,is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "get_php_installed_versions":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            php_list = RySoftShop.objects.filter(name='php',installed=True).order_by('-is_default','install_version')
+            data = []
+            for item in php_list:
+                version = item.install_version
+                running = False
+                try:
+                    from utils.install.php import is_php_running
+                    running = is_php_running(version,is_windows=is_windows)
+                except:
+                    pass
+                data.append({
+                    'version':version,
+                    'install_path':item.install_path,
+                    'is_default':item.is_default,
+                    'status':item.status,
+                    'running':running,
+                })
+            return DetailResponse(data=data,msg="success")
+        elif action == "get_php_config_params":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_GET_PHP_CONFIG_PARAMS(version=soft_version,is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "save_php_config_params":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            params = ast_convert(reqData.get("params",{}))
+            if not params:
+                return ErrorResponse(msg="参数不能为空")
+            validate = RY_VALIDATE_PHP_CONFIG(version=soft_version,is_windows=is_windows)
+            data = RY_SAVE_PHP_CONFIG_PARAMS(version=soft_version,params=params,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【修改PHP配置参数】=>"+soft_version,module="softmg")
+            Ry_Reload_Soft(name='php',is_windows=is_windows,version=soft_version)
+            return DetailResponse(data=data,msg="保存成功")
+        elif action == "get_php_disabled_functions":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            disabled = RY_GET_PHP_DISABLED_FUNCTIONS(version=soft_version,is_windows=is_windows)
+            dangerous = RY_GET_PHP_DANGEROUS_FUNCTIONS()
+            data = {
+                'disabled': disabled,
+                'dangerous': dangerous,
+            }
+            return DetailResponse(data=data,msg="success")
+        elif action == "save_php_disabled_functions":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            functions = reqData.get("functions",[])
+            if isinstance(functions, str):
+                functions = [f.strip() for f in functions.split(',') if f.strip()]
+            data = RY_SAVE_PHP_DISABLED_FUNCTIONS(version=soft_version,functions=functions,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【修改PHP禁用函数】=>"+soft_version,module="softmg")
+            Ry_Reload_Soft(name='php',is_windows=is_windows,version=soft_version)
+            return DetailResponse(data=data,msg="保存成功")
+        elif action == "get_php_fpm_pool_params":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            params = RY_GET_PHP_FPM_POOL_PARAMS(version=soft_version,is_windows=is_windows)
+            presets = RY_GET_PHP_FPM_PRESETS()
+            data = {
+                'params': params,
+                'presets': presets,
+            }
+            return DetailResponse(data=data,msg="success")
+        elif action == "save_php_fpm_pool_params":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            params = ast_convert(reqData.get("params",{}))
+            if not params:
+                return ErrorResponse(msg="参数不能为空")
+            data = RY_SAVE_PHP_FPM_POOL_PARAMS(version=soft_version,params=params,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【修改PHP-FPM进程池参数】=>"+soft_version,module="softmg")
+            Ry_Reload_Soft(name='php',is_windows=is_windows,version=soft_version)
+            return DetailResponse(data=data,msg="保存成功")
+        elif action == "validate_php_config":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_VALIDATE_PHP_CONFIG(version=soft_version,is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "clear_php_opcache":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_CLEAR_PHP_OPCACHE(version=soft_version,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【清空PHP OPcache】=>"+soft_version,module="softmg")
+            return DetailResponse(data=data,msg="操作成功" if data else "OPcache不可用")
+        elif action == "get_php_slowlog":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_GET_PHP_SLOWLOG(version=soft_version,is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "get_php_fpm_status":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_GET_PHP_FPM_STATUS(version=soft_version,is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "clear_php_error_log":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_CLEAR_PHP_ERROR_LOG(version=soft_version,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【清空PHP错误日志】=>"+soft_version,module="softmg")
+            return DetailResponse(data=data,msg="清空成功")
+        elif action == "clear_php_slowlog":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_CLEAR_PHP_SLOWLOG(version=soft_version,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【清空PHP慢日志】=>"+soft_version,module="softmg")
+            return DetailResponse(data=data,msg="清空成功")
+        elif action == "get_php_extension_list":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_GET_PHP_EXTENSION_LIST(version=soft_version,is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "toggle_php_extension":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            ext_name = reqData.get("ext_name","")
+            enable = reqData.get("enable",True)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            if not ext_name:
+                return ErrorResponse(msg="请指定扩展名")
+            data = RY_TOGGLE_PHP_EXTENSION(version=soft_version,ext_name=ext_name,enable=enable,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【" + ("启用" if enable else "禁用") + "PHP扩展】=>"+soft_version+" "+ext_name,module="softmg")
+            Ry_Reload_Soft(name='php',is_windows=is_windows,version=soft_version)
+            return DetailResponse(data=data,msg="操作成功")
+        elif action == "get_phpinfo":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_GET_PHPINFO(version=soft_version,is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "get_pecl_extensions":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            data = RY_GET_PECL_EXTENSIONS(version=soft_version,is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "install_pecl_extension":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            ext_name = reqData.get("ext_name","")
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            if not ext_name:
+                return ErrorResponse(msg="请指定扩展名")
+            data = RY_INSTALL_PECL_EXTENSION(version=soft_version,ext_name=ext_name,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【安装PHP扩展】=>"+soft_version+" "+ext_name,module="softmg")
+            if data.get('success'):
+                Ry_Reload_Soft(name='php',is_windows=is_windows,version=soft_version)
+                return DetailResponse(data=data,msg=data.get('msg','操作成功'))
+            else:
+                return ErrorResponse(msg=data.get('msg','操作失败'))
+        elif action == "uninstall_pecl_extension":
+            if soft['name'] != 'php':
+                return ErrorResponse(msg="仅支持PHP")
+            soft_version = reqData.get("version",None)
+            ext_name = reqData.get("ext_name","")
+            if not soft_version:
+                return ErrorResponse(msg="请指定PHP版本")
+            if not ext_name:
+                return ErrorResponse(msg="请指定扩展名")
+            data = RY_UNINSTALL_PECL_EXTENSION(version=soft_version,ext_name=ext_name,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【卸载PHP扩展】=>"+soft_version+" "+ext_name,module="softmg")
+            if data.get('success'):
+                Ry_Reload_Soft(name='php',is_windows=is_windows,version=soft_version)
+                return DetailResponse(data=data,msg=data.get('msg','操作成功'))
+            else:
+                return ErrorResponse(msg=data.get('msg','操作失败'))
         return ErrorResponse(msg="类型错误")
     
 class RYSoftInstallLogsView(CustomAPIView):

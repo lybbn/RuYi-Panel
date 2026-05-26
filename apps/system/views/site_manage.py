@@ -458,6 +458,64 @@ class RYSiteManageView(CustomAPIView):
             RuyiAddOpLog(request,msg="【网站管理】-【反向代理】-【修改代理配置文件】=> 站点：%s => 代理名称：%s"%(s_ins.name,name),module="sitemg")
             WebClient.reload_service(webserver=webServer)
             return DetailResponse(msg="保存成功")
+        elif action == "get_site_rewrite":
+            id = reqData.get("id","")
+            if not id:return ErrorResponse(msg="参数错误")
+            s_ins = Sites.objects.filter(id=id).first()
+            if not s_ins:return ErrorResponse(msg="无此站点")
+            conf_path,null = WebClient.get_conf_path(webserver=webServer,siteName=s_ins.name,sitePath=s_ins.path)
+            data = ReadFile(conf_path['rewrite_path'])
+            if not data:
+                data = []
+            else:
+                data = json.loads(data)
+            return DetailResponse(data=data,msg="success")
+        elif action == "set_site_rewrite":
+            id = reqData.get("id","")
+            if not id:return ErrorResponse(msg="参数错误")
+            s_ins = Sites.objects.filter(id=id).first()
+            if not s_ins:return ErrorResponse(msg="无此站点")
+            cont = ast_convert(reqData.get("cont",{}))
+            if not cont:return ErrorResponse(msg="参数错误2")
+            operate = cont.get('operate',"add")
+            name = cont.get('name',"")
+            isok,msg = WebClient.set_site_rewrite(webserver=webServer,siteName=s_ins.name,sitePath=s_ins.path,cont=cont)
+            if not isok:return ErrorResponse(msg=msg)
+            RuyiAddOpLog(request,msg="【网站管理】-【伪静态】%s => %s => %s"%(s_ins.name,operate,name),module="sitemg")
+            WebClient.reload_service(webserver=webServer)
+            return DetailResponse(msg="设置成功")
+        elif action == "get_rewrite_templates":
+            data = WebClient.get_rewrite_templates()
+            return DetailResponse(data=data,msg="success")
+        elif action == "get_site_rewrite_conf":
+            id = reqData.get("id","")
+            if not id:return ErrorResponse(msg="参数错误")
+            s_ins = Sites.objects.filter(id=id).first()
+            if not s_ins:return ErrorResponse(msg="无此站点")
+            name = reqData.get("name","")
+            if not name:return ErrorResponse(msg="规则名称不能为空")
+            conf_path,null = WebClient.get_conf_path(webserver=webServer,siteName=s_ins.name,sitePath=s_ins.path)
+            rewrite_conf_path = conf_path['rewrite_base_path']+ "/" + name + "_" + s_ins.name + ".conf"
+            if not os.path.exists(rewrite_conf_path):return ErrorResponse(msg="无此配置文件")
+            data = ReadFile(rewrite_conf_path)
+            if not data:
+                data = ""
+            return DetailResponse(data=data,msg="success")
+        elif action == "set_site_rewrite_conf":
+            id = reqData.get("id","")
+            if not id:return ErrorResponse(msg="参数错误")
+            s_ins = Sites.objects.filter(id=id).first()
+            if not s_ins:return ErrorResponse(msg="无此站点")
+            name = reqData.get("name","")
+            if not name:return ErrorResponse(msg="规则名称不能为空")
+            confcontent = reqData.get("conf","")
+            conf_path,null = WebClient.get_conf_path(webserver=webServer,siteName=s_ins.name,sitePath=s_ins.path)
+            rewrite_conf_path = conf_path['rewrite_base_path']+ "/" + name + "_" + s_ins.name + ".conf"
+            if not os.path.exists(rewrite_conf_path):return ErrorResponse(msg="无此配置文件")
+            WriteFile(rewrite_conf_path,confcontent)
+            RuyiAddOpLog(request,msg="【网站管理】-【伪静态】-【修改配置文件】=> 站点：%s => 规则名称：%s"%(s_ins.name,name),module="sitemg")
+            WebClient.reload_service(webserver=webServer)
+            return DetailResponse(msg="保存成功")
         elif action == "save_site_conf":
             id = reqData.get("id","")
             if not id:return ErrorResponse(msg="参数错误")

@@ -38,6 +38,8 @@ class Command(BaseCommand):
         print("开始执行升级数据初始化...")
         print("=" * 50)
         
+        call_command('syncdb')
+        
         # 1. 初始化计划任务（如果不存在）
         self.init_crontab_tasks()
         

@@ -31,7 +31,8 @@ def job_subprocess_kill(job_id):
                 for processpid in process_pids:
                     logger.info(f"Job {job_id}: 停止 subprocess with PID {processpid} ...")
                     os.killpg(os.getpgid(processpid), signal.SIGTERM)
-                    job_subprocess_del(job_id)
                     logger.info(f"Job {job_id}: 停止 subprocess with PID {processpid} 停止成功")
             except Exception as e:
                 logger.info(f"停止{job_id} subprocess 错误: {str(e)}")
+            finally:
+                job_subprocess_del(job_id)

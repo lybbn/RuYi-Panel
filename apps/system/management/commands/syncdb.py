@@ -25,4 +25,5 @@ class Command(BaseCommand):
         call_command('migrate', database='alert')
         call_command('migrate', database='waf')
         call_command('migrate', database='waf_logs')
+        call_command('migrate', database='ai')
         print("同步models到数据库完成！")

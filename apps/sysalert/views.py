@@ -231,6 +231,8 @@ class AlertTaskListView(CustomAPIView):
                 'channel_names': channel_names,
                 'silence_minutes': task.silence_minutes,
                 'check_interval': task.check_interval,
+                'push_count': task.push_count,
+                'is_alerting': task.is_alerting,
                 'last_trigger': task.last_trigger.strftime('%Y-%m-%d %H:%M:%S') if task.last_trigger else None,
                 'config': task.get_config(),
                 'create_at': task.create_at.strftime('%Y-%m-%d %H:%M:%S') if task.create_at else None,
@@ -249,6 +251,7 @@ class AlertTaskListView(CustomAPIView):
         config = data.get('config', {})
         silence_minutes = data.get('silence_minutes', 30)
         check_interval = data.get('check_interval', 300)
+        push_count = data.get('push_count', 10)
         is_enabled = data.get('is_enabled', True)
         
         if not name or not task_type:
@@ -261,6 +264,7 @@ class AlertTaskListView(CustomAPIView):
                 channels=','.join(map(str, channels)) if channels else '',
                 silence_minutes=silence_minutes,
                 check_interval=check_interval,
+                push_count=push_count,
                 is_enabled=is_enabled,
             )
             task.set_config(config)
@@ -299,6 +303,8 @@ class AlertTaskDetailView(CustomAPIView):
                 'channel_names': channel_names,
                 'silence_minutes': task.silence_minutes,
                 'check_interval': task.check_interval,
+                'push_count': task.push_count,
+                'is_alerting': task.is_alerting,
                 'last_trigger': task.last_trigger.strftime('%Y-%m-%d %H:%M:%S') if task.last_trigger else None,
                 'config': task.get_config(),
             }
@@ -320,6 +326,7 @@ class AlertTaskDetailView(CustomAPIView):
             task.is_enabled = data.get('is_enabled', task.is_enabled)
             task.silence_minutes = data.get('silence_minutes', task.silence_minutes)
             task.check_interval = data.get('check_interval', task.check_interval)
+            task.push_count = data.get('push_count', task.push_count)
             
             if 'channels' in data:
                 task.channels = ','.join(map(str, data['channels'])) if data['channels'] else ''
@@ -429,6 +436,7 @@ class AlertLogListView(CustomAPIView):
                 'task_type_name': log.task.get_task_type_display() if log.task else '-',
                 'content': log.content,
                 'channels': log.channels,
+                'channel_type': log.channel_type,
                 'status': log.status,
                 'status_name': '成功' if log.status == 0 else '失败',
                 'response': log.response,
@@ -457,6 +465,7 @@ class AlertLogDetailView(CustomAPIView):
                 'task_type_name': log.task.get_task_type_display() if log.task else '-',
                 'content': log.content,
                 'channels': log.channels,
+                'channel_type': log.channel_type,
                 'status': log.status,
                 'status_name': '成功' if log.status == 0 else '失败',
                 'response': log.response,
@@ -494,21 +503,112 @@ class AlertTaskTypeListView(CustomAPIView):
     
     def get(self, request):
         """获取任务类型列表"""
+        from utils.common import current_os
+        is_windows = current_os == 'windows'
+        
         types = [
-            {'value': 'cpu_usage', 'label': 'CPU使用率', 'category': 'system', 'icon': 'Cpu'},
-            {'value': 'mem_usage', 'label': '内存使用率', 'category': 'system', 'icon': 'Coin'},
-            {'value': 'disk_usage', 'label': '磁盘使用率', 'category': 'system', 'icon': 'Folder'},
-            {'value': 'disk_io', 'label': '磁盘IO', 'category': 'system', 'icon': 'DataLine'},
-            {'value': 'network_io', 'label': '网络流量', 'category': 'system', 'icon': 'Connection'},
-            {'value': 'load_avg', 'label': '系统负载', 'category': 'system', 'icon': 'Odometer'},
-            {'value': 'ssl_expire', 'label': 'SSL证书过期', 'category': 'website', 'icon': 'Document'},
-            {'value': 'site_down', 'label': '网站宕机', 'category': 'website', 'icon': 'Link'},
-            {'value': 'site_slow', 'label': '网站响应慢', 'category': 'website', 'icon': 'Timer'},
-            {'value': 'waf_attack', 'label': 'WAF攻击', 'category': 'security', 'icon': 'Shield'},
-            {'value': 'ssh_fail', 'label': 'SSH登录失败', 'category': 'security', 'icon': 'Lock'},
-            {'value': 'ssh_new_ip', 'label': 'SSH新IP登录', 'category': 'security', 'icon': 'User'},
-            {'value': 'panel_login_fail', 'label': '面板登录失败', 'category': 'security', 'icon': 'Key'},
-            {'value': 'cron_fail', 'label': '定时任务失败', 'category': 'task', 'icon': 'Clock'},
+            {
+                'value': 'cpu_usage', 'label': 'CPU使用率', 'category': 'system', 'icon': 'Cpu', 'supported': True,
+                'config_template': [
+                    {'key': 'threshold', 'label': '阈值', 'type': 'slider', 'min': 1, 'max': 100, 'default': 80, 'unit': '%'},
+                    {'key': 'duration', 'label': '持续时间', 'type': 'number', 'min': 1, 'max': 60, 'default': 5, 'unit': '分钟'},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'mem_usage', 'label': '内存使用率', 'category': 'system', 'icon': 'Coin', 'supported': True,
+                'config_template': [
+                    {'key': 'threshold', 'label': '阈值', 'type': 'slider', 'min': 1, 'max': 100, 'default': 80, 'unit': '%'},
+                    {'key': 'duration', 'label': '持续时间', 'type': 'number', 'min': 1, 'max': 60, 'default': 5, 'unit': '分钟'},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'disk_usage', 'label': '磁盘使用率', 'category': 'system', 'icon': 'Folder', 'supported': True,
+                'config_template': [
+                    {'key': 'threshold', 'label': '阈值', 'type': 'slider', 'min': 1, 'max': 100, 'default': 80, 'unit': '%'},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'disk_io', 'label': '磁盘IO', 'category': 'system', 'icon': 'DataLine', 'supported': True,
+                'config_template': [
+                    {'key': 'threshold', 'label': '阈值', 'type': 'number', 'min': 0.1, 'max': 1000, 'default': 50, 'unit': 'MB/s', 'step': 0.1},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'network_io', 'label': '网络流量', 'category': 'system', 'icon': 'Connection', 'supported': True,
+                'config_template': [
+                    {'key': 'threshold', 'label': '阈值', 'type': 'number', 'min': 0.1, 'max': 10000, 'default': 100, 'unit': 'MB/s', 'step': 0.1},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'load_avg', 'label': '系统负载', 'category': 'system', 'icon': 'Odometer', 'supported': not is_windows,
+                'config_template': [
+                    {'key': 'threshold', 'label': '阈值', 'type': 'number', 'min': 0.1, 'max': 100, 'default': 1, 'unit': '倍核心数', 'step': 0.1},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'ssl_expire', 'label': 'SSL证书过期', 'category': 'website', 'icon': 'Document', 'supported': True,
+                'config_template': [
+                    {'key': 'site_ids', 'label': '监控站点', 'type': 'site_select', 'multiple': True, 'default': []},
+                    {'key': 'days_before', 'label': '提前天数', 'type': 'number', 'min': 1, 'max': 90, 'default': 15, 'unit': '天'},
+                ],
+                'check_interval': None,
+            },
+            {
+                'value': 'site_down', 'label': '网站宕机', 'category': 'website', 'icon': 'Link', 'supported': True,
+                'config_template': [
+                    {'key': 'urls', 'label': '监控URL', 'type': 'tag_input', 'multiple': True, 'default': []},
+                    {'key': 'timeout', 'label': '超时时间', 'type': 'number', 'min': 1, 'max': 60, 'default': 10, 'unit': '秒'},
+                ],
+                'check_interval': {'min': 10, 'max': 3600, 'default': 60},
+            },
+            {
+                'value': 'site_slow', 'label': '网站响应慢', 'category': 'website', 'icon': 'Timer', 'supported': True,
+                'config_template': [
+                    {'key': 'urls', 'label': '监控URL', 'type': 'tag_input', 'multiple': True, 'default': []},
+                    {'key': 'timeout', 'label': '超时时间', 'type': 'number', 'min': 1, 'max': 60, 'default': 10, 'unit': '秒'},
+                    {'key': 'slow_threshold', 'label': '响应阈值', 'type': 'number', 'min': 1, 'max': 60, 'default': 5, 'unit': '秒'},
+                ],
+                'check_interval': {'min': 10, 'max': 3600, 'default': 60},
+            },
+            {
+                'value': 'waf_attack', 'label': 'WAF攻击', 'category': 'security', 'icon': 'FirstAidKit', 'supported': True,
+                'config_template': [
+                    {'key': 'threshold', 'label': '触发次数', 'type': 'number', 'min': 1, 'max': 10000, 'default': 100, 'unit': '次/5分钟'},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'ssh_fail', 'label': 'SSH登录失败', 'category': 'security', 'icon': 'Lock', 'supported': not is_windows,
+                'config_template': [
+                    {'key': 'threshold', 'label': '失败次数', 'type': 'number', 'min': 1, 'max': 100, 'default': 5, 'unit': '次/5分钟'},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'ssh_new_ip', 'label': 'SSH新IP登录', 'category': 'security', 'icon': 'User', 'supported': not is_windows,
+                'config_template': [
+                    {'key': 'known_ips', 'label': '已知IP列表', 'type': 'tag_input', 'multiple': True, 'default': []},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'panel_login_fail', 'label': '面板登录失败', 'category': 'security', 'icon': 'Key', 'supported': True,
+                'config_template': [
+                    {'key': 'threshold', 'label': '失败次数', 'type': 'number', 'min': 1, 'max': 100, 'default': 5, 'unit': '次/5分钟'},
+                ],
+                'check_interval': {'min': 60, 'max': 3600, 'default': 300},
+            },
+            {
+                'value': 'cron_fail', 'label': '定时任务失败', 'category': 'task', 'icon': 'Clock', 'supported': True,
+                'config_template': [],
+                'check_interval': None,
+            },
         ]
         return DetailResponse(data=types)
 

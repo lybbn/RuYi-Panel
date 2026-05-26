@@ -1,0 +1,16 @@
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+
+    dependencies = [
+        ('syslogs', '0004_alter_operationlog_module'),
+    ]
+
+    operations = [
+        migrations.AlterField(
+            model_name='operationlog',
+            name='module',
+            field=models.CharField(blank=True, choices=[('dbmg', '数据库管理'), ('login', '用户登录'), ('safe', '安全'), ('softmg', '软件管理'), ('filemg', '文件管理'), ('sitemg', '网站管理'), ('dellog', '清空日志'), ('panelst', '面板设置'), ('taskmg', '计划任务'), ('dockermg', '容器'), ('cmdmg', '执行命令'), ('wafmg', 'WAF防护'), ('monitormg', '系统监控')], max_length=255, null=True, verbose_name='请求模块'),
+        ),
+    ]

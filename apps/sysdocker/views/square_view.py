@@ -15,11 +15,11 @@
 # ------------------------------
 # docker 广场管理
 # ------------------------------
-import os,json
+import os,json,re
 from math import ceil
 from utils.customView import CustomAPIView
 from utils.pagination import CustomPagination
-from utils.common import get_parameter_dic,ast_convert,DeleteDir,RunCommand,formatdatetime
+from utils.common import get_parameter_dic,ast_convert,DeleteDir,DeleteFile,RunCommand,formatdatetime
 from utils.jsonResponse import ErrorResponse,DetailResponse,SuccessResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
@@ -95,9 +95,11 @@ class RYGetDockerSquareAppsListManageView(CustomAPIView):
                     for c in compose_json:
                         if c['Name'] == name.lower():
                             has_name_ps = True
-                            status = ''.join([char for char in c['Status'] if not char.isdigit() and char != '(' and char != ')'])
+                            compose_status = c.get('Status', '')
+                            status = re.sub(r'[\d()]+', '', compose_status).strip() or compose_status
                             path = os.path.dirname(c['ConfigFiles'])
-                    if not has_name_ps and not status in ["install"]:status="exited"
+                    if not has_name_ps and status not in ["install", "install_failed"]:
+                        status = "exited"
                     if not path:path=newsq.get_dkapp_path({"appname":appname,"name":name})
                     params = ast_convert(m.params)
                     ports= [] 
@@ -191,7 +193,13 @@ class RYGetDockerSquareAppsManageView(CustomAPIView):
             if status == "remove":
                 ins.delete()
                 DeleteDir(app_path)
-            elif status in ["restart","rebuild","start"]:
+            elif status == "rebuild":
+                install_log_path = newsq.get_dkapp_install_logpath({"appname":appname,"name":name})
+                if os.path.exists(install_log_path):
+                    DeleteFile(install_log_path)
+                ins.status = "install"
+                ins.save()
+            elif status in ["restart","start"]:
                 ins.status = "running"
                 ins.save()
             elif status in ["stop"]:

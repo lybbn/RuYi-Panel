@@ -66,8 +66,63 @@ stop() {
 }
 
 restart() {
-    systemctl restart ruyi.service
+    service_name="ruyi.service"
+    panel_process_pattern="RuYi-Panel|${Panel_Root_Path}/start.py|python.*start.py"
+    stop_timeout=20
+    start_timeout=20
+
+    echo "Stopping ruyi service..."
+    systemctl stop "$service_name"
+
+    for i in $(seq 1 $stop_timeout); do
+        if ! systemctl is-active --quiet "$service_name"; then
+            break
+        fi
+        sleep 1
+    done
+
+    if systemctl is-active --quiet "$service_name"; then
+        echo "ruyi service is still active, killing service cgroup..."
+        systemctl kill --kill-who=all --signal=KILL "$service_name" 2>/dev/null
+        sleep 1
+    fi
+
+    pids=$(pgrep -f "$panel_process_pattern" 2>/dev/null | sort -u | tr '\n' ' ')
+    if [ -n "$pids" ]; then
+        echo "Killing residual ruyi processes: $pids"
+        echo "$pids" | xargs -r kill -TERM 2>/dev/null
+        sleep 2
+    fi
+
+    pids=$(pgrep -f "$panel_process_pattern" 2>/dev/null | sort -u | tr '\n' ' ')
+    if [ -n "$pids" ]; then
+        echo "Force killing residual ruyi processes: $pids"
+        echo "$pids" | xargs -r kill -KILL 2>/dev/null
+        sleep 1
+    fi
+
+    pids=$(pgrep -f "$panel_process_pattern" 2>/dev/null | sort -u | tr '\n' ' ')
+    if [ -n "$pids" ]; then
+        echo "Failed to stop residual ruyi processes: $pids"
+        status
+        exit 1
+    fi
+
+    echo "Starting ruyi service..."
+    systemctl start "$service_name"
+
+    for i in $(seq 1 $start_timeout); do
+        if systemctl is-active --quiet "$service_name"; then
+            echo "ruyi service started successfully"
+            status
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "Failed to start ruyi service"
     status
+    exit 1
 }
 
 version() {
@@ -96,6 +151,7 @@ repair() {
         fi
         chmod +x /tmp/update_fix.sh
         chmod +x /tmp/update_init.sh
+        sed -i 's/\r$//' /tmp/update_fix.sh /tmp/update_init.sh
         sh /tmp/update_fix.sh
         if [ $? -eq 0 ]; then
             sh /tmp/update_init.sh

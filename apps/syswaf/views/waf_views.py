@@ -36,6 +36,7 @@ from apps.syswaf.services import WafConfigSync
 from utils.ruyiclass.nginxClass import NginxClient
 from utils.ip_util import IPQQwry, GeoIP2Lookup, get_server_location, get_ip_location_with_coords
 from utils.common import is_private_ip
+from apps.syslogs.logutil import RuyiAddOpLog
 
 
 class WafGlobalConfigViewSet(CustomModelViewSet):
@@ -49,7 +50,8 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
     def list(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
-        return DetailResponse(data=serializer.data, msg="获取成功")
+        data = serializer.data
+        return DetailResponse(data=data, msg="获取成功")
     
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -58,6 +60,7 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
         serializer.save()
         sync = WafConfigSync()
         sync.sync_global_config()
+        RuyiAddOpLog(request, msg="【WAF防护】-【全局配置】-【更新】", module="wafmg")
         return DetailResponse(data=serializer.data, msg="更新成功")
     
     @action(methods=['POST'], detail=False)
@@ -66,11 +69,14 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
         if status not in ['off', 'observe', 'protect']:
             return ErrorResponse(msg="无效的状态")
         instance = self.get_object()
+        old_status = instance.waf_status
+        
         instance.waf_status = status
         instance.save()
         sync = WafConfigSync()
         sync.sync_global_config()
         status_display = {'off': '关闭', 'observe': '观察模式', 'protect': '防护模式'}
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【全局状态】切换为{status_display.get(status, status)}", module="wafmg")
         return DetailResponse(msg=f"WAF已切换为{status_display.get(status, status)}")
     
     @action(methods=['POST'], detail=False)
@@ -81,6 +87,7 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
         instance.save()
         sync = WafConfigSync()
         sync.sync_global_config()
+        RuyiAddOpLog(request, msg="【WAF防护】-【CC防护配置】保存", module="wafmg")
         return DetailResponse(msg="CC防护配置保存成功")
     
     @action(methods=['POST'], detail=False)
@@ -91,6 +98,7 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
         instance.save()
         sync = WafConfigSync()
         sync.sync_global_config()
+        RuyiAddOpLog(request, msg="【WAF防护】-【HTTP请求过滤配置】保存", module="wafmg")
         return DetailResponse(msg="HTTP请求过滤配置保存成功")
     
     @action(methods=['POST'], detail=False)
@@ -101,6 +109,7 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
         instance.save()
         sync = WafConfigSync()
         sync.sync_global_config()
+        RuyiAddOpLog(request, msg="【WAF防护】-【地域限制配置】保存", module="wafmg")
         return DetailResponse(msg="地域限制配置保存成功")
     
     @action(methods=['POST'], detail=False)
@@ -111,6 +120,7 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
         instance.save()
         sync = WafConfigSync()
         sync.sync_global_config()
+        RuyiAddOpLog(request, msg="【WAF防护】-【CDN兼容配置】保存", module="wafmg")
         return DetailResponse(msg="CDN兼容配置保存成功")
     
     @action(methods=['POST'], detail=False)
@@ -121,6 +131,7 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
         instance.save()
         sync = WafConfigSync()
         sync.sync_global_config()
+        RuyiAddOpLog(request, msg="【WAF防护】-【攻击防护规则配置】保存", module="wafmg")
         return DetailResponse(msg="攻击防护规则配置保存成功")
     
     @action(methods=['POST'], detail=False)
@@ -131,6 +142,7 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
         instance.save()
         sync = WafConfigSync()
         sync.sync_global_config()
+        RuyiAddOpLog(request, msg="【WAF防护】-【拦截页面配置】保存", module="wafmg")
         return DetailResponse(msg="拦截页面配置保存成功")
     
     @action(methods=['GET'], detail=False)
@@ -197,6 +209,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data, request=request)
         serializer.is_valid(raise_exception=True)
+        
         self.perform_create(serializer)
         
         if serializer.data.get('waf_status') != 'off' and serializer.data.get('site_id'):
@@ -204,13 +217,17 @@ class WafSiteConfigViewSet(CustomModelViewSet):
             site = Sites.objects.filter(id=serializer.data['site_id']).first()
             if site:
                 nginx = NginxClient(siteName=site.name)
-                nginx.set_site_waf(enabled=True, site_id=serializer.data['site_id'])
+                ok, msg = nginx.set_site_waf(enabled=True, site_id=serializer.data['site_id'])
+                if not ok:
+                    return ErrorResponse(msg=f"WAF配置失败：{msg}")
         
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】新增站点WAF", module="wafmg")
         return DetailResponse(data=serializer.data, msg="新增成功")
     
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
         old_status = instance.waf_status
+        
         serializer = self.get_serializer(instance, data=request.data, request=request, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -222,8 +239,11 @@ class WafSiteConfigViewSet(CustomModelViewSet):
             site = instance.site
             if site:
                 nginx = NginxClient(siteName=site.name)
-                nginx.set_site_waf(enabled=new_enabled, site_id=instance.site_id)
+                ok, msg = nginx.set_site_waf(enabled=new_enabled, site_id=instance.site_id)
+                if not ok:
+                    return ErrorResponse(msg=f"WAF配置失败：{msg}")
         
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】更新 {instance.site_name or ''}", module="wafmg")
         return DetailResponse(data=serializer.data, msg="更新成功")
     
     @action(methods=['POST'], detail=True)
@@ -233,6 +253,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
             return ErrorResponse(msg="无效的状态")
         instance = self.get_object()
         old_status = instance.waf_status
+        
         instance.waf_status = status
         instance.save()
         
@@ -242,9 +263,14 @@ class WafSiteConfigViewSet(CustomModelViewSet):
             site = instance.site
             if site:
                 nginx = NginxClient(siteName=site.name)
-                nginx.set_site_waf(enabled=new_enabled, site_id=instance.site_id)
+                ok, msg = nginx.set_site_waf(enabled=new_enabled, site_id=instance.site_id)
+                if not ok:
+                    instance.waf_status = old_status
+                    instance.save()
+                    return ErrorResponse(msg=f"WAF配置失败：{msg}")
         
         status_display = {'off': '关闭', 'observe': '观察模式', 'protect': '防护模式'}
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点WAF】{instance.site_name or ''} 切换为{status_display.get(status, status)}", module="wafmg")
         return DetailResponse(msg=f"站点WAF已切换为{status_display.get(status, status)}")
     
     @action(methods=['POST'], detail=True)
@@ -253,6 +279,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
         instance.stats_blocked_today = 0
         instance.stats_blocked_total = 0
         instance.save()
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】{instance.site_name or ''} 重置统计数据", module="wafmg")
         return DetailResponse(msg="统计数据已重置")
     
     @action(methods=['POST'], detail=False)
@@ -262,6 +289,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
         if not ids or not updates:
             return ErrorResponse(msg="参数错误")
         WafSiteConfig.objects.filter(id__in=ids).update(**updates)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】批量更新{len(ids)}个站点", module="wafmg")
         return DetailResponse(msg=f"已批量更新{len(ids)}个站点配置")
     
     @action(methods=['POST'], detail=True)
@@ -271,6 +299,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
         if status and status in ['off', 'observe', 'protect']:
             instance.waf_status = status
         instance.save()
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】{instance.site_name or ''} 保存基础配置", module="wafmg")
         return DetailResponse(msg="基础配置保存成功")
 
     @action(methods=['POST'], detail=True)
@@ -285,6 +314,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
         if 'cdn_ip_position' in request.data:
             instance.cdn_ip_position = request.data['cdn_ip_position']
         instance.save()
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】{instance.site_name or ''} 保存CDN配置", module="wafmg")
         return DetailResponse(msg="CDN配置保存成功")
 
     @action(methods=['POST'], detail=True)
@@ -294,6 +324,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
         if not instance.inherit_cc and 'cc_config' in request.data:
             instance.set_config('cc_config', request.data['cc_config'])
         instance.save()
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】{instance.site_name or ''} 保存CC防护配置", module="wafmg")
         return DetailResponse(msg="CC防护配置保存成功")
 
     @action(methods=['POST'], detail=True)
@@ -303,6 +334,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
         if not instance.inherit_geo and 'geo_config' in request.data:
             instance.set_config('geo_config', request.data['geo_config'])
         instance.save()
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】{instance.site_name or ''} 保存地域限制配置", module="wafmg")
         return DetailResponse(msg="地域限制配置保存成功")
 
     @action(methods=['POST'], detail=True)
@@ -312,6 +344,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
         if not instance.inherit_rule and 'rule_config' in request.data:
             instance.set_config('rule_config', request.data['rule_config'])
         instance.save()
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】{instance.site_name or ''} 保存规则配置", module="wafmg")
         return DetailResponse(msg="规则配置保存成功")
 
     @action(methods=['POST'], detail=True)
@@ -321,6 +354,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
         if not instance.inherit_request_limit and 'request_limit_config' in request.data:
             instance.set_config('request_limit_config', request.data['request_limit_config'])
         instance.save()
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】{instance.site_name or ''} 保存请求限制配置", module="wafmg")
         return DetailResponse(msg="请求限制配置保存成功")
 
     @action(methods=['POST'], detail=True)
@@ -342,6 +376,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
         setattr(instance, inherit_field, not current_value)
         instance.save()
 
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】{instance.site_name or ''} 切换{config_type}为{'继承全局' if not current_value else '独立配置'}", module="wafmg")
         return DetailResponse(data={
             'inherit_status': not current_value,
             'config_type': config_type
@@ -355,6 +390,7 @@ class WafSiteConfigViewSet(CustomModelViewSet):
                 nginx = NginxClient(siteName=site.name)
                 nginx.set_site_waf(enabled=False, site_id=item.site_id)
         self.perform_destroy(instance)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【站点配置】删除", module="wafmg")
         return DetailResponse(data=[], msg="删除成功")
 
 
@@ -391,7 +427,22 @@ class WafRuleViewSet(CustomModelViewSet):
         instance = self.get_object()
         if instance.is_builtin:
             return ErrorResponse(msg="内置规则不允许删除")
-        return super().destroy(request, pk)
+        rule_name = instance.name
+        result = super().destroy(request, pk)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【规则】删除 {rule_name}", module="wafmg")
+        return result
+    
+    def create(self, request, *args, **kwargs):
+        result = super().create(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg="【WAF防护】-【规则】新增", module="wafmg")
+        return result
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        rule_name = instance.name
+        result = super().update(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【规则】更新 {rule_name}", module="wafmg")
+        return result
     
     @action(methods=['POST'], detail=True)
     def toggle(self, request, pk=None):
@@ -399,6 +450,7 @@ class WafRuleViewSet(CustomModelViewSet):
         instance.enabled = not instance.enabled
         instance.save()
         status_text = "启用" if instance.enabled else "禁用"
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【规则】{instance.name} {status_text}", module="wafmg")
         return DetailResponse(msg=f"规则已{status_text}")
     
     @action(methods=['POST'], detail=False)
@@ -407,6 +459,7 @@ class WafRuleViewSet(CustomModelViewSet):
         enabled = request.data.get('enabled', True)
         WafRule.objects.filter(id__in=ids).update(enabled=enabled)
         status_text = "启用" if enabled else "禁用"
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【规则】批量{status_text}{len(ids)}条规则", module="wafmg")
         return DetailResponse(msg=f"已批量{status_text}{len(ids)}条规则")
     
     @action(methods=['POST'], detail=False)
@@ -416,6 +469,7 @@ class WafRuleViewSet(CustomModelViewSet):
         if mode not in ['block', 'log', 'captcha']:
             return ErrorResponse(msg="无效的防护模式")
         WafRule.objects.filter(id__in=ids).update(mode=mode)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【规则】批量修改{len(ids)}条规则防护模式为{mode}", module="wafmg")
         return DetailResponse(msg=f"已批量修改{len(ids)}条规则的防护模式")
     
     @action(methods=['GET'], detail=False)
@@ -444,6 +498,7 @@ class WafRuleViewSet(CustomModelViewSet):
             
             source_text = "云端" if from_remote else "本地"
             
+            RuyiAddOpLog(request, msg=f"【WAF防护】-【规则】从{source_text}更新规则", module="wafmg")
             return DetailResponse(data={
                 'categories': categories,
                 'rules': rules,
@@ -464,6 +519,18 @@ class WafIpGroupViewSet(CustomModelViewSet):
     search_fields = ('name',)
     ordering_fields = ('create_at',)
     
+    def create(self, request, *args, **kwargs):
+        result = super().create(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg="【WAF防护】-【IP分组】新增", module="wafmg")
+        return result
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        name = instance.name
+        result = super().update(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【IP分组】更新 {name}", module="wafmg")
+        return result
+
     def destroy(self, request, *args, **kwargs):
         pk = kwargs.get('pk')
         if not pk:
@@ -473,6 +540,7 @@ class WafIpGroupViewSet(CustomModelViewSet):
             instance = self.get_queryset().get(pk=pk)
             WafIpList.objects.filter(group=instance).update(group=None)
             instance.delete()
+            RuyiAddOpLog(request, msg=f"【WAF防护】-【IP分组】删除 {instance.name}", module="wafmg")
             return DetailResponse(data=[], msg="删除成功")
         except WafIpGroup.DoesNotExist:
             return DetailResponse(data=[], msg="分组不存在")
@@ -496,7 +564,9 @@ class WafIpListViewSet(CustomModelViewSet):
             if exists:
                 return ErrorResponse(msg=f"IP {ip} 已在{('黑名单' if list_type == 'blacklist' else '白名单')}中")
         
-        return super().create(request, *args, **kwargs)
+        result = super().create(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【IP名单】新增 {ip or ''}", module="wafmg")
+        return result
     
     def perform_create(self, serializer):
         ip = serializer.validated_data.get('ip')
@@ -510,6 +580,20 @@ class WafIpListViewSet(CustomModelViewSet):
             serializer.save(location=location)
         else:
             serializer.save()
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        ip_addr = instance.ip
+        result = super().update(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【IP名单】更新 {ip_addr}", module="wafmg")
+        return result
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        ip_addr = instance.ip
+        result = super().destroy(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【IP名单】删除 {ip_addr}", module="wafmg")
+        return result
     
     def _get_ip_location(self, ip):
         try:
@@ -544,6 +628,7 @@ class WafIpListViewSet(CustomModelViewSet):
             if created:
                 created_count += 1
         
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【IP名单】批量导入{created_count}条IP到{'黑名单' if list_type == 'blacklist' else '白名单'}", module="wafmg")
         return DetailResponse(msg=f"成功导入{created_count}条IP")
     
     @action(methods=['POST'], detail=True)
@@ -552,6 +637,7 @@ class WafIpListViewSet(CustomModelViewSet):
         instance.enabled = not instance.enabled
         instance.save()
         status_text = "启用" if instance.enabled else "禁用"
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【IP名单】{instance.ip} {status_text}", module="wafmg")
         return DetailResponse(msg=f"IP已{status_text}")
     
     @action(methods=['POST'], detail=False)
@@ -569,6 +655,7 @@ class WafIpListViewSet(CustomModelViewSet):
         switch.enabled = not switch.enabled
         switch.save()
         status_text = "开启" if switch.enabled else "关闭"
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【IP名单】{'黑名单' if list_type == 'blacklist' else '白名单'} 全局{status_text}", module="wafmg")
         return DetailResponse(data={'enabled': switch.enabled}, msg=f"已{status_text}")
     
     @action(methods=['GET'], detail=False)
@@ -803,6 +890,7 @@ class WafAttackLogViewSet(CustomModelViewSet):
     @action(methods=['POST'], detail=False)
     def clear_logs(self, request):
         deleted_count, _ = WafAttackLog.objects.all().delete()
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【攻击日志】清空{deleted_count}条记录", module="wafmg")
         return DetailResponse(data={'deleted_count': deleted_count}, msg=f"已清空 {deleted_count} 条攻击日志")
 
 
@@ -811,6 +899,25 @@ class WafUrlWhitelistViewSet(CustomModelViewSet):
     serializer_class = WafUrlWhitelistSerializer
     filterset_fields = ('site_id', 'match_type', 'enabled')
     search_fields = ('url', 'remark')
+
+    def create(self, request, *args, **kwargs):
+        result = super().create(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg="【WAF防护】-【URL白名单】新增", module="wafmg")
+        return result
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        url = instance.url
+        result = super().update(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【URL白名单】更新 {url}", module="wafmg")
+        return result
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        url = instance.url
+        result = super().destroy(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【URL白名单】删除 {url}", module="wafmg")
+        return result
     
     @action(methods=['POST'], detail=True)
     def toggle(self, request, pk=None):
@@ -818,6 +925,7 @@ class WafUrlWhitelistViewSet(CustomModelViewSet):
         instance.enabled = not instance.enabled
         instance.save()
         status_text = "启用" if instance.enabled else "禁用"
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【URL白名单】{instance.url} {status_text}", module="wafmg")
         return DetailResponse(msg=f"URL白名单已{status_text}")
     
     @action(methods=['POST'], detail=False)
@@ -830,6 +938,7 @@ class WafUrlWhitelistViewSet(CustomModelViewSet):
         switch.enabled = not switch.enabled
         switch.save()
         status_text = "开启" if switch.enabled else "关闭"
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【URL白名单】全局{status_text}", module="wafmg")
         return DetailResponse(data={'enabled': switch.enabled}, msg=f"已{status_text}")
     
     @action(methods=['GET'], detail=False)
@@ -846,6 +955,25 @@ class WafUrlBlacklistViewSet(CustomModelViewSet):
     serializer_class = WafUrlBlacklistSerializer
     filterset_fields = ('site_id', 'match_type', 'enabled')
     search_fields = ('url', 'remark')
+
+    def create(self, request, *args, **kwargs):
+        result = super().create(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg="【WAF防护】-【URL黑名单】新增", module="wafmg")
+        return result
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        url = instance.url
+        result = super().update(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【URL黑名单】更新 {url}", module="wafmg")
+        return result
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        url = instance.url
+        result = super().destroy(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【URL黑名单】删除 {url}", module="wafmg")
+        return result
     
     @action(methods=['POST'], detail=True)
     def toggle(self, request, pk=None):
@@ -853,6 +981,7 @@ class WafUrlBlacklistViewSet(CustomModelViewSet):
         instance.enabled = not instance.enabled
         instance.save()
         status_text = "启用" if instance.enabled else "禁用"
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【URL黑名单】{instance.url} {status_text}", module="wafmg")
         return DetailResponse(msg=f"URL黑名单已{status_text}")
     
     @action(methods=['POST'], detail=False)
@@ -865,6 +994,7 @@ class WafUrlBlacklistViewSet(CustomModelViewSet):
         switch.enabled = not switch.enabled
         switch.save()
         status_text = "开启" if switch.enabled else "关闭"
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【URL黑名单】全局{status_text}", module="wafmg")
         return DetailResponse(data={'enabled': switch.enabled}, msg=f"已{status_text}")
     
     @action(methods=['GET'], detail=False)
@@ -881,6 +1011,25 @@ class WafUaListViewSet(CustomModelViewSet):
     serializer_class = WafUaListSerializer
     filterset_fields = ('list_type', 'site_id', 'enabled')
     search_fields = ('keyword', 'remark')
+
+    def create(self, request, *args, **kwargs):
+        result = super().create(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg="【WAF防护】-【UA名单】新增", module="wafmg")
+        return result
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        keyword = instance.keyword
+        result = super().update(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【UA名单】更新 {keyword}", module="wafmg")
+        return result
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        keyword = instance.keyword
+        result = super().destroy(request, *args, **kwargs)
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【UA名单】删除 {keyword}", module="wafmg")
+        return result
     
     @action(methods=['POST'], detail=True)
     def toggle(self, request, pk=None):
@@ -888,6 +1037,7 @@ class WafUaListViewSet(CustomModelViewSet):
         instance.enabled = not instance.enabled
         instance.save()
         status_text = "启用" if instance.enabled else "禁用"
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【UA名单】{instance.keyword} {status_text}", module="wafmg")
         return DetailResponse(msg=f"UA名单已{status_text}")
     
     @action(methods=['POST'], detail=False)
@@ -905,6 +1055,8 @@ class WafUaListViewSet(CustomModelViewSet):
         switch.enabled = not switch.enabled
         switch.save()
         status_text = "开启" if switch.enabled else "关闭"
+        type_display = 'UA白名单' if list_type == 'whitelist' else 'UA黑名单'
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【{type_display}】全局{status_text}", module="wafmg")
         return DetailResponse(data={'enabled': switch.enabled}, msg=f"已{status_text}")
     
     @action(methods=['GET'], detail=False)

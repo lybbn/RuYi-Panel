@@ -124,13 +124,25 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
         """
         try:
             self.active = False
-            if self.channel:
-                self.channel.close()
-            # 关闭SSH连接
-            if self.ssh_conn:
-                self.ssh_conn.close()
             if self.process_output_task:
                 self.process_output_task.cancel()
+                try:
+                    await asyncio.wait_for(self.process_output_task, timeout=2)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+            if self.channel:
+                try:
+                    self.channel.close()
+                except:
+                    pass
+            if self.ssh_conn:
+                try:
+                    self.ssh_conn.close()
+                except:
+                    pass
+            self.channel = None
+            self.ssh_conn = None
+            self.process_output_task = None
         except:
             pass
 
@@ -172,17 +184,16 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
         @name 转发服务端消息给客户端（self.channel.recv非阻塞）
         @author lybbn<2024-01-13>
         """
-        bufsize = 1024  # 初始接收数据的大小
+        bufsize = 1024
         while self.active:
             try:
+                if not self.channel or self.channel.closed:
+                    break
                 if self.channel.recv_ready():
                     data = self.channel.recv(bufsize)
                     if not data:
-                        await self.close()
                         break
-                    # 根据需要动态调整 bufsize 的大小
                     bufsize = self.calculate_new_bufsize(data)
-                    # 将SSH连接输出发送给客户端
                     try:
                         r_data = data.decode('utf-8','ignore')
                     except:
@@ -191,14 +202,11 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
                         except:
                             r_data = str(data)
                     await self.send_message(message=r_data)
-                if self.channel.closed:
-                    await self.close()
-                    break
-                await asyncio.sleep(0.1)  # 添加适当的延迟以避免占用过多的计算资源
-            except Exception as e:
-                await self.send_message(message='[error]'+str(e)+' \r\n')
-                if self.channel.closed:
-                    await self.close()
+                else:
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                break
+            except Exception:
                 break
 
     async def process_output_block(self):
@@ -234,8 +242,7 @@ class WebSSHConsumerAsync(AsyncWebsocketConsumer):
             # 获取SSH连接信息
             ssh_info = TerminalServer.objects.filter(id=self.terminal_id).first()
             if not ssh_info:
-                self.send_message(message='无此主机信息\r\n')
-                self.close()
+                raise ValueError('无此主机信息')
             targethost = ssh_info.host
             if targethost in ["127.0.0.1","localhost"]:
                 KeepSSHRunning()
@@ -438,13 +445,20 @@ class WebSSHConsumer(WebsocketConsumer):
         @author lybbn<2024-01-13>
         """
         self.active = False
-        if self.channel:
-            self.channel.close()
-        # 关闭SSH连接
-        if self.ssh_conn:
-            self.ssh_conn.close()
+        try:
+            if self.channel:
+                self.channel.close()
+        except:
+            pass
+        try:
+            if self.ssh_conn:
+                self.ssh_conn.close()
+        except:
+            pass
         if self.process_output_task:
             self.process_output_task.cancel()
+        self.channel = None
+        self.ssh_conn = None
 
     def receive(self, text_data=None, bytes_data=None):
         """
@@ -508,17 +522,14 @@ class WebSSHConsumer(WebsocketConsumer):
         @name 转发服务端消息给客户端（self.channel.recv非阻塞）
         @author lybbn<2024-01-13>
         """
-        bufsize = 1024  # 初始接收数据的大小
+        bufsize = 1024
         while self.active:
             try:
+                if not self.channel or self.channel.closed:
+                    break
                 if self.channel.recv_ready():
                     data = self.channel.recv(bufsize)
-                    # if not data:
-                    #     self.close()
-                    #     break
-                    # 根据需要动态调整 bufsize 的大小
                     bufsize = self.calculate_new_bufsize(data)
-                    # 将SSH连接输出发送给客户端
                     try:
                         r_data = data.decode('utf-8','ignore')
                     except:
@@ -527,14 +538,9 @@ class WebSSHConsumer(WebsocketConsumer):
                         except:
                             r_data = str(data)
                     self.send_message(message=r_data)
-                # if self.channel.closed:
-                #     self.close()
-                #     break
-                # time.sleep(0.1)
-            except Exception as e:
-                print("异常退出:%s"%(str(e)))
-                self.send_message(message='\r\n[错误内容]'+str(e)+' \r\n')
-                # self.close()
+                else:
+                    time.sleep(0.1)
+            except Exception:
                 break
 
     def connect_ssh(self):
