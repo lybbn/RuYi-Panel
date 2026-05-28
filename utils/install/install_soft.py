@@ -24,12 +24,13 @@ from utils.install.redis import *
 from utils.install.mysql import *
 from utils.install.python import *
 from utils.install.go import *
+from utils.install.nodejs import *
 from utils.install.php import *
 from utils.install.supervisor import *
 from utils.install.docker import *
 from utils.install.fail2ban import *
 
-def Check_Soft_Running(name="",is_windows = True,simple_check=False):
+def Check_Soft_Running(name="",is_windows = True,simple_check=False,version=None):
     if name == 'nginx':
         return is_nginx_running(is_windows=is_windows,simple_check=simple_check)
     elif name == 'redis':
@@ -43,6 +44,8 @@ def Check_Soft_Running(name="",is_windows = True,simple_check=False):
     elif name == 'fail2ban':
         return is_fail2ban_running()
     elif name == 'php':
+        if version:
+            return is_php_running(version=version,is_windows=is_windows,simple_check=simple_check)
         return is_php_running(version="",is_windows=is_windows,simple_check=simple_check)
     return False
 
@@ -60,7 +63,7 @@ def Check_Soft_Installed(name="",version=None,get_status=True,is_windows = True,
     if os.path.exists(version_path):
         c_version = ReadFile(version_path)
         if get_status:
-            status =  Check_Soft_Running(name=name,is_windows=is_windows,simple_check=simple_check)
+            status =  Check_Soft_Running(name=name,is_windows=is_windows,simple_check=simple_check,version=version if name == 'php' else None)
         install_path = GetInstallPath()+"/"+name+"/"+version if version else GetInstallPath()+"/"+name
         return True,c_version,status,install_path
     return False,c_version,status,install_path
@@ -78,6 +81,8 @@ def Ry_Install_Soft(type=2,name="",version={},is_windows=True,call_back=None):
         Install_Python(type=type,version=version,is_windows=is_windows,call_back=call_back)
     elif name == 'go':
         Install_Go(type=type,version=version,is_windows=is_windows,call_back=call_back)
+    elif name == 'nodejs':
+        Install_Nodejs(type=type,version=version,is_windows=is_windows,call_back=call_back)
     elif name == 'php':
         Install_PHP(type=type,version=version,is_windows=is_windows,call_back=call_back)
     elif name == 'supervisor':
@@ -99,6 +104,8 @@ def Ry_Uninstall_Soft(name="",is_windows=True,version=None):
         Uninstall_Python(version=version,is_windows=is_windows)
     elif name == 'go':
         Uninstall_Go(version=version,is_windows=is_windows)
+    elif name == 'nodejs':
+        Uninstall_Nodejs(version=version,is_windows=is_windows)
     elif name == 'php':
         Uninstall_PHP(version=version,is_windows=is_windows)
     elif name == 'supervisor':
@@ -202,6 +209,10 @@ def Ry_Get_Soft_Info_Path(name="",type="all",version=None,is_windows=True):
             return allinfo
     elif name == 'go':
         allinfo = get_go_path_info(version)
+        if type == 'all':
+            return allinfo
+    elif name == 'nodejs':
+        allinfo = get_nodejs_path_info(version)
         if type == 'all':
             return allinfo
     elif name == 'php':

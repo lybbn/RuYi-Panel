@@ -18,6 +18,7 @@ import re
 import wget
 import os
 import shutil
+import stat
 import datetime
 import mimetypes
 import requests
@@ -165,7 +166,9 @@ def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8
                 
                 if buffered_logs:
                     WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
+                    buffered_logs.clear()
                 
+                r.close()
                 return True,"下载成功"
                 
         except Exception as e:
@@ -557,11 +560,28 @@ def list_files_in_directory(dst_path,sort="name",is_reverse=False,is_windows=Fal
         gid = file_info.st_gid
         group_name = "" if is_windows else system.GetGroupidName(entry.path, gid)
         
+        if entry.is_file():
+            entry_type = "file"
+        elif entry.is_dir():
+            entry_type = "dir"
+        elif entry.is_symlink():
+            entry_type = "link"
+        elif stat.S_ISBLK(file_info.st_mode):
+            entry_type = "block"
+        elif stat.S_ISCHR(file_info.st_mode):
+            entry_type = "char"
+        elif stat.S_ISSOCK(file_info.st_mode):
+            entry_type = "socket"
+        elif stat.S_ISFIFO(file_info.st_mode):
+            entry_type = "fifo"
+        else:
+            entry_type = "file"
+        
         return {
             "name": entry.name,
-            "type": "file" if entry.is_file() else "dir",
+            "type": entry_type,
             "path": windows_path_replace(entry.path, is_windows=is_windows),
-            "size": file_info.st_size if entry.is_file() else None,
+            "size": file_info.st_size if entry_type == "file" else None,
             "permissions": oct(file_info.st_mode)[-3:],
             "owner_uid": file_info.st_uid,
             "owner": system.GetUidName(entry.path, file_info.st_uid),
@@ -574,7 +594,7 @@ def list_files_in_directory(dst_path,sort="name",is_reverse=False,is_windows=Fal
         """处理单个目录项"""
         if search and search.lower() not in entry.name.lower():
             return None
-        if isDir and entry.is_file():
+        if isDir and not entry.is_dir():
             return None
         return get_file_info(entry)
 
@@ -612,7 +632,12 @@ def list_files_in_directory(dst_path,sort="name",is_reverse=False,is_windows=Fal
             'total_nums': 0
         }
     if not os.path.isdir(dst_path):
-        raise ValueError("错误：非目录")
+        return {
+            'data': [],
+            'file_nums': 0,
+            'dir_nums': 0,
+            'total_nums': 0
+        }
 
     # 处理不包含子目录的情况
     if not containSub:
@@ -762,7 +787,12 @@ def list_files_in_directory_old(dst_path,sort="name",is_reverse=False,is_windows
             'total_nums':0
         }
     if not os.path.isdir(dst_path):
-        raise ValueError("错误：非目录")
+        return {
+            'data': [],
+            'file_nums': 0,
+            'dir_nums': 0,
+            'total_nums': 0
+        }
     data = []
     dirData = []
     fileData = []
@@ -804,6 +834,35 @@ def list_files_in_directory_old(dst_path,sort="name",is_reverse=False,is_windows
                 data.append(tempData)
                 if is_dir_first:
                     dirData.append(tempData)
+            else:
+                if isDir:
+                    continue
+                if search:
+                    if entry.name.lower().find(search) == -1:
+                        continue
+                file_info = entry.stat()
+                if entry.is_symlink():
+                    entry_type = "link"
+                elif stat.S_ISBLK(file_info.st_mode):
+                    entry_type = "block"
+                elif stat.S_ISCHR(file_info.st_mode):
+                    entry_type = "char"
+                elif stat.S_ISSOCK(file_info.st_mode):
+                    entry_type = "socket"
+                elif stat.S_ISFIFO(file_info.st_mode):
+                    entry_type = "fifo"
+                else:
+                    entry_type = "file"
+                modified_time = datetime.datetime.fromtimestamp(file_info.st_mtime)
+                formatted_time = modified_time.strftime("%Y-%m-%d %H:%M:%S")
+                gid=file_info.st_gid
+                group_name=""
+                if not is_windows:
+                    group_name = system.GetGroupidName(entry.path,gid)
+                tempData = {"name":entry.name,"type":entry_type,"path":windows_path_replace(entry.path,is_windows=is_windows),"size":None,"permissions":oct(file_info.st_mode)[-3:],"owner_uid":file_info.st_uid,"owner":system.GetUidName(entry.path,file_info.st_uid),"gid":gid,"group":group_name,"modified":formatted_time}
+                data.append(tempData)
+                if is_dir_first:
+                    fileData.append(tempData)
     else:
         count_limit = 0
         max_limit = 3000
@@ -902,6 +961,26 @@ def get_filedir_attribute(path,is_windows=False):
         access_time = datetime.datetime.fromtimestamp(dir_info.st_atime)
         formatted_at = access_time.strftime("%Y-%m-%d %H:%M:%S")
         return {"name":name,"type":"dir","is_link":is_link(path),"path":windows_path_replace(path,is_windows=is_windows),"size":get_directory_size(path),"permissions":oct(dir_info.st_mode)[-3:],"owner_uid":dir_info.st_uid,"owner":system.GetUidName(path,dir_info.st_uid),"gid":dir_info.st_gid,"group":system.GetGroupidName(path,dir_info.st_gid),"modified":formatted_time,"access_at":formatted_at}
+    elif os.path.islink(path) or os.path.exists(path):
+        name = os.path.basename(path)
+        file_info = os.stat(path)
+        modified_time = datetime.datetime.fromtimestamp(file_info.st_mtime)
+        formatted_time = modified_time.strftime("%Y-%m-%d %H:%M:%S")
+        access_time = datetime.datetime.fromtimestamp(file_info.st_atime)
+        formatted_at = access_time.strftime("%Y-%m-%d %H:%M:%S")
+        if os.path.islink(path):
+            entry_type = "link"
+        elif stat.S_ISBLK(file_info.st_mode):
+            entry_type = "block"
+        elif stat.S_ISCHR(file_info.st_mode):
+            entry_type = "char"
+        elif stat.S_ISSOCK(file_info.st_mode):
+            entry_type = "socket"
+        elif stat.S_ISFIFO(file_info.st_mode):
+            entry_type = "fifo"
+        else:
+            entry_type = "file"
+        return {"name":name,"type":entry_type,"is_link":os.path.islink(path),"path":windows_path_replace(path,is_windows=is_windows),"size":None,"permissions":oct(file_info.st_mode)[-3:],"owner_uid":file_info.st_uid,"owner":system.GetUidName(path,file_info.st_uid),"gid":file_info.st_gid,"group":system.GetGroupidName(path,file_info.st_gid),"modified":formatted_time,"access_at":formatted_at}
     return None
 
 def create_file(path,is_windows=False):

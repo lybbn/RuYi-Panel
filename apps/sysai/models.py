@@ -28,6 +28,7 @@ class AIModel(BaseModel):
         ('zhipu', '智谱AI'),
         ('baidu', '百度文心'),
         ('alibaba', '阿里通义'),
+        ('xiaomi', '小米MiMo'),
         ('custom', '自定义'),
     )
 
@@ -48,6 +49,7 @@ class AIModel(BaseModel):
     api_secret = models.CharField(max_length=500, verbose_name='API Secret', blank=True, default='')
     api_version = models.CharField(max_length=50, verbose_name='API版本', blank=True, default='')
     max_tokens = models.IntegerField(default=4096, verbose_name='最大输出Token数')
+    context_length = models.IntegerField(default=8192, verbose_name='上下文窗口大小')
     temperature = models.FloatField(default=0.7, verbose_name='温度参数')
     top_p = models.FloatField(default=1.0, verbose_name='Top P')
     extra_params = models.JSONField(default=dict, verbose_name='额外参数')

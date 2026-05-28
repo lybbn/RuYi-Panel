@@ -1,0 +1,22 @@
+services:
+  RUYI_DKAPP:
+    image: gogs/gogs:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    ports:
+      - ${HOST_IP}:${GOGS_PORT}:3000
+      - ${HOST_IP}:${GOGS_SSH_PORT}:22
+    volumes:
+      - ${APP_PATH}/data:/data
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

@@ -1,0 +1,31 @@
+services:
+  RUYI_DKAPP:
+    image: mcr.microsoft.com/playwright/python:${VERSION}-noble
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: unless-stopped
+    environment:
+      - TZ=${TIMEZONE}
+    ports:
+      - ${HOST_IP}:${API_PORT}:9222
+    volumes:
+      - ${APP_PATH}/scripts:/home/pwuser/scripts
+      - ${APP_PATH}/downloads:/home/pwuser/downloads
+      - ${APP_PATH}/screenshots:/home/pwuser/screenshots
+      - ${APP_PATH}/videos:/home/pwuser/videos
+      - ${APP_PATH}/traces:/home/pwuser/traces
+      - ${APP_PATH}/test-results:/home/pwuser/test-results
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+    command: tail -f /dev/null
+
+networks:
+  ruyi-network:
+    external: true

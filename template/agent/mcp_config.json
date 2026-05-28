@@ -1,0 +1,33 @@
+{
+  "servers": [
+    {
+      "name": "filesystem",
+      "transport": "stdio",
+      "enabled": false,
+      "command": "npx -y @modelcontextprotocol/server-filesystem /tmp",
+      "args": [],
+      "env": {},
+      "auth": {}
+    },
+    {
+      "name": "github",
+      "transport": "stdio",
+      "enabled": false,
+      "command": "npx -y @modelcontextprotocol/server-github",
+      "args": [],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": ""
+      },
+      "auth": {}
+    },
+    {
+      "name": "sqlite",
+      "transport": "stdio",
+      "enabled": false,
+      "command": "npx -y @modelcontextprotocol/server-sqlite",
+      "args": [],
+      "env": {},
+      "auth": {}
+    }
+  ]
+}

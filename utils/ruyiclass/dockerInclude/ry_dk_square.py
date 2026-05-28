@@ -25,7 +25,7 @@ import docker
 import subprocess
 import asyncio
 from django.conf import settings
-from utils.common import ReadFile,WriteFile,DeleteFile,GetTmpPath,RunCommand,GetDataPath,GetInstallPath,DeleteDir,current_os,ast_convert,is_service_running,check_is_port,GetBackupPath,GetRandomSet
+from utils.common import ReadFile,WriteFile,DeleteFile,GetTmpPath,RunCommand,GetDataPath,GetInstallPath,DeleteDir,current_os,ast_convert,is_service_running,check_is_port,GetBackupPath,GetRandomSet,CleanupInstallProcess
 import requests
 import zipfile
 import tarfile
@@ -801,7 +801,6 @@ class main:
 
             process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, universal_newlines=True, encoding='utf-8', errors='replace')
             
-            # 异步读取输出
             async def stream_output():
                 try:
                     while True:
@@ -816,15 +815,15 @@ class main:
                 except Exception as e:
                     await wsinstace.send_message(action='error', message=f"日志读取错误: {str(e)}")
                 finally:
-                    # 读取剩余错误输出
                     error_output = await asyncio.get_event_loop().run_in_executor(
                         None, 
                         process.stderr.read
                     )
                     if error_output:
-                        await wsinstace.send_message(action='error', message=error_output.strip())
+                        await wsinstace.send_message(action='error', message=error_output.strip()[:2000])
                     else:
                         await wsinstace.send_message(action='success', message="日志获取完毕")
+                    CleanupInstallProcess(process)
 
             # 启动输出流任务
             await stream_output()

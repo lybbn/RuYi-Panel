@@ -1,0 +1,8 @@
+{
+  "gateway": {
+    "mode": "local",
+    "controlUi": {
+      "allowedOrigins": ["*"]
+    }
+  }
+}

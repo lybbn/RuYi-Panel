@@ -17,6 +17,9 @@ import re
 import struct
 import os
 import shutil
+import signal
+import gc
+import ctypes
 import socket
 import ast
 import random
@@ -621,9 +624,8 @@ def GetWebRootPath():
         return www_path
     
     try:
-        f = open(os.path.join(settings.BASE_DIR,"data",'wwwroot.ry'))
-        www_path = f.read()
-        f.close()
+        with open(os.path.join(settings.BASE_DIR,"data",'wwwroot.ry')) as f:
+            www_path = f.read()
         if not www_path: www_path = getDefaultPath()
     except:
         www_path = getDefaultPath()
@@ -881,7 +883,7 @@ def RunCommandReturnCode(cmdstr, cwd=None,env_path=None, shell=True,timeout=None
                 env['PATH'] = env_path+";" + env['PATH']
             else:
                 env['PATH'] = env_path+":" + env['PATH']
-        sub = subprocess.Popen(cmdstr, cwd=cwd,stdin=subprocess.PIPE,env=env,shell=shell, bufsize=4096)
+        sub = subprocess.Popen(cmdstr, cwd=cwd,stdin=subprocess.DEVNULL,env=env,shell=shell, bufsize=4096)
         start_time = time.time()
         while True:
             retcode = sub.poll()
@@ -900,6 +902,109 @@ def RunCommandReturnCode(cmdstr, cwd=None,env_path=None, shell=True,timeout=None
         return sub.returncode
     except Exception as e:
         return None
+
+def CreateInstallProcess(cmd_args):
+    """
+    @name 创建安装子进程，使用独立进程组隔离
+    @author lybbn<2024-02-18>
+    @param cmd_args 命令参数列表，如 ['bash', 'script.sh', 'install', '7.4.33']
+    @return subprocess.Popen 进程对象
+    """
+    return subprocess.Popen(
+        list(cmd_args),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        preexec_fn=os.setsid
+    )
+
+def CleanupInstallProcess(process, job_id=None):
+    """
+    @name 清理安装子进程资源，释放内存
+    @author lybbn<2024-02-18>
+    @param process subprocess.Popen 进程对象
+    @param job_id 任务ID，用于从进程管理器中移除
+    """
+    if not process:
+        return
+    try:
+        if process.poll() is None:
+            try:
+                pgid = os.getpgid(process.pid)
+                if pgid != os.getpgrp():
+                    os.killpg(pgid, signal.SIGTERM)
+                else:
+                    process.terminate()
+            except (ProcessLookupError, OSError):
+                pass
+            try:
+                process.wait(timeout=5)
+            except:
+                try:
+                    try:
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    except (ProcessLookupError, OSError):
+                        process.kill()
+                    process.wait(timeout=3)
+                except:
+                    pass
+    except:
+        try:
+            process.kill()
+        except:
+            pass
+    try:
+        process.stdout.close()
+    except:
+        pass
+    try:
+        process.stderr.close()
+    except:
+        pass
+    try:
+        process.wait(timeout=3)
+    except:
+        pass
+    if job_id:
+        try:
+            from apps.systask.subprocessMg import job_subprocess_del
+            job_subprocess_del(job_id)
+        except:
+            pass
+    ReleaseMemory()
+
+def ReleaseMemory():
+    """
+    @name 强制释放内存归还操作系统
+    @description Python的gc.collect()只回收Python对象，不归还内存给OS。
+                 Linux下需调用malloc_trim强制glibc释放堆内存。
+    @author lybbn<2024-02-18>
+    """
+    gc.collect()
+    if platform.system() == 'Linux':
+        try:
+            ctypes.CDLL(None).malloc_trim(0)
+        except:
+            pass
+
+def SafeReadStderr(process, max_bytes=2000):
+    """
+    @name 安全读取子进程stderr，限制读取大小防止内存泄漏
+    @author lybbn<2024-02-18>
+    @param process subprocess.Popen 进程对象
+    @param max_bytes 最大读取字节数，默认2000
+    @return str stderr内容
+    """
+    if not process or not process.stderr:
+        return ''
+    try:
+        r_stderr = process.stderr.read(max_bytes + 1)
+        if r_stderr and len(r_stderr) > max_bytes:
+            r_stderr = r_stderr[:max_bytes]
+        return r_stderr or ''
+    except:
+        return ''
 
 def md5(strings):
     """

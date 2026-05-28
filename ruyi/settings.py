@@ -50,6 +50,10 @@ if RUYI_SECURITY_PATH in RUYI_SYSTEM_PATH_LIST: RUYI_SECURITY_PATH = '/ry'
 if RUYI_SECURITY_PATH.endswith("/"): RUYI_SECURITY_PATH = RUYI_SECURITY_PATH[:-1]
 if RUYI_SECURITY_PATH[0] != '/': RUYI_SECURITY_PATH = '/' + RUYI_SECURITY_PATH
 
+# guacd (Apache Guacamole proxy daemon) 配置
+RUYI_GUACD_HOST = os.getenv('RUYI_GUACD_HOST', '127.0.0.1')
+RUYI_GUACD_PORT = int(os.getenv('RUYI_GUACD_PORT', '4822'))
+
 #是否demo模式
 RUYI_DEMO = False
 RUYI_DEMO_FILE = os.path.join(RUYI_DATA_BASE_PATH,'demo.ry')
@@ -74,6 +78,16 @@ RUYI_CERTKEY_PATH_FILE = os.path.join(RUYI_DATA_BASE_PATH,"key",'certificate.pem
 RUYI_ROOTPFX_PATH_FILE = os.path.join(RUYI_DATA_BASE_PATH,"key",'ruyi_root.pfx')
 RUYI_ROOTPFX_PASSWORD_PATH_FILE = os.path.join(RUYI_DATA_BASE_PATH,"key",'ruyi_root_password.ry')
 RUYI_SSL_ENABLE_FILE = os.path.join(RUYI_DATA_BASE_PATH,'ssl.ry')#是否开启面板ssl
+
+# WAF配置路径
+RUYI_WAF_DATA_PATH = os.path.join(RUYI_DATA_BASE_PATH, 'waf')
+RUYI_WAF_CONFIG_FILE = os.path.join(RUYI_WAF_DATA_PATH, 'config.json')
+RUYI_WAF_RULES_FILE = os.path.join(RUYI_WAF_DATA_PATH, 'rules.json')
+RUYI_WAF_IP_WHITELIST_FILE = os.path.join(RUYI_WAF_DATA_PATH, 'ip_whitelist.json')
+RUYI_WAF_IP_BLACKLIST_FILE = os.path.join(RUYI_WAF_DATA_PATH, 'ip_blacklist.json')
+RUYI_WAF_URL_WHITELIST_FILE = os.path.join(RUYI_WAF_DATA_PATH, 'url_whitelist.json')
+RUYI_WAF_NGINX_CONF_FILE = os.path.join(RUYI_WAF_DATA_PATH, 'nginx_waf.conf')
+RUYI_WAF_LUA_PATH = os.path.join(BASE_DIR, 'utils', 'waf', 'lua')
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.1/howto/deployment/checklist/
@@ -112,6 +126,11 @@ INSTALLED_APPS = [
     'apps.sysshop',
     'apps.sysbak',
     'apps.sysdocker',
+    'apps.sysmonitor',
+    'apps.sysalert',
+    'apps.syswaf',
+    'apps.sysai',
+    'apps.syscheck',
 ]
 
 MIDDLEWARE = [
@@ -158,6 +177,15 @@ CHANNEL_LAYERS = {
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
 
+SQLITE_PRAGMAS = {
+    'journal_mode': 'WAL',
+    'synchronous': 'NORMAL',
+    'cache_size': -2000,
+    'temp_store': 'MEMORY',
+    'mmap_size': 0,
+    'busy_timeout': 5000,
+}
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -182,6 +210,31 @@ DATABASES = {
     'docker': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': os.path.join(BASE_DIR,'data','db','ruyi_docker.db'),
+    },
+    'monitor': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(BASE_DIR,'data','db','ruyi_monitor.db'),
+        'OPTIONS': {'init_command': '; '.join(f'PRAGMA {k}={v}' for k, v in SQLITE_PRAGMAS.items())},
+    },
+    'alert': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(BASE_DIR,'data','db','ruyi_alert.db'),
+        'OPTIONS': {'init_command': '; '.join(f'PRAGMA {k}={v}' for k, v in SQLITE_PRAGMAS.items())},
+    },
+    'waf': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(BASE_DIR,'data','db','ruyi_waf.db'),
+        'OPTIONS': {'init_command': '; '.join(f'PRAGMA {k}={v}' for k, v in SQLITE_PRAGMAS.items())},
+    },
+    'waf_logs': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(BASE_DIR, 'data', 'db', 'ruyi_waf_logs.db'),
+        'OPTIONS': {'init_command': 'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-8000;'},
+    },
+    'ai': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(BASE_DIR, 'data', 'db', 'ruyi_ai.db'),
+        'OPTIONS': {'init_command': '; '.join(f'PRAGMA {k}={v}' for k, v in SQLITE_PRAGMAS.items())},
     }
 }
 
@@ -197,8 +250,8 @@ CACHES = {
         'SHARDS': 4,
         'TIMEOUT': None,# None永不过期
         "OPTIONS": {
-            "MAX_ENTRIES": 1000,
-            'size_limit': 2 ** 30,  # 1GB
+            "MAX_ENTRIES": 500,
+            'size_limit': 256 * 1024 * 1024,  # 256MB
         },
     }
 }
@@ -299,6 +352,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'utils.pagination.CustomPagination',  # 自定义分页
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'utils.authentication.APIKeyAuthentication',
         # 'rest_framework_simplejwt.authentication.JWTTokenUserAuthentication',
         # 'rest_framework.authentication.SessionAuthentication',
     ),
@@ -308,8 +362,8 @@ REST_FRAMEWORK = {
             'rest_framework.throttling.UserRateThrottle'    #登陆用户
     ),
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '60/minute',                   #未登录用户每分钟可以请求60次，还可以设置'100/day',天数
-        'user': '160/minute'                    #已登录用户每分钟可以请求160次
+        'anon': '120/minute',                   #未登录用户每分钟可以请求120次，还可以设置'100/day',天数
+        'user': '240/minute'                    #已登录用户每分钟可以请求240次
     },
     'EXCEPTION_HANDLER': 'utils.exception.CustomExceptionHandler',  # 自定义的异常处理
     'DEFAULT_THROTTLE_FAILURE_MESSAGE': '请求太频繁，请稍后再试',

@@ -19,7 +19,6 @@ CORE_TOOLS = [
 ]
 
 MINIMAL_TOOLS = [
-    'execute_command',
     'request_user_input',
 ]
 

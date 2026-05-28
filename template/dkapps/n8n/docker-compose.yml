@@ -1,0 +1,24 @@
+services:
+  RUYI_DKAPP:
+    image: n8nio/n8n:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+      N8N_SECURE_COOKIE: "false"
+    ports:
+      - ${HOST_IP}:${N8N_PORT}:5678
+    volumes:
+      - ${APP_PATH}/data:/home/node/.n8n
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

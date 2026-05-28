@@ -1,0 +1,32 @@
+services:
+  RUYI_DKAPP:
+    image: vllm/vllm-openai:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: unless-stopped
+    ipc: host
+    gpus: all
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+    ports:
+      - ${HOST_IP}:${VLLM_PORT}:8000
+    volumes:
+      - ${APP_PATH}/hf-cache:/root/.cache/huggingface
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+    command:
+      - --model
+      - ${VLLM_MODEL}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+
+networks:
+  ruyi-network:
+    external: true

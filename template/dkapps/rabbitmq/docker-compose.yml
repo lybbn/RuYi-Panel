@@ -1,0 +1,30 @@
+services:
+  RUYI_DKAPP:
+    image: rabbitmq:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    hostname: ${HOSTNAME}
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE}
+    ports:
+      - ${HOST_IP}:${RABBITMQ_PORT}:5672
+      - ${HOST_IP}:${RABBITMQ_MANAGEMENT_PORT}:15672
+    volumes:
+      - ${APP_PATH}/data:/var/lib/rabbitmq
+      - ${APP_PATH}/log:/var/log/rabbitmq
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

@@ -1,0 +1,19 @@
+services:
+  RUYI_DKAPP:
+    image: guacamole/guacd:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: unless-stopped
+    ports:
+      - ${HOST_IP}:${GUACD_PORT}:4822
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

@@ -15,9 +15,18 @@
 # ------------------------------
 
 import os
+import sys
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 if os.name == "posix":
-    from setproctitle import setproctitle
-    setproctitle("RuYi-Panel")
+    try:
+        from setproctitle import setproctitle
+        setproctitle("RuYi-Panel")
+    except Exception:
+        pass
 
 import django
 
@@ -27,15 +36,16 @@ django.setup()
 import sys
 import importlib
 import datetime
-import socket
+import signal
 from django.apps import apps
 from django.conf import settings
-from utils.common import GetPanelPort,isSSLEnable,GetPanelBindAddress,ReadFile,current_os
+from utils.common import GetPanelPort,isSSLEnable,GetPanelBindAddress,current_os,initWindowsEnv
 from daphne.server import Server as DaphneServer
 from daphne.endpoints import build_endpoint_description_strings
 
 from django.core.exceptions import ImproperlyConfigured
 from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler
+from twisted.internet import reactor
 
 import logging
 logger = logging.getLogger("django.channels.server")
@@ -86,24 +96,38 @@ class AccessLogGenerator:
     """
     Object that implements the Daphne "action logger" internal interface in
     order to provide an access log in something resembling NCSA format.
+    1. 减少日志写入频率，只记录重要事件
+    2. 跳过静态资源日志，减少 I/O
     """
 
     def __init__(self, stream):
         self.stream = stream
+        # 静态资源扩展名，不记录这些请求的日志
+        self.static_extensions = {
+            '.ico', '.png', '.jpg', '.jpeg', '.gif', '.svg',
+            '.css', '.js', '.woff', '.woff2', '.ttf', '.eot',
+            '.map', '.json', '.xml', '.txt'
+        }
 
     def __call__(self, protocol, action, details):
         """
-        Called when an action happens; use it to generate log entries.
+        只记录重要的 HTTP 请求，跳过静态资源
         """
         # HTTP requests
         if protocol == "http" and action == "complete":
-            self.write_entry(
-                host=details["client"],
-                date=datetime.datetime.now(),
-                request="%(method)s %(path)s" % details,
-                status=details["status"],
-                length=details["size"],
-            )
+            path = details.get("path", "")
+            # 跳过静态资源请求，减少日志 I/O
+            if not any(path.lower().endswith(ext) for ext in self.static_extensions):
+                # 只记录状态码>=400 或重要的请求
+                status = details.get("status", 200)
+                if status >= 400 or not path.startswith(('/static/', '/media/')):
+                    self.write_entry(
+                        host=details["client"],
+                        date=datetime.datetime.now(),
+                        request="%(method)s %(path)s" % details,
+                        status=status,
+                        length=details["size"],
+                    )
         # Websocket requests
         elif protocol == "websocket" and action == "connecting":
             self.write_entry(
@@ -155,6 +179,16 @@ def ready_callable():
     """
     quit_command = "CTRL-BREAK" if sys.platform == "win32" else "CONTROL-C"
     sys.stdout.write("Quit the server with %s.\n"%quit_command)
+    if sys.platform == "win32":
+        import threading
+        def _run_startpost():
+            try:
+                from django.core.management import call_command
+                call_command('startpost')
+            except Exception as e:
+                logger.error(f"Windows开机自启执行startpost失败: {e}")
+        t = threading.Thread(target=_run_startpost, daemon=True)
+        t.start()
 
 def main():
     """
@@ -175,14 +209,18 @@ def main():
         privateKeyFile = os.path.relpath(privateKeyFile, settings.BASE_DIR).replace("\\","/") if current_os == "windows" else privateKeyFile
         certKeyFile = os.path.relpath(certKeyFile, settings.BASE_DIR).replace("\\","/") if current_os == "windows" else certKeyFile
         endpoints = ['ssl:%d:privateKey=%s:certKey=%s:interface=%s'%(PORT,privateKeyFile,certKeyFile,HOST)]
+    
+    initWindowsEnv()
+    
     options = {}
     server_name = "ruyi"
-    http_timeout = None
+    http_timeout = 300
     application_close_timeout = 30 #应用超时时间
-    websocket_timeout= 86400 #(websocket超时时间1天)
+    websocket_timeout= 86400  # WebSocket 超时时间，默认1天
     ping_timeout = 40
-    request_buffer_size = 8192 * 10
+    request_buffer_size = 8192 * 5
     websocket_handshake_timeout = 10
+
     try:
         ruyi_server = Server(
             application=get_application(options),
@@ -203,11 +241,30 @@ def main():
             verbosity=1,
             ready_callable=ready_callable
         )
+
+        def handle_exit_signal(signum,frame):
+            """处理退出信号"""
+            if signum == 2:
+                signum = "Ctrl+C"
+            elif signum == 15:
+                signum = "Kill"
+            logger.info(f"收到信号 {signum}，正在关闭ruyi server...")
+            if ruyi_server and reactor.running:
+                ruyi_server.stop()
+            logger.info("ruyi exited")
+            os._exit(0)
+
+        # 注册信号处理函数
+        signal.signal(signal.SIGINT, handle_exit_signal)
+        signal.signal(signal.SIGTERM,handle_exit_signal)
+        
         ruyi_server.run()
         logger.info("ruyi exited")
     except KeyboardInterrupt:
         logger.info("ruyi shutdown")
-        return
-
+        os._exit(0)
+    except Exception as e:
+        logger.error(f"服务器运行出错: {e}")
+        os._exit(1)
 if __name__ == '__main__':
     main()

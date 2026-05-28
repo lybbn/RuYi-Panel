@@ -261,7 +261,7 @@ class ContextCompressor:
                 except Exception:
                     pass
 
-                if not sys_config.get('enable_memory', True):
+                if not sys_config.get('enable_memory', False):
                     return
 
                 embedding_provider = EmbeddingProvider(sys_config)

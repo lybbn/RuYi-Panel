@@ -1,0 +1,25 @@
+services:
+  RUYI_DKAPP:
+    image: allinssl/allinssl:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    environment:
+      ALLINSSL_USER: ${ALLINSSL_USER}
+      ALLINSSL_PWD: ${ALLINSSL_PWD}
+      ALLINSSL_URL: ${ALLINSSL_URL}
+    ports:
+      - ${HOST_IP}:${ALLINSSL_PORT}:8888
+    volumes:
+      - ${APP_PATH}/data:/www/allinssl/data
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

@@ -43,6 +43,8 @@ class NginxClient:
     proxyPath = None
     redirectBasePath = None#重定向配置目录
     redirectPath = None
+    rewriteBasePath = None#伪静态配置目录
+    rewritePath = None
     extensionBasePath = None#扩展配置目录（WAF等）
     antichainStartKey = "RyAntiChain-Start"
     antichainEndKey = "RyAntiChain-End"
@@ -71,6 +73,9 @@ class NginxClient:
         self.redirectBasePath = self.confBasePath + "/redirect/" + self.siteName
         if not os.path.exists(self.redirectBasePath): os.makedirs(self.redirectBasePath)
         self.redirectPath = settings.RUYI_VHOST_PATH.replace("\\", "/")+"/redirect"+ "/" + self.siteName +"_redirect.json"
+        self.rewriteBasePath = self.confBasePath + "/rewrite/" + self.siteName
+        if not os.path.exists(self.rewriteBasePath): os.makedirs(self.rewriteBasePath)
+        self.rewritePath = settings.RUYI_VHOST_PATH.replace("\\", "/")+"/rewrite"+ "/" + self.siteName +"_rewrite.json"
         self.sslBasePath = settings.RUYI_VHOST_PATH.replace("\\", "/")+"/ssl/" + self.siteName
         self.extensionBasePath = self.confBasePath + "/extension/" + self.siteName
         self.stopPath = os.path.join(settings.RUYI_TEMPLATE_BASE_PATH,"www","stop").replace("\\", "/")
@@ -252,6 +257,8 @@ class NginxClient:
             "ratelimit_path":self.ratelimitPath,
             "redirect_base_path":self.redirectBasePath,
             "redirect_path":self.redirectPath,
+            "rewrite_base_path":self.rewriteBasePath,
+            "rewrite_path":self.rewritePath,
             "ssl_base_path":self.sslBasePath,
             "indexDocs":self.get_indexdoc()
         }
@@ -349,6 +356,10 @@ class NginxClient:
         #删除反向代理
         DeleteFile(self.proxyPath,empty_tips=False)
         DeleteDir(self.proxyBasePath)
+        
+        #删除伪静态
+        DeleteFile(self.rewritePath,empty_tips=False)
+        DeleteDir(self.rewriteBasePath)
         
         #删除扩展配置目录
         DeleteDir(self.extensionBasePath)
@@ -781,21 +792,36 @@ class NginxClient:
         cacheUnit = cont.get('cacheUnit','m')
         advanced = cont.get('advanced',False)
         status = cont.get('status',False)
-        operate = cont.get('operate',"add")#操作动作：add、edit、del
+        operate = cont.get('operate',"add")
+        proxyType = cont.get('proxyType','http')
+        phpVersion = cont.get('phpVersion','')
+        
         if len(name)<2 or len(name)>30:return False,"代理名称长度要大于2小于30"
-        if not proxyPath:return False,"代理路径不能为空"
-        if not proxyPass:return False,"转发到URL不能为空"
-        if not proxyHost:return False,"发送域名不能为空"
-        if not re.match(r'http(s)?\:\/\/([a-zA-Z0-9][-a-zA-Z0-9]{0,70}\.)+([a-zA-Z0-9][a-zA-Z0-9]{0,70})+.?',proxyPass):
-            return False, f'域名格式错误:{proxyPass}'
-        if re.search(r'[\=\?\[\]\)\(\&\*\^\$\%\#\@\!\~\`{\}\>\<\,\',\"]+', proxyPass):
-            return False, "转发到URL有特殊符号"
-        if cache and not cacheTime:
-            return False, "缓存时间不能为空"
+        
+        if proxyType == 'php-fpm':
+            if not phpVersion:return False,"请选择PHP版本"
+            proxyPath = '~ [^/]\\.php(/|$)'
+            try:
+                from utils.install.php import get_php_path_info
+                soft_paths = get_php_path_info(phpVersion)
+                fpm_port = soft_paths['fpm_port']
+                proxyPass = f"127.0.0.1:{fpm_port}"
+            except Exception as e:
+                return False,f"获取PHP版本信息失败：{e}"
+        else:
+            if not proxyPath:return False,"代理路径不能为空"
+            if not proxyPass:return False,"转发到URL不能为空"
+            if not proxyHost:return False,"发送域名不能为空"
+            if not re.match(r'http(s)?\:\/\/([a-zA-Z0-9][-a-zA-Z0-9]{0,70}\.)+([a-zA-Z0-9][a-zA-Z0-9]{0,70})+.?',proxyPass):
+                return False, f'域名格式错误:{proxyPass}'
+            if re.search(r'[\=\?\[\]\)\(\&\*\^\$\%\#\@\!\~\`{\}\>\<\,\',\"]+', proxyPass):
+                return False, "转发到URL有特殊符号"
+            if cache and not cacheTime:
+                return False, "缓存时间不能为空"
         
         subfilter_rule = ""
         
-        if subFilters:
+        if proxyType != 'php-fpm' and subFilters:
             for s in subFilters:
                 if not s["key"]:
                     return False, '请输入原内容'
@@ -811,7 +837,7 @@ class NginxClient:
     sub_filter_once off;"""
 
         websocket_rule = ""
-        if websocket:
+        if proxyType != 'php-fpm' and websocket:
             websocket_rule = """
     set $proxy_connection "upgrade";
     if ($http_upgrade = '') {
@@ -829,17 +855,33 @@ class NginxClient:
         
         proxy_conf_name = self.proxyBasePath + "/" + name + "_" + self.siteName + ".conf"
         
-        is_delete_nginx_include = False#是否删除nginx的include 代理配置
+        is_delete_nginx_include = False
         local_conf = ReadFile(self.confPath)
         if not local_conf:return False,"无法获取站点配置文件"
         proxy_c_file = self.proxyBasePath + "/*.conf"
         proxy_cont = ReadFile(self.proxyPath)
         if not proxy_cont:
             proxy_cont = []
-        else:#存在原始配置
+        else:
             proxy_cont = json.loads(proxy_cont)
-            
-        cache_content = f"""
+        
+        if proxyType == 'php-fpm':
+            proxy_conf_content = f"""#RUYI-PROXY-START
+location ~ [^/]\.php(/|$) {{
+    try_files $uri =404;
+    fastcgi_pass {proxyPass};
+    fastcgi_index index.php;
+    include fastcgi.conf;
+    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    fastcgi_param PATH_INFO $fastcgi_path_info;
+    fastcgi_param PHP_VALUE "open_basedir={self.sitePath}:/tmp:/proc";
+    fastcgi_read_timeout 300;
+    fastcgi_buffers 8 16k;
+    fastcgi_buffer_size 32k;
+}}
+#RUYI-PROXY-END"""
+        else:
+            cache_content = f"""
     if ( $uri ~* "\.(gif|png|jpg|css|js|woff|woff2)$" )
     {{
         expires {cacheTime}{cacheUnit};
@@ -849,10 +891,10 @@ class NginxClient:
     proxy_cache_key $host$uri$is_args$args;
     proxy_cache_valid 200 304 301 302 {cacheTime}{cacheUnit};
 """
-        no_cache_content = f"""
+            no_cache_content = f"""
     add_header Cache-Control no-cache;"""
-            
-        proxy_conf_content = f"""#RUYI-PROXY-START    
+                
+            proxy_conf_content = f"""#RUYI-PROXY-START    
 location ^~ {proxyPath} {{
     proxy_pass {proxyPass};
     proxy_set_header Host {proxyHost};
@@ -864,7 +906,7 @@ location ^~ {proxyPath} {{
 }}
 #RUYI-PROXY-END"""
 
-        if operate == "del":#删除当前代理条目
+        if operate == "del":
             proxy_cont = [obj for obj in proxy_cont if obj['name'] != name]
             if len(proxy_cont) == 0:
                 is_delete_nginx_include = True
@@ -887,6 +929,8 @@ location ^~ {proxyPath} {{
                 'advanced':advanced,
                 'subFilters':subFilters, 
                 'proxyHost':proxyHost,
+                'proxyType':proxyType,
+                'phpVersion':phpVersion,
             })
                 
         elif operate == "edit":
@@ -904,23 +948,123 @@ location ^~ {proxyPath} {{
                     rc['advanced'] = advanced
                     rc['subFilters'] = subFilters
                     rc['proxyHost'] = proxyHost
+                    rc['proxyType'] = proxyType
+                    rc['phpVersion'] = phpVersion
                     break
         
         WriteFile(self.proxyPath,json.dumps(proxy_cont))
         
-        if status:#开启时（或创建时）
+        if status:
             if not is_delete_nginx_include and not re.search(r"include.*\/nginx.*\/proxy\/.*\*.conf;",local_conf):
-                #创建站点配置文件代理配置引用
                 addlinecontent = f"""    include {proxy_c_file};"""
                 self.file_add_line(self.confPath,self.replaceLine2Key,addlinecontent)
-            if not is_delete_nginx_include or not is_delete_mode:#写重定向规则文件
+            if not is_delete_nginx_include or not is_delete_mode:
                 WriteFile(proxy_conf_name,proxy_conf_content)
-        else:#关闭
+        else:
             DeleteFile(proxy_conf_name,empty_tips=False)
         
         if is_delete_nginx_include:
             local_conf = ReadFile(self.confPath)
             local_conf = re.sub(r"include.*\/nginx.*\/proxy\/.*\*.conf;\n?",'',local_conf)
+            WriteFile(self.confPath, local_conf)
+        
+        return True,"ok"
+    
+    def get_rewrite_templates(self):
+        templates = [
+            {
+                "name":"wordpress",
+                "label":"WordPress",
+                "content":"location / {\n    try_files $uri $uri/ /index.php?$args;\n}\n"
+            },
+            {
+                "name":"laravel",
+                "label":"Laravel",
+                "content":"location / {\n    try_files $uri $uri/ /index.php$is_args$args;\n}\n"
+            },
+            {
+                "name":"thinkphp",
+                "label":"ThinkPHP",
+                "content":"location / {\n    if (!-e $request_filename){\n        rewrite ^(.*)$ /index.php?s=$1 last;\n        break;\n    }\n}\n"
+            },
+            {
+                "name":"discuz",
+                "label":"Discuz!",
+                "content":"rewrite ^([^\\.]*)/topic-(.+\\.html)$ $1/portal.php?mod=topic&topic=$2 last;\nrewrite ^([^\\.]*)/article-([0-9]+)-([0-9]+)\\.html$ $1/portal.php?mod=view&aid=$2&page=$3 last;\nrewrite ^([^\\.]*)/forum-(\\w+)-([0-9]+)\\.html$ $1/forum.php?mod=forumdisplay&fid=$2&page=$3 last;\nrewrite ^([^\\.]*)/thread-([0-9]+)-([0-9]+)-([0-9]+)\\.html$ $1/forum.php?mod=viewthread&tid=$2&extra=page%3D$4&page=$3 last;\nrewrite ^([^\\.]*)/group-([0-9]+)-([0-9]+)\\.html$ $1/forum.php?mod=group&fid=$2&page=$3 last;\nrewrite ^([^\\.]*)/space-(username|uid)-(.+)\\.html$ $1/home.php?mod=space&$2=$3 last;\nrewrite ^([^\\.]*)/blog-([0-9]+)-([0-9]+)\\.html$ $1/home.php?mod=space&uid=$2&do=blog&id=$3 last;\nrewrite ^([^\\.]*)/(fid|tid)-([0-9]+)\\.html$ $1/index.php?action=$2&value=$3 last;\nrewrite ^([^\\.]*)/([a-z]+[a-z0-9_]*)-([a-z0-9_\\-]+)\\.html$ $1/plugin.php?id=$2:$3 last;\nif (!-e $request_filename) {\n    return 404;\n}\n"
+            },
+            {
+                "name":"typecho",
+                "label":"Typecho",
+                "content":"location / {\n    index index.html index.php;\n    if (-f $request_filename/index.html){\n        rewrite (.*) $1/index.html break;\n    }\n    if (-f $request_filename/index.php){\n        rewrite (.*) $1/index.php;\n    }\n    if (!-f $request_filename){\n        rewrite (.*) /index.php;\n    }\n}\n"
+            },
+            {
+                "name":"dedecms",
+                "label":"DedeCMS",
+                "content":"location / {\n    rewrite ^/plus/list-([0-9]+)\\.html$ /plus/list.php?tid=$1 last;\n    rewrite ^/plus/list-([0-9]+)-([0-9]+)-([0-9]+)\\.html$ /plus/list.php?tid=$1&totalresult=$2&PageNo=$3 last;\n    rewrite ^/plus/view-([0-9]+)-([0-9]+)\\.html$ /plus/view.php?arcID=$1&pageno=$2 last;\n    rewrite ^/tags.html$ /tags.php last;\n    rewrite ^/tags/([0-9]+)\\.html$ /tags.php?/$1 last;\n    rewrite ^/tags/([0-9]+)-([0-9]+)\\.html$ /tags.php?/$1/$2 last;\n}\n"
+            }
+        ]
+        return templates
+    
+    def set_site_rewrite(self,cont):
+        sitename = self.siteName
+        name = cont.get('name',"")
+        rewriteContent = cont.get('content',"")
+        operate = cont.get('operate',"add")
+        
+        if operate not in ["add","edit","del"]:return False,"操作动作错误"
+        if operate != "del" and not name:return False,"规则名称不能为空"
+        
+        is_delete_mode = True if operate == "del" else False
+        
+        rewrite_conf_name = self.rewriteBasePath + "/" + name + "_" + self.siteName + ".conf"
+        
+        is_delete_nginx_include = False
+        local_conf = ReadFile(self.confPath)
+        if not local_conf:return False,"无法获取站点配置文件"
+        rewrite_c_file = self.rewriteBasePath + "/*.conf"
+        rewrite_cont = ReadFile(self.rewritePath)
+        if not rewrite_cont:
+            rewrite_cont = []
+        else:
+            rewrite_cont = json.loads(rewrite_cont)
+        
+        rewrite_conf_content = f"""#RUYI-REWRITE-START
+{rewriteContent}#RUYI-REWRITE-END"""
+        
+        if operate == "del":
+            rewrite_cont = [obj for obj in rewrite_cont if obj['name'] != name]
+            if len(rewrite_cont) == 0:
+                is_delete_nginx_include = True
+            DeleteFile(rewrite_conf_name,empty_tips=False)
+        
+        elif operate == "add":
+            if any(obj['name'] == name for obj in rewrite_cont):
+                return False,"规则名称重复"
+            rewrite_cont.append({
+                "sitename":sitename,
+                "name":name,
+                "content":rewriteContent,
+            })
+                
+        elif operate == "edit":
+            for rc in rewrite_cont:
+                if rc['name'] == name:
+                    rc['content'] = rewriteContent
+                    break
+        
+        WriteFile(self.rewritePath,json.dumps(rewrite_cont))
+        
+        if not is_delete_mode:
+            if not re.search(r"include.*\/nginx.*\/rewrite\/.*\*.conf;",local_conf):
+                addlinecontent = f"""    include {rewrite_c_file};"""
+                self.file_add_line(self.confPath,self.replaceLine2Key,addlinecontent)
+            WriteFile(rewrite_conf_name,rewrite_conf_content)
+        else:
+            DeleteFile(rewrite_conf_name,empty_tips=False)
+        
+        if is_delete_nginx_include:
+            local_conf = ReadFile(self.confPath)
+            local_conf = re.sub(r"include.*\/nginx.*\/rewrite\/.*\*.conf;\n?",'',local_conf)
             WriteFile(self.confPath, local_conf)
         
         return True,"ok"
@@ -1238,12 +1382,13 @@ access_by_lua_block {{
         
         return migrated_count, skipped_count, failed_count
     
-    def create_php_proxy_conf(self, domains=None, fpm_port=9000, conf_path=None, is_windows=True):
+    def create_php_proxy_conf(self, domains=None, fpm_port=None, fpm_listen=None, conf_path=None, is_windows=True):
         """
         @name 创建PHP站点的Nginx配置文件（含PHP-FPM反向代理）
         @author lybbn<2025-05-06>
         @param domains 域名端口列表[{'domain':xxx,'port':xxx}]
-        @param fpm_port PHP-FPM监听端口
+        @param fpm_port PHP-FPM监听端口（兼容旧参数）
+        @param fpm_listen PHP-FPM监听地址（优先使用，支持socket和tcp）
         @param conf_path 配置文件路径
         @param is_windows 是否Windows
         """
@@ -1257,7 +1402,12 @@ access_by_lua_block {{
         listen_ports = "\n".join(f"    listen {d};" for d in l_ports)
         error_log_off = "off" if is_windows else "/dev/null"
         
-        fpm_socket = f"127.0.0.1:{fpm_port}"
+        if fpm_listen:
+            fpm_socket = fpm_listen
+        elif fpm_port:
+            fpm_socket = f"127.0.0.1:{fpm_port}"
+        else:
+            fpm_socket = "127.0.0.1:9000"
         
         conf = f"""server 
 {{

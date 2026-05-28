@@ -1,0 +1,53 @@
+services:
+  RUYI_DKAPP:
+    image: ghcr.io/openclaw/openclaw:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: unless-stopped
+    init: true
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      TZ: ${OPENCLAW_TIMEZONE}
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+    ports:
+      - ${OPENCLAW_GATEWAY_HOST_IP:-0.0.0.0}:${OPENCLAW_GATEWAY_PORT}:18789
+      - ${OPENCLAW_BRIDGE_HOST_IP:-127.0.0.1}:${OPENCLAW_BRIDGE_PORT}:18790
+    volumes:
+      - ${APP_PATH}/config:/home/node/.openclaw
+      - ${APP_PATH}/workspace:/home/node/.openclaw/workspace
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+    command:
+      - node
+      - dist/index.js
+      - gateway
+      - --bind
+      - ${OPENCLAW_GATEWAY_BIND}
+      - --port
+      - "18789"
+      - --auth
+      - token
+      - --token
+      - ${OPENCLAW_GATEWAY_TOKEN}
+      - --allow-unconfigured
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  ruyi-network:
+    external: true
+

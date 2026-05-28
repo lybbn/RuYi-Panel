@@ -84,7 +84,8 @@ vuln_scan_kernel 返回的 risk_level 是代码确定性判断，必须直接采
 ### 信息收集规则
 - 缺少关键参数（域名/端口/密码等）→ 用 request_user_input 表单收集，不用纯文本提问
 - 面板操作问题 → 先 search_docs 查文档，不凭记忆回答
-- 回答问题前先调用工具收集信息，不直接给方案
+- 运维操作类问题 → 先调用工具收集信息，不直接给方案
+- 日常对话/问候/闲聊 → 直接回复，不调用任何工具
 
 ### 工具调用规则
 - 必须用function calling，禁止在文本中输出工具调用
@@ -178,9 +179,9 @@ class Agent:
                     self.system_prompt += '\n\n' + supplement
         self.temperature = self.config.get('temperature', 0.7)
         self.top_p = self.config.get('top_p', 1.0)
-        self.require_command_confirm = self.config.get('require_command_confirm', True)
+        self.require_command_confirm = self.config.get('require_command_confirm', 'medium_high')
         self.max_context_messages = self.config.get('max_context_messages', 30)
-        self.enable_memory = self.config.get('enable_memory', True)
+        self.enable_memory = self.config.get('enable_memory', False)
         self.memory_recall_threshold = self.config.get('memory_recall_threshold', 10)
         self.web_search = self.config.get('web_search', False)
 
@@ -196,6 +197,7 @@ class Agent:
 
         self._memory_store = None
         self._stop_flag = False
+        self._stop_reason = ''
         self._confirm_events = {}
         self._confirm_results = {}
         self._confirm_lock = threading.Lock()
@@ -210,8 +212,9 @@ class Agent:
         from apps.sysai.agent.agent_orchestrator import get_or_create_orchestrator
         self._orchestrator = get_or_create_orchestrator(self.session_id, self)
 
-    def stop(self):
+    def stop(self, reason='user'):
         self._stop_flag = True
+        self._stop_reason = reason
         with self._confirm_lock:
             for event in self._confirm_events.values():
                 event.set()
@@ -222,11 +225,16 @@ class Agent:
     def is_stopped(self):
         return self._stop_flag
 
+    def get_stop_reason(self):
+        return self._stop_reason
+
     def reset_stop(self):
         self._stop_flag = False
+        self._stop_reason = ''
 
     def cancel_current_command(self):
         self._stop_flag = True
+        self._stop_reason = 'command_cancelled'
         with self._confirm_lock:
             for event in self._confirm_events.values():
                 event.set()
@@ -906,6 +914,8 @@ class Agent:
             }
             consecutive_tool_failures = 0
             max_consecutive_failures = 3
+            empty_response_retries = 0
+            max_empty_response_retries = 1
 
             while iteration_count < self.max_tool_iterations:
                 iteration_usage = {
@@ -915,7 +925,9 @@ class Agent:
                 }
 
                 if self.is_stopped():
-                    self._save_trajectory(messages, iteration_count, 'user_stopped')
+                    stop_r = self.get_stop_reason()
+                    logger.info(f'Agent在迭代开始时被停止: iteration={iteration_count}, stop_reason={stop_r}')
+                    self._save_trajectory(messages, iteration_count, f'stopped:{stop_r}')
                     yield {
                         'type': 'stop',
                         'content': '生成已停止',
@@ -958,7 +970,9 @@ class Agent:
                     try:
                         for chunk in self.model.chat_stream(request_messages, tools):
                             if self.is_stopped():
-                                self._save_trajectory(messages, iteration_count, 'user_stopped_during_stream')
+                                stop_r = self.get_stop_reason()
+                                logger.info(f'Agent在流式处理中被停止: iteration={iteration_count}, stop_reason={stop_r}')
+                                self._save_trajectory(messages, iteration_count, f'stopped_during_stream:{stop_r}')
                                 yield {
                                     'type': 'stop',
                                     'content': '生成已停止',
@@ -1189,6 +1203,29 @@ class Agent:
                             current_response_content = clean_content
                             full_response_content = full_response_content[:full_response_content.rfind(current_response_content) + len(current_response_content)] if current_response_content in full_response_content else full_response_content
                     else:
+                        if not current_response_content and current_reasoning_content and empty_response_retries < max_empty_response_retries:
+                            empty_response_retries += 1
+                            logger.warning(f'模型返回空内容但有思考过程(iteration={iteration_count}), 重试({empty_response_retries}/{max_empty_response_retries})')
+                            messages.append({
+                                'role': 'assistant',
+                                'content': '',
+                                'reasoning_content': current_reasoning_content,
+                            })
+                            messages.append({
+                                'role': 'user',
+                                'content': '请基于你的思考过程，直接给出最终回答。不要再次调用工具。',
+                            })
+                            current_response_content = ''
+                            current_reasoning_content = ''
+                            continue
+                        if not current_response_content and current_reasoning_content:
+                            logger.warning(f'模型返回空内容重试后仍为空(iteration={iteration_count}), 使用思考过程作为回复')
+                            current_response_content = current_reasoning_content
+                            full_response_content += current_response_content
+                            yield {
+                                'type': 'content',
+                                'content': current_response_content,
+                            }
                         yield {
                             'type': 'stop',
                             'usage': total_usage,
@@ -1339,6 +1376,16 @@ class Agent:
                         continue
 
                     need_confirm = False
+                    tool_risk_level = 'low'
+                    try:
+                        from apps.sysai.tools.base import AIToolRegistry
+                        registry = AIToolRegistry()
+                        meta = registry.get_metadata(func_name)
+                        if meta:
+                            tool_risk_level = meta.get('risk_level', 'low')
+                    except Exception:
+                        pass
+
                     try:
                         from apps.sysai.models import AIToolConfig
                         tool_config = AIToolConfig.objects.filter(name=func_name).first()
@@ -1347,29 +1394,29 @@ class Agent:
                     except Exception:
                         pass
 
-                    if self.require_command_confirm and func_name in (
-                        'execute_command', 'start_command', 'stop_command', 'service_manage', 'firewall_manage',
-                        'file_write', 'file_delete', 'file_move', 'file_copy',
-                        'database_execute', 'database_create', 'database_delete',
-                        'database_reset_pass', 'panel_site_create', 'panel_site_delete',
-                        'panel_site_manage', 'panel_shop_install', 'panel_shop_uninstall',
-                        'panel_shop_manage', 'panel_docker_square_install',
-                        'panel_docker_square_manage', 'crontab_create', 'crontab_delete',
-                        'crontab_toggle', 'docker_container_stop', 'docker_container_remove',
-                        'docker_image_remove', 'security_scan', 'security_fix',
-                    ):
-                        need_confirm = True
+                    confirm_level = self.require_command_confirm
+                    if isinstance(confirm_level, bool):
+                        confirm_level = 'medium_high' if confirm_level else 'none'
+
+                    if not need_confirm and confirm_level != 'none':
+                        if confirm_level == 'high' and tool_risk_level in ('high', 'dangerous'):
+                            need_confirm = True
+                        elif confirm_level == 'medium_high' and tool_risk_level in ('medium', 'high', 'dangerous'):
+                            need_confirm = True
 
                     if need_confirm:
                         confirm_id = f"confirm_{call_id}"
+                        _confirm_timeout = 600
+                        _confirm_timeout_backend = _confirm_timeout + 60
                         yield {
                             'type': 'tool_confirm',
                             'tool': func_name,
                             'id': call_id,
                             'confirm_id': confirm_id,
                             'arguments': arguments,
+                            'timeout': _confirm_timeout,
                         }
-                        approved = self._wait_for_confirm(confirm_id, timeout=600)
+                        approved = self._wait_for_confirm(confirm_id, timeout=_confirm_timeout_backend)
                         if not approved:
                             logger.info(f'工具 {func_name} 被用户拒绝执行')
                             messages.append({
@@ -1440,7 +1487,9 @@ class Agent:
                     })
 
                 if self.is_stopped():
-                    self._save_trajectory(messages, iteration_count, 'user_stopped_after_tool')
+                    stop_r = self.get_stop_reason()
+                    logger.info(f'Agent在工具执行后被停止: iteration={iteration_count}, stop_reason={stop_r}')
+                    self._save_trajectory(messages, iteration_count, f'stopped_after_tool:{stop_r}')
                     yield {
                         'type': 'stop',
                         'content': '生成已停止',
@@ -1455,7 +1504,7 @@ class Agent:
                 self._save_trajectory(messages, iteration_count, 'max_iterations')
                 yield {
                     'type': 'can_continue',
-                    'content': '模型思考次数已达上限，请输入"继续"后获得更多结果。',
+                    'content': f'模型工具调用轮次已达上限（{iteration_count}/{self.max_tool_iterations}），点击"继续生成"可继续执行。',
                 }
                 yield {
                     'type': 'stop',

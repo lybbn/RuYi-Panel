@@ -448,6 +448,9 @@ Uninstall_Soft() {
     echo "==================================================="
 }
 
+# 释放Linux文件系统缓存（page cache）
+trap 'sync && echo 3 > /proc/sys/vm/drop_caches 2>/dev/null' EXIT
+
 if [ "$action_type" == 'install' ]; then
     if [ -z "${soft_version}" ]; then
         echo "参数错误" >&2

@@ -1,0 +1,28 @@
+services:
+  RUYI_DKAPP:
+    image: registry.cn-beijing.aliyuncs.com/ruyi-panel/ruyi-mcp-server:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    environment:
+      - MCP_TRANSPORT=sse
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8765
+      - PANEL_URL=${PANEL_URL}
+      - PANEL_PORT=${PANEL_PORT}
+      - API_KEY=${API_KEY}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - ${HOST_IP}:${MCP_PORT}:8765
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

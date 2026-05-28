@@ -15,7 +15,7 @@ AI_CONFIG_KEY = 'sysai_global_config'
 
 _DEFAULT_CONFIG = {
     'system_prompt': '',
-    'max_turns': 20,
+    'max_turns': 100,
     'max_context_messages': 20,
     'enable_web_search': False,
     'web_search_provider': '',
@@ -25,9 +25,9 @@ _DEFAULT_CONFIG = {
     'context_compress_threshold': 10000,
     'compress_preserve_rounds': 5,
     'enable_memory_flush': True,
-    'enable_memory': True,
+    'enable_memory': False,
     'memory_recall_threshold': 10,
-    'require_command_confirm': True,
+    'require_command_confirm': 'medium_high',
     'show_assistant': True,
 }
 

@@ -51,17 +51,26 @@ class ProcessMonitor:
         proc_time = (tt1_0 - tt0_0) + (tt1_1 - tt0_1)
         time = st1 - st0
         try:
-            cpus_percent = (proc_time / time) * 100  # 计算 CPU 使用率百分比
+            cpus_percent = (proc_time / time) * 100
         except ZeroDivisionError:
-            cpus_percent = 0.0  # 防止除以零异常
+            cpus_percent = 0.0
         all_pid_cpuinfo[pid] = [st1, tt1_0, tt1_1]
         
-        res =  "{:.2f}".format(cpus_percent)
+        if len(all_pid_cpuinfo) > 2000:
+            self._cleanup_stale_cpuinfo(all_pid_cpuinfo)
         
-        # 更新总缓存键
+        res = "{:.2f}".format(cpus_percent)
         cache.set(self.cache_key, all_pid_cpuinfo, timeout=self.cache_timeout)
-
         return res
+
+    def _cleanup_stale_cpuinfo(self, all_pid_cpuinfo):
+        try:
+            current_pids = set(psutil.pids())
+            stale_pids = [pid for pid in list(all_pid_cpuinfo.keys()) if pid not in current_pids]
+            for pid in stale_pids[:500]:
+                all_pid_cpuinfo.pop(pid, None)
+        except Exception:
+            pass
 
 
     def get_processes_list(self, pid_filter=None, name_filter=None, user_filter=None):
@@ -217,19 +226,21 @@ class ProcessMonitor:
         :return: 进程信息列表
         Author: lybbn
         """
-        from concurrent.futures import ProcessPoolExecutor, as_completed
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         processes_info = []
         pids = [proc.pid for proc in psutil.process_iter(['pid'])]
-        # 使用线程池并发获取进程信息
-        with ProcessPoolExecutor() as executor:
+        with ThreadPoolExecutor() as executor:
             futures = []
             for pid in pids:
                 futures.append(executor.submit(self._get_windows_process_info, pid, pid_filter, name_filter, user_filter))
 
             for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    processes_info.append(result)
+                try:
+                    result = future.result()
+                    if result:
+                        processes_info.append(result)
+                except Exception:
+                    pass
 
         return processes_info
     

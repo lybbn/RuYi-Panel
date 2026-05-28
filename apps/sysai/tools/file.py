@@ -17,8 +17,10 @@ def _format_size(size_bytes: int) -> str:
 def list_directory(path: str = '/', show_hidden: bool = False):
     """列出指定目录下的文件和子目录，包括文件大小、权限、修改时间等信息。当用户需要查看目录内容时使用。
 
+    路径必须使用绝对路径，禁止使用相对路径。
+
     Args:
-        path: 要列出的目录路径，默认为根目录 /
+        path: 要列出的目录绝对路径，默认为根目录 /
         show_hidden: 是否显示隐藏文件，默认否
     """
     if not os.path.exists(path):
@@ -71,8 +73,10 @@ def list_directory(path: str = '/', show_hidden: bool = False):
 def read_file(path: str, start_line: int = 1, end_line: int = 100, encoding: str = 'utf-8'):
     """读取指定文件的内容，支持指定行范围。当用户需要查看文件内容时使用。
 
+    路径必须使用绝对路径，禁止使用相对路径。
+
     Args:
-        path: 文件路径
+        path: 文件绝对路径
         start_line: 起始行号，默认1
         end_line: 结束行号，默认100
         encoding: 文件编码，默认utf-8
@@ -119,8 +123,10 @@ def read_file(path: str, start_line: int = 1, end_line: int = 100, encoding: str
 def write_file(path: str, content: str, mode: str = 'overwrite', encoding: str = 'utf-8'):
     """写入内容到指定文件。⚠️此为高危操作，会修改或创建文件，请确认操作意图后再执行。
 
+    路径必须使用绝对路径，禁止使用相对路径。
+
     Args:
-        path: 文件路径
+        path: 文件绝对路径
         content: 要写入的内容
         mode: 写入模式，overwrite(覆盖) 或 append(追加)，默认overwrite
         encoding: 文件编码，默认utf-8
@@ -158,8 +164,10 @@ def write_file(path: str, content: str, mode: str = 'overwrite', encoding: str =
 def search_files(directory: str, pattern: str = '*', max_results: int = 50):
     """在指定目录下搜索文件，支持通配符模式匹配。当用户需要查找特定文件时使用。
 
+    路径必须使用绝对路径，禁止使用相对路径。
+
     Args:
-        directory: 搜索的目录路径
+        directory: 搜索的目录绝对路径
         pattern: 文件名匹配模式，支持通配符，默认 *
         max_results: 最大返回结果数，默认50
     """
@@ -193,8 +201,10 @@ def search_files(directory: str, pattern: str = '*', max_results: int = 50):
 def search_in_file(path: str, keyword: str, case_sensitive: bool = True, max_lines: int = 30):
     """在文件中搜索包含指定关键词的行。当用户需要在文件中查找特定内容时使用。
 
+    路径必须使用绝对路径，禁止使用相对路径。
+
     Args:
-        path: 文件路径
+        path: 文件绝对路径
         keyword: 搜索关键词
         case_sensitive: 是否区分大小写，默认是
         max_lines: 最大返回行数，默认30

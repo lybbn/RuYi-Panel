@@ -21,6 +21,7 @@ from utils.ruyiclass.nginxClass import NginxClient
 from utils.ruyiclass.pythonClass import PythonClient
 from utils.ruyiclass.goClass import GoClient
 from utils.ruyiclass.phpClass import PhpClient
+from utils.ruyiclass.nodejsClass import NodeClient
 from utils.install.install_soft import Ry_Reload_Soft,Ry_Restart_Soft
 from utils.common import current_os
 
@@ -54,6 +55,12 @@ class WebClient:
             cont =  kwargs.get('cont', {})
             isok,msg = PhpClient(siteName=siteName,sitePath=sitePath,cont=cont).create_site()
             return isok,msg
+        elif webserver == "node":
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok,msg = NodeClient(siteName=siteName,sitePath=sitePath,cont=cont).create_site()
+            return isok,msg
         return False,"无此类型webserver"
     
     @staticmethod
@@ -76,6 +83,12 @@ class WebClient:
             sitePath = kwargs.get('sitePath', '')
             cont =  kwargs.get('cont', {})
             isok = PhpClient(siteName=siteName,sitePath=sitePath,cont=cont).autoStart()
+            return isok
+        elif webserver == 'node':
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok = NodeClient(siteName=siteName,sitePath=sitePath,cont=cont).autoStart()
             return isok
         return False,"无此类型webserver"
     
@@ -105,6 +118,12 @@ class WebClient:
             cont =  kwargs.get('cont', {})
             isok = PhpClient(siteName=siteName,sitePath=sitePath,cont=cont).start_site()
             return isok
+        elif webserver == 'node':
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok = NodeClient(siteName=siteName,sitePath=sitePath,cont=cont).start_site()
+            return isok
         return False,"无此类型webserver"
     
     @staticmethod
@@ -132,6 +151,12 @@ class WebClient:
             sitePath = kwargs.get('sitePath', '')
             cont =  kwargs.get('cont', {})
             isok = PhpClient(siteName=siteName,sitePath=sitePath,cont=cont).stop_site()
+            return isok,None
+        elif webserver == 'node':
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok = NodeClient(siteName=siteName,sitePath=sitePath,cont=cont).stop_site()
             return isok,None
         return False,"无此类型webserver"
     
@@ -161,6 +186,12 @@ class WebClient:
             sitePath = kwargs.get('sitePath', '')
             cont =  kwargs.get('cont', {})
             isok,msg = PhpClient(siteName=siteName,sitePath=sitePath,cont=cont).delete_site()
+            return isok,msg
+        elif webserver == 'node':
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont =  kwargs.get('cont', {})
+            isok,msg = NodeClient(siteName=siteName,sitePath=sitePath,cont=cont).delete_site()
             return isok,msg
         return False,"无此类型webserver"
     
@@ -372,4 +403,25 @@ class WebClient:
             type = kwargs.get('type', '')
             isok = NginxClient(siteName=siteName,sitePath=sitePath).site_log_open(action=action,type=type)
             return isok,None
+        return False,"无此类型webserver"
+    
+    @staticmethod
+    def get_rewrite_templates(*args, **kwargs):
+        """
+        获取伪静态规则模板
+        """
+        return NginxClient().get_rewrite_templates()
+    
+    @staticmethod
+    def set_site_rewrite(*args, **kwargs):
+        """
+        设置伪静态规则
+        """
+        webserver = kwargs.get('webserver', '')
+        if webserver == 'nginx':
+            siteName = kwargs.get('siteName', '')
+            sitePath = kwargs.get('sitePath', '')
+            cont = kwargs.get('cont', {})
+            isok,msg = NginxClient(siteName=siteName,sitePath=sitePath).set_site_rewrite(cont=cont)
+            return isok,msg
         return False,"无此类型webserver"

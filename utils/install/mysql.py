@@ -25,7 +25,7 @@ import zipfile
 import tarfile
 import psutil
 import configparser
-from utils.common import DeleteFile,GetRandomSet,ReadFile,GetBackupPath,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,generate_random_string,ConvertToUnixLineEndings
+from utils.common import DeleteFile,GetRandomSet,ReadFile,GetBackupPath,is_service_running,GetTmpPath,GetInstallPath,WriteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,generate_random_string,ConvertToUnixLineEndings,CreateInstallProcess,CleanupInstallProcess,SafeReadStderr,ReleaseMemory
 from utils.security.files import download_url_file,get_file_name_from_url,download_url_file_wget
 from pathlib import Path
 import subprocess
@@ -35,7 +35,7 @@ from apps.sysshop.models import RySoftShop
 from utils.ruyiclass.mysqlClass import MysqlClient
 from apps.sysbak.models import RuyiBackup
 from django.conf import settings
-from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
+from apps.systask.subprocessMg import job_subprocess_add
 
 def is_sql_result_error(result):
     result = str(result)
@@ -79,8 +79,7 @@ def get_mysql_path_info():
 
 def mysql_install_call_back(version={},call_back=None,ok=True):
     if call_back:
-        job_id = version['job_id']
-        job_subprocess_del(job_id)
+        job_id = version.get('job_id')
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -161,22 +160,24 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
             # 转换脚本换行符为 Unix 格式
             script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","mysql.sh")
             ConvertToUnixLineEndings(script_path)
-            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'], str(type)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            #r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'], str(type)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            r_process = CreateInstallProcess(['bash', script_path,'install',version['c_version'], str(type)])
             job_subprocess_add(version['job_id'],r_process)
-            # 持续读取输出
-            while True:
-                r_output = r_process.stdout.readline()
-                if r_output == '' and r_process.poll() is not None:
-                    break
-                if r_output:
-                    WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
-                time.sleep(0.1)
-
-            # 获取标准错误
-            r_stderr = r_process.stderr.read()
-            if r_stderr:
-                if not os.path.exists(soft_paths['linux_mysql_path']):
-                    raise ValueError(r_stderr.strip())
+            try:
+                while True:
+                    r_output = r_process.stdout.readline()
+                    if r_output == '' and r_process.poll() is not None:
+                        break
+                    if r_output:
+                        WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                    time.sleep(0.1)
+                r_stderr = SafeReadStderr(r_process)
+                if r_stderr:
+                    if not os.path.exists(soft_paths['linux_mysql_path']):
+                        raise ValueError(r_stderr.strip()[:2000])
+            finally:
+                CleanupInstallProcess(r_process, version['job_id'])
+                r_process = None
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
             WriteFile(soft_paths['linux_conf_path'],RY_GET_MYSQL_CONFIG(version=version['c_version'],is_windows=False))
@@ -213,10 +214,15 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
         Drop_Test_Databases(is_windows=is_windows)
         mysql_install_call_back(version=version,call_back=call_back,ok=True)
         WriteFile(log_path,"-------------------安装任务已结束-------------------\n",mode='a',write=is_write_log)
+        version.clear()
+        soft_paths.clear()
+        ReleaseMemory()
         return True
     except Exception as e:
         WriteFile(log_path,f"【错误】异常信息如下：\n{e}",mode='a',write=is_write_log)
         mysql_install_call_back(version=version,call_back=call_back,ok=False)
+        version.clear()
+        ReleaseMemory()
         return False
 
 def Uninstall_Mysql(is_windows=True):
@@ -292,7 +298,8 @@ def Start_Mysql(is_windows=True):
                     if not is_mysql_running(is_windows=True):
                         # command = f'"{exe_path}" --defaults-file="{conf_path}"'
                         command = f'sc start MySQL'
-                        subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
+                        p = subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)
+                        p.communicate(timeout=30)
                     else:
                         return True
                     time.sleep(2)
@@ -342,7 +349,8 @@ def Stop_Mysql(is_windows=True):
                     #     os.kill(int(i['ProcessId']), signal.SIGTERM)
                     # return True
                     command = f'sc stop MySQL'
-                    subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)#CREATE_NEW_CONSOLE 新窗口 、CREATE_NO_WINDOW 隐藏窗口
+                    p = subprocess.Popen(command,cwd=soft_paths['install_path'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW)
+                    p.communicate(timeout=30)
                     time.sleep(2)
                     if is_mysql_running(is_windows=True):
                         continue

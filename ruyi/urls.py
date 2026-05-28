@@ -35,6 +35,11 @@ urlpatterns = [
     path('api/task/', include('apps.systask.urls')),
     path('api/bak/', include('apps.sysbak.urls')),
     path('api/docker/', include('apps.sysdocker.urls')),
+    path('api/monitor/', include('apps.sysmonitor.urls')),
+    path('api/alert/', include('apps.sysalert.urls')),
+    path('api/waf/', include('apps.syswaf.urls')),
+    path('api/ai/', include('apps.sysai.urls')),
+    path('api/syscheck/', include('apps.syscheck.urls')),
     path('static/<path:path>', streamingmedia_serve, {'document_root': os.path.join(settings.STATIC_ROOT, "static") },),  # 处理静态文件
     path('media/<path:path>', streamingmedia_serve, {'document_root': os.path.join(settings.STATIC_ROOT, "static") },),  # 处理媒体文件
     re_path(r'^(logo\.png|favicon\.ico)$', streamingmedia_serve, {'document_root': settings.STATIC_ROOT},),

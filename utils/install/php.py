@@ -18,15 +18,16 @@
 # PHP环境安装/卸载/启停/配置
 # ------------------------------
 
-import os,platform,re
+import os,platform,re,json,errno
 import time
-from utils.common import ReadFile,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,RunCommand,ConvertToUnixLineEndings,is_service_running,current_os
+from contextlib import contextmanager
+from utils.common import ReadFile,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,RunCommand,ConvertToUnixLineEndings,is_service_running,current_os,CreateInstallProcess,CleanupInstallProcess,SafeReadStderr,ReleaseMemory
 from utils.security.files import download_url_file,get_file_name_from_url
 import subprocess
 import importlib
 from utils.server.system import system
 from django.conf import settings
-from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
+from apps.systask.subprocessMg import job_subprocess_add
 
 def get_php_path_info(version):
     root_path = GetInstallPath()
@@ -65,8 +66,7 @@ def get_php_fpm_port(version):
 
 def php_install_call_back(version={},call_back=None,ok=True):
     if call_back:
-        job_id = version['job_id']
-        job_subprocess_del(job_id)
+        job_id = version.get('job_id')
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -109,6 +109,13 @@ def is_php_running(version,is_windows=True,simple_check=False):
                     pass
         return False
     else:
+        service_name = f"php-fpm-{version}"
+        try:
+            result = subprocess.run(['systemctl','is-active',service_name],capture_output=True,text=True,timeout=5)
+            if result.returncode == 0 and 'active' in result.stdout.strip().lower():
+                return True
+        except Exception:
+            pass
         fpm_path = soft_paths['linux_abspath_fpm_path']
         pid_file = os.path.join(soft_paths['install_abspath_path'],'var','run','php-fpm.pid')
         if os.path.isfile(pid_file):
@@ -121,10 +128,17 @@ def is_php_running(version,is_windows=True,simple_check=False):
             except:
                 pass
         import psutil
-        for proc in psutil.process_iter(['name','exe']):
+        install_path = soft_paths['install_abspath_path']
+        for proc in psutil.process_iter(['name','exe','cmdline']):
             try:
-                if proc.info['name'] == 'php-fpm' or (proc.info['exe'] and proc.info['exe'] == fpm_path):
+                if proc.info['exe'] and proc.info['exe'] == fpm_path:
                     return True
+                if proc.info['cmdline']:
+                    cmdline_str = ' '.join(proc.info['cmdline'])
+                    if fpm_path in cmdline_str:
+                        return True
+                    if install_path in cmdline_str:
+                        return True
             except:
                 pass
         return False
@@ -141,12 +155,36 @@ def _init_php_fpm_conf_windows(install_path,version):
         elif os.path.exists(php_ini_develop):
             import shutil
             shutil.copy2(php_ini_develop,php_ini_path)
+    if not os.path.exists(php_ini_path):
+        ext_dir = os.path.join(install_path,'ext')
+        default_ini = f"""[PHP]
+engine = On
+short_open_tag = Off
+precision = 14
+output_buffering = 4096
+zlib.output_compression = Off
+implicit_flush = Off
+unserialize_callback_func =
+serialize_precision = -1
+extension_dir = "{ext_dir.replace(os.sep,'/')}"
+date.timezone = Asia/Shanghai
+disable_functions = {','.join(PHP_DANGEROUS_FUNCTIONS)}
+upload_max_filesize = 50M
+post_max_size = 50M
+max_execution_time = 300
+max_input_time = 300
+memory_limit = 128M
+display_errors = Off
+log_errors = On
+error_log = {os.path.join(soft_paths["install_abspath_path"],'var','log','php-fpm.log').replace(os.sep,'/')}
+"""
+        WriteFile(php_ini_path, default_ini)
     if os.path.exists(php_ini_path):
         content = ReadFile(php_ini_path)
         ext_dir = os.path.join(install_path,'ext')
         content = re.sub(r';?\s*extension_dir\s*=.*',f'extension_dir = "{ext_dir.replace(os.sep,"/")}"',content)
         content = re.sub(r';?\s*date\.timezone\s*=.*','date.timezone = Asia/Shanghai',content)
-        content = re.sub(r';?\s*disable_functions\s*=.*','disable_functions = exec,system,passthru,shell_exec,proc_open,popen',content)
+        content = re.sub(r';?\s*disable_functions\s*=.*','disable_functions = '+','.join(PHP_DANGEROUS_FUNCTIONS),content)
         content = re.sub(r';?\s*upload_max_filesize\s*=.*','upload_max_filesize = 50M',content)
         content = re.sub(r';?\s*post_max_size\s*=.*','post_max_size = 50M',content)
         content = re.sub(r';?\s*max_execution_time\s*=.*','max_execution_time = 300',content)
@@ -154,7 +192,13 @@ def _init_php_fpm_conf_windows(install_path,version):
         content = re.sub(r';?\s*memory_limit\s*=.*','memory_limit = 128M',content)
         content = re.sub(r';?\s*display_errors\s*=.*','display_errors = Off',content)
         content = re.sub(r';?\s*log_errors\s*=.*','log_errors = On',content)
-        content = re.sub(r';?\s*error_log\s*=.*',f'error_log = {soft_paths["error_log_path"].replace(os.sep,"/")}',content)
+        content = re.sub(r';?\s*error_log\s*=.*',f'error_log = {os.path.join(soft_paths["install_abspath_path"],"var","log","php-fpm.log").replace(os.sep,"/")}',content)
+        content = re.sub(r';?\s*cgi\.fix_pathinfo\s*=.*','cgi.fix_pathinfo = 1',content)
+        content = re.sub(r';?\s*expose_php\s*=.*','expose_php = Off',content)
+        content = re.sub(r';?\s*short_open_tag\s*=.*','short_open_tag = On',content)
+        content = re.sub(r';?\s*error_reporting\s*=.*','error_reporting = E_ALL & ~E_NOTICE',content)
+        if 'error_reporting' not in content:
+            content += '\nerror_reporting = E_ALL & ~E_NOTICE'
         content = re.sub(r';\s*extension=curl','extension=curl',content)
         content = re.sub(r';\s*extension=gd','extension=gd',content)
         content = re.sub(r';\s*extension=mbstring','extension=mbstring',content)
@@ -167,7 +211,7 @@ def _init_php_fpm_conf_windows(install_path,version):
         content = re.sub(r';\s*extension=zip','extension=zip',content)
         content = re.sub(r';\s*extension=sockets','extension=sockets',content)
         WriteFile(php_ini_path,content)
-    var_log_path = os.path.join(install_path,'var','log')
+    var_log_path = os.path.join(install_abspath_path,'var','log')
     if not os.path.exists(var_log_path):
         os.makedirs(var_log_path)
 
@@ -224,7 +268,7 @@ def SET_PHP_WINDOWS_SERVICE_CONFIG(version):
     php_cgi_path = soft_paths['windows_abspath_phpcgi_path']
     php_ini_path = soft_paths['windows_abspath_conf_path']
     fpm_port = soft_paths['fpm_port']
-    log_path = soft_paths['log_path']
+    log_path = os.path.join(install_abspath_path,'var','log')
     service_name = soft_paths['service_name']
     content = f"""
 <service>
@@ -258,10 +302,33 @@ def _init_php_fpm_conf_linux(install_path,version):
         elif os.path.exists(php_ini_develop):
             import shutil
             shutil.copy2(php_ini_develop,php_ini_path)
+    if not os.path.exists(php_ini_path):
+        ext_dir = os.path.join(install_path,'lib','php','extensions','no-debug-non-zts-20220829')
+        default_ini = f"""[PHP]
+engine = On
+short_open_tag = Off
+precision = 14
+output_buffering = 4096
+zlib.output_compression = Off
+implicit_flush = Off
+unserialize_callback_func =
+serialize_precision = -1
+date.timezone = Asia/Shanghai
+disable_functions = {','.join(PHP_DANGEROUS_FUNCTIONS)}
+upload_max_filesize = 50M
+post_max_size = 50M
+max_execution_time = 300
+max_input_time = 300
+memory_limit = 128M
+display_errors = Off
+log_errors = On
+error_log = {os.path.join(soft_paths["install_abspath_path"],'var','log','php-fpm.log')}
+"""
+        WriteFile(php_ini_path, default_ini)
     if os.path.exists(php_ini_path):
         content = ReadFile(php_ini_path)
         content = re.sub(r';?\s*date\.timezone\s*=.*','date.timezone = Asia/Shanghai',content)
-        content = re.sub(r';?\s*disable_functions\s*=.*','disable_functions = exec,system,passthru,shell_exec,proc_open,popen',content)
+        content = re.sub(r';?\s*disable_functions\s*=.*','disable_functions = '+','.join(PHP_DANGEROUS_FUNCTIONS),content)
         content = re.sub(r';?\s*upload_max_filesize\s*=.*','upload_max_filesize = 50M',content)
         content = re.sub(r';?\s*post_max_size\s*=.*','post_max_size = 50M',content)
         content = re.sub(r';?\s*max_execution_time\s*=.*','max_execution_time = 300',content)
@@ -269,12 +336,33 @@ def _init_php_fpm_conf_linux(install_path,version):
         content = re.sub(r';?\s*memory_limit\s*=.*','memory_limit = 128M',content)
         content = re.sub(r';?\s*display_errors\s*=.*','display_errors = Off',content)
         content = re.sub(r';?\s*log_errors\s*=.*','log_errors = On',content)
-        content = re.sub(r';?\s*error_log\s*=.*',f'error_log = {soft_paths["error_log_path"]}',content)
+        content = re.sub(r';?\s*error_log\s*=.*',f'error_log = {os.path.join(soft_paths["install_abspath_path"],"var","log","php-fpm.log")}',content)
+        content = re.sub(r';?\s*cgi\.fix_pathinfo\s*=.*','cgi.fix_pathinfo = 1',content)
+        content = re.sub(r';?\s*expose_php\s*=.*','expose_php = Off',content)
+        content = re.sub(r';?\s*short_open_tag\s*=.*','short_open_tag = On',content)
+        content = re.sub(r';?\s*error_reporting\s*=.*','error_reporting = E_ALL & ~E_NOTICE',content)
+        if 'error_reporting' not in content:
+            content += '\nerror_reporting = E_ALL & ~E_NOTICE'
+        if os.path.exists('/usr/sbin/sendmail'):
+            content = re.sub(r';?\s*sendmail_path\s*=.*','sendmail_path = /usr/sbin/sendmail -t -i',content)
+        ca_bundle_paths = ['/etc/pki/tls/certs/ca-bundle.crt','/etc/ssl/certs/ca-certificates.crt']
+        ca_path = ''
+        for p in ca_bundle_paths:
+            if os.path.exists(p):
+                ca_path = p
+                break
+        if ca_path:
+            content = re.sub(r';?\s*openssl\.cafile\s*=.*',f'openssl.cafile = {ca_path}',content)
+            content = re.sub(r';?\s*curl\.cainfo\s*=.*',f'curl.cainfo = {ca_path}',content)
+            if 'openssl.cafile' not in content:
+                content += f'\nopenssl.cafile = {ca_path}'
+            if 'curl.cainfo' not in content:
+                content += f'\ncurl.cainfo = {ca_path}'
         WriteFile(php_ini_path,content)
     fpm_conf_path = soft_paths['linux_abspath_fpm_conf_path']
     fpm_conf_d_path = soft_paths['linux_abspath_fpm_conf_d_path']
-    var_run_path = os.path.join(install_path,'var','run')
-    var_log_path = os.path.join(install_path,'var','log')
+    var_run_path = os.path.join(install_abspath_path,'var','run')
+    var_log_path = os.path.join(install_abspath_path,'var','log')
     for p in [var_run_path,var_log_path,fpm_conf_d_path]:
         if not os.path.exists(p):
             os.makedirs(p)
@@ -291,11 +379,26 @@ def _init_php_fpm_conf_linux(install_path,version):
 
 def RY_GET_PHP_FPM_DEFAULT_POOL(version):
     soft_paths = get_php_path_info(version)
+    import subprocess
+    fpm_user = "www"
+    try:
+        result = subprocess.run(['id', 'www'], capture_output=True, text=True)
+        if result.returncode != 0:
+            try:
+                subprocess.run(['useradd', '-r', '-s', '/sbin/nologin', 'www'], capture_output=True, text=True)
+            except Exception:
+                fpm_user = "nobody"
+    except Exception:
+        fpm_user = "nobody"
     return f"""[www]
-user = www
-group = www
+user = {fpm_user}
+group = {fpm_user}
 listen = {soft_paths['install_abspath_path']}/tmp/php-cgi-{version}.sock
 listen.backlog = 8192
+listen.allowed_clients = 127.0.0.1
+listen.owner = {fpm_user}
+listen.group = {fpm_user}
+listen.mode = 0660
 pm = dynamic
 pm.max_children = 50
 pm.start_servers = 10
@@ -304,7 +407,7 @@ pm.max_spare_servers = 30
 pm.max_requests = 1000
 request_terminate_timeout = 100
 request_slowlog_timeout = 30
-slowlog = {soft_paths['install_path']}/var/log/php-slow.log
+slowlog = {soft_paths['install_abspath_path']}/var/log/php-slow.log
 """
 
 def Install_PHP(type=2,version={},is_windows=True,call_back=None):
@@ -392,25 +495,36 @@ def Install_PHP(type=2,version={},is_windows=True,call_back=None):
             else:
                 WriteFile(log_path,"PHP系统服务注册成功\n",mode='a',write=is_write_log)
         else:
+            WriteFile(log_path,"【%s】下载完成，开始编译安装...\n"%filename,mode='a',write=is_write_log)
             script_path = GetInstallPath()+'/ruyi/utils/install/bash/php.sh'
             ConvertToUnixLineEndings(script_path)
-            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            r_process = CreateInstallProcess(['bash', script_path, 'install', version['c_version'], filename])
             job_subprocess_add(version['job_id'],r_process)
-            while True:
-                r_output = r_process.stdout.readline()
-                if r_output == '' and r_process.poll() is not None:
-                    break
-                if r_output:
-                    WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
-                time.sleep(0.1)
-            r_stderr = r_process.stderr.read()
-            if r_stderr:
-                if not os.path.exists(soft_paths['linux_abspath_php_path']):
-                    raise Exception(r_stderr.strip())
+            try:
+                while True:
+                    r_output = r_process.stdout.readline()
+                    if r_output == '' and r_process.poll() is not None:
+                        break
+                    if r_output:
+                        WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                    time.sleep(0.1)
+                r_stderr = SafeReadStderr(r_process)
+                if r_stderr:
+                    if not os.path.exists(soft_paths['linux_abspath_php_path']):
+                        raise Exception(r_stderr.strip()[:2000])
+            finally:
+                CleanupInstallProcess(r_process, version['job_id'])
+                r_process = None
             WriteFile(log_path,"正在初始化PHP-FPM配置...\n",mode='a',write=is_write_log)
             _init_php_fpm_conf_linux(install_directory,version['c_version'])
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
+            WriteFile(log_path,"正在启动PHP-FPM服务...\n",mode='a',write=is_write_log)
+            try:
+                Start_PHP(version=version['c_version'],is_windows=False)
+                WriteFile(log_path,"PHP-FPM服务启动成功\n",mode='a',write=is_write_log)
+            except Exception as start_e:
+                WriteFile(log_path,f"PHP-FPM服务启动失败：{start_e}\n",mode='a',write=is_write_log)
         
         DeleteFile(save_path,empty_tips=False)
         WriteFile(log_path,"已删除下载的临时安装文件，并回调\n",mode='a',write=is_write_log)
@@ -418,10 +532,15 @@ def Install_PHP(type=2,version={},is_windows=True,call_back=None):
         version['install_path'] = install_directory
         php_install_call_back(version=version,call_back=call_back,ok=True)
         WriteFile(log_path,"-------------------安装任务已结束-------------------\n",mode='a',write=is_write_log)
+        version.clear()
+        soft_paths.clear()
+        ReleaseMemory()
         return True
     except Exception as e:
         WriteFile(log_path,f"【错误】异常信息如下：\n{e}",mode='a',write=is_write_log)
         php_install_call_back(version=version,call_back=call_back,ok=False)
+        version.clear()
+        ReleaseMemory()
         return False
 
 def Uninstall_PHP(version=None,is_windows=True):
@@ -494,8 +613,18 @@ def Start_PHP(version=None,is_windows=True,num_workers=None):
             raise FileNotFoundError(f"PHP-FPM可执行文件不存在: {fpm_path}")
         if is_php_running(version,is_windows=is_windows):
             return True
-        subprocess.run([fpm_path],capture_output=True,text=True)
-        return True
+        service_name = f"php-fpm-{version}"
+        try:
+            result = subprocess.run(['systemctl','start',service_name],capture_output=True,text=True,timeout=30)
+            if result.returncode == 0:
+                time.sleep(1)
+                if is_php_running(version,is_windows=is_windows):
+                    return True
+        except Exception:
+            pass
+        subprocess.run([fpm_path,'-y',soft_paths['linux_abspath_fpm_conf_path']],capture_output=True,text=True)
+        time.sleep(1)
+        return is_php_running(version,is_windows=is_windows)
 
 def Stop_PHP(version=None,is_windows=True):
     if not version: raise ValueError("未提供版本号")
@@ -532,6 +661,15 @@ def Stop_PHP(version=None,is_windows=True):
     else:
         if not is_php_running(version,is_windows=is_windows):
             return True
+        service_name = f"php-fpm-{version}"
+        try:
+            result = subprocess.run(['systemctl','stop',service_name],capture_output=True,text=True,timeout=30)
+            if result.returncode == 0:
+                time.sleep(1)
+                if not is_php_running(version,is_windows=is_windows):
+                    return True
+        except Exception:
+            pass
         pid_file = os.path.join(soft_paths['install_abspath_path'],'var','run','php-fpm.pid')
         if os.path.isfile(pid_file):
             try:
@@ -539,10 +677,13 @@ def Stop_PHP(version=None,is_windows=True):
                     pid = f.read().strip()
                 if pid.isdigit():
                     subprocess.run(['kill','-QUIT',pid],capture_output=True,text=True)
-                    return True
+                    time.sleep(1)
+                    if not is_php_running(version,is_windows=is_windows):
+                        return True
             except:
                 pass
-        subprocess.run(['pkill','-f',f'php-fpm: pool.*{version}'],capture_output=True,text=True)
+        fpm_install_path = soft_paths['install_abspath_path']
+        subprocess.run(['pkill','-f',f'php-fpm: master.*{fpm_install_path}'],capture_output=True,text=True)
         return True
 
 def Restart_PHP(version=None,is_windows=True):
@@ -557,6 +698,13 @@ def Reload_PHP(version=None,is_windows=True):
     if is_windows:
         Restart_PHP(version=version,is_windows=is_windows)
     else:
+        service_name = f"php-fpm-{version}"
+        try:
+            result = subprocess.run(['systemctl','reload',service_name],capture_output=True,text=True,timeout=30)
+            if result.returncode == 0:
+                return True
+        except Exception:
+            pass
         pid_file = os.path.join(soft_paths['install_abspath_path'],'var','run','php-fpm.pid')
         if os.path.isfile(pid_file):
             try:
@@ -624,6 +772,28 @@ def RY_GET_PHP_EXTENSIONS(version=None,is_windows=True):
         return extensions
     except:
         return []
+
+def RY_GET_PHP_EXTENSIONS_WITH_VERSION(version=None, is_windows=True):
+    if not version: return {}
+    soft_paths = get_php_path_info(version)
+    php_path = soft_paths['windows_abspath_php_path'] if is_windows else soft_paths['linux_abspath_php_path']
+    if not os.path.exists(php_path):
+        return {}
+    try:
+        cmd = [php_path, '-r', "foreach(get_loaded_extensions() as $ext) echo $ext.'='.phpversion($ext).PHP_EOL;"]
+        if is_windows:
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', creationflags=subprocess.CREATE_NO_WINDOW)
+        else:
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        ext_versions = {}
+        for line in result.stdout.strip().split('\n'):
+            line = line.strip()
+            if '=' in line:
+                name, ver = line.split('=', 1)
+                ext_versions[name.strip()] = ver.strip()
+        return ext_versions
+    except Exception:
+        return {}
 
 def RY_GET_PHP_INFO(version=None,is_windows=True):
     if not version: return {}
@@ -877,6 +1047,177 @@ PHP_FPM_PRESETS = {
 def RY_GET_PHP_FPM_PRESETS():
     return PHP_FPM_PRESETS
 
+@contextmanager
+def _file_lock(lock_file, timeout=10):
+    lock_dir = os.path.dirname(lock_file)
+    if lock_dir and not os.path.exists(lock_dir):
+        os.makedirs(lock_dir, exist_ok=True)
+    start_time = time.time()
+    while True:
+        try:
+            fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            break
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+            if time.time() - start_time > timeout:
+                raise TimeoutError(f"无法获取文件锁: {lock_file}")
+            time.sleep(0.1)
+    try:
+        yield
+    finally:
+        try:
+            os.close(fd)
+            os.unlink(lock_file)
+        except OSError:
+            pass
+
+def get_php_pool_port(site_name, php_version):
+    pool_port_file = os.path.join(get_php_path_info(php_version)['install_abspath_path'], 'var', 'run', 'pool_ports.json')
+    lock_file = pool_port_file + '.lock'
+    ports_data = {}
+    with _file_lock(lock_file):
+        if os.path.exists(pool_port_file):
+            try:
+                with open(pool_port_file, 'r') as f:
+                    ports_data = json.loads(f.read())
+            except:
+                pass
+        if site_name in ports_data:
+            return ports_data[site_name]
+        base_port = 9100
+        used_ports = set(ports_data.values())
+        for port in range(base_port, 65535):
+            if port not in used_ports:
+                if not is_service_running(port=port):
+                    ports_data[site_name] = port
+                    try:
+                        with open(pool_port_file, 'w') as f:
+                            f.write(json.dumps(ports_data))
+                    except:
+                        pass
+                    return port
+    return None
+
+def release_php_pool_port(site_name, php_version):
+    pool_port_file = os.path.join(get_php_path_info(php_version)['install_abspath_path'], 'var', 'run', 'pool_ports.json')
+    lock_file = pool_port_file + '.lock'
+    if not os.path.exists(pool_port_file):
+        return
+    with _file_lock(lock_file):
+        try:
+            with open(pool_port_file, 'r') as f:
+                ports_data = json.loads(f.read())
+            if site_name in ports_data:
+                del ports_data[site_name]
+                with open(pool_port_file, 'w') as f:
+                    f.write(json.dumps(ports_data))
+        except:
+            pass
+
+def create_php_fpm_pool_conf(site_name, site_path, php_version, pool_params=None, is_windows=True):
+    soft_paths = get_php_path_info(php_version)
+    if is_windows:
+        pool_port = soft_paths['fpm_port']
+    else:
+        pool_port = get_php_pool_port(site_name, php_version)
+        if not pool_port:
+            return False, "无法分配Pool端口"
+    if not pool_params:
+        pool_params = PHP_FPM_PRESETS.get('2h2g', {})
+    pm = pool_params.get('pm', 'dynamic')
+    pm_max_children = pool_params.get('pm_max_children', '50')
+    pm_start_servers = pool_params.get('pm_start_servers', '10')
+    pm_min_spare_servers = pool_params.get('pm_min_spare_servers', '5')
+    pm_max_spare_servers = pool_params.get('pm_max_spare_servers', '20')
+    pm_max_requests = pool_params.get('pm_max_requests', '1000')
+    request_terminate_timeout = pool_params.get('request_terminate_timeout', '100')
+    pool_name = site_name.replace('.', '_').replace('-', '_')
+    pool_log_dir = os.path.join(site_path, 'logs')
+    if not os.path.exists(pool_log_dir):
+        os.makedirs(pool_log_dir, exist_ok=True)
+    if is_windows:
+        listen_addr = f"127.0.0.1:{pool_port}"
+    else:
+        socket_dir = os.path.join(soft_paths['install_abspath_path'], 'tmp')
+        if not os.path.exists(socket_dir):
+            os.makedirs(socket_dir, exist_ok=True)
+        listen_addr = f"{socket_dir}/php-cgi-{pool_name}.sock"
+    if is_windows:
+        pool_conf_content = f"""[{pool_name}]
+listen = {listen_addr}
+pm = {pm}
+pm.max_children = {pm_max_children}
+pm.start_servers = {pm_start_servers}
+pm.min_spare_servers = {pm_min_spare_servers}
+pm.max_spare_servers = {pm_max_spare_servers}
+pm.max_requests = {pm_max_requests}
+request_terminate_timeout = {request_terminate_timeout}
+"""
+    else:
+        slowlog_path = os.path.join(soft_paths['install_abspath_path'], 'var', 'log', f'php-slow-{pool_name}.log')
+        pool_conf_content = f"""[{pool_name}]
+user = www
+group = www
+listen = {listen_addr}
+listen.backlog = 8192
+pm = {pm}
+pm.max_children = {pm_max_children}
+pm.start_servers = {pm_start_servers}
+pm.min_spare_servers = {pm_min_spare_servers}
+pm.max_spare_servers = {pm_max_spare_servers}
+pm.max_requests = {pm_max_requests}
+request_terminate_timeout = {request_terminate_timeout}
+request_slowlog_timeout = 30
+slowlog = {slowlog_path}
+php_admin_value[open_basedir] = {site_path}:/tmp:/proc
+php_admin_value[error_log] = {pool_log_dir}/php-error.log
+php_admin_flag[log_errors] = on
+"""
+    if is_windows:
+        pool_conf_dir = os.path.join(soft_paths['install_abspath_path'], 'fpm-pool.d')
+    else:
+        pool_conf_dir = soft_paths['linux_abspath_fpm_conf_d_path']
+    if not os.path.exists(pool_conf_dir):
+        os.makedirs(pool_conf_dir, exist_ok=True)
+    pool_conf_path = os.path.join(pool_conf_dir, f"{pool_name}.conf")
+    WriteFile(pool_conf_path, pool_conf_content)
+    return True, {"pool_port": pool_port, "pool_name": pool_name, "listen_addr": listen_addr}
+
+def delete_php_fpm_pool_conf(site_name, php_version, is_windows=True):
+    pool_name = site_name.replace('.', '_').replace('-', '_')
+    soft_paths = get_php_path_info(php_version)
+    if is_windows:
+        pool_conf_path = os.path.join(soft_paths['install_abspath_path'], 'fpm-pool.d', f"{pool_name}.conf")
+    else:
+        pool_conf_path = os.path.join(soft_paths['linux_abspath_fpm_conf_d_path'], f"{pool_name}.conf")
+    if os.path.exists(pool_conf_path):
+        DeleteFile(pool_conf_path, empty_tips=False)
+    release_php_pool_port(site_name, php_version)
+    return True
+
+def get_php_fpm_pool_conf(site_name, php_version, is_windows=True):
+    pool_name = site_name.replace('.', '_').replace('-', '_')
+    soft_paths = get_php_path_info(php_version)
+    if is_windows:
+        pool_conf_path = os.path.join(soft_paths['install_abspath_path'], 'fpm-pool.d', f"{pool_name}.conf")
+    else:
+        pool_conf_path = os.path.join(soft_paths['linux_abspath_fpm_conf_d_path'], f"{pool_name}.conf")
+    if not os.path.exists(pool_conf_path):
+        return None
+    return ReadFile(pool_conf_path)
+
+def get_php_fpm_pool_port(site_name, php_version):
+    pool_port_file = os.path.join(get_php_path_info(php_version)['install_abspath_path'], 'var', 'run', 'pool_ports.json')
+    if not os.path.exists(pool_port_file):
+        return None
+    try:
+        with open(pool_port_file, 'r') as f:
+            ports_data = json.loads(f.read())
+        return ports_data.get(site_name)
+    except:
+        return None
+
 def RY_VALIDATE_PHP_CONFIG(version=None, is_windows=True):
     if not version: return {'valid': False, 'msg': 'version is required'}
     soft_paths = get_php_path_info(version)
@@ -1086,6 +1427,7 @@ def RY_GET_PHP_EXTENSION_LIST(version=None, is_windows=True):
         return {'installed': [], 'available': []}
     installed = RY_GET_PHP_EXTENSIONS(version, is_windows)
     installed_lower = [ext.lower() for ext in installed]
+    ext_versions = RY_GET_PHP_EXTENSIONS_WITH_VERSION(version, is_windows)
     available_names = []
     if is_windows:
         ext_dir = os.path.join(soft_paths['install_abspath_path'], 'ext')
@@ -1127,42 +1469,35 @@ def RY_GET_PHP_EXTENSION_LIST(version=None, is_windows=True):
             if ext_name and ext_name.lower() not in [a.lower() for a in available_names] and ext_name.lower() not in installed_lower:
                 available_names.append(ext_name)
     pecl_map = {}
+    pecl_names_lower = set()
     for pecl_ext in RY_PECL_COMMON_EXTENSIONS:
         pecl_map[pecl_ext['name'].lower()] = pecl_ext
+        pecl_names_lower.add(pecl_ext['name'].lower())
     available_info = []
     for ext_name in available_names:
         if ext_name.lower() in installed_lower:
             continue
-        pecl_info = pecl_map.get(ext_name.lower())
+        if ext_name.lower() in pecl_names_lower:
+            continue
         has_dll = False
         if is_windows:
             dll_path = os.path.join(soft_paths['install_abspath_path'], 'ext', f'php_{ext_name}.dll')
             has_dll = os.path.exists(dll_path)
         available_info.append({
             'name': ext_name,
-            'desc': pecl_info['desc'] if pecl_info else '',
-            'category': pecl_info['category'] if pecl_info else 'other',
+            'desc': '',
+            'category': 'builtin',
             'has_file': has_dll if is_windows else True,
         })
-    for pecl_ext in RY_PECL_COMMON_EXTENSIONS:
-        if pecl_ext['name'].lower() not in installed_lower and pecl_ext['name'].lower() not in [a.lower() for a in available_names]:
-            has_dll = False
-            if is_windows:
-                dll_path = os.path.join(soft_paths['install_abspath_path'], 'ext', f'php_{pecl_ext["name"]}.dll')
-                has_dll = os.path.exists(dll_path)
-            available_info.append({
-                'name': pecl_ext['name'],
-                'desc': pecl_ext['desc'],
-                'category': pecl_ext['category'],
-                'has_file': has_dll if is_windows else True,
-            })
     installed_info = []
     for ext_name in installed:
-        pecl_info = pecl_map.get(ext_name.lower())
+        if ext_name.lower() in pecl_names_lower:
+            continue
         installed_info.append({
             'name': ext_name,
-            'desc': pecl_info['desc'] if pecl_info else '',
-            'category': pecl_info['category'] if pecl_info else 'builtin',
+            'desc': '',
+            'category': 'builtin',
+            'version': ext_versions.get(ext_name, ''),
         })
     return {'installed': installed_info, 'available': available_info}
 
@@ -1350,6 +1685,18 @@ def _phpinfo_text_to_html(text):
     html_parts.append('</body></html>')
     return '\n'.join(html_parts)
 
+RY_PHP_BUILTIN_EXTENSIONS = [
+    'bcmath', 'calendar', 'ctype', 'curl', 'date', 'dom', 'exif', 'fileinfo',
+    'filter', 'ftp', 'gd', 'gettext', 'hash', 'iconv', 'intl', 'json', 'ldap',
+    'libxml', 'mbstring', 'mysqli', 'mysqlnd', 'odbc', 'opcache', 'openssl',
+    'pcntl', 'pcre', 'pdo', 'pdo_mysql', 'pdo_pgsql', 'pdo_sqlite', 'pdo_odbc',
+    'pgsql', 'phar', 'posix', 'readline', 'reflection', 'session', 'shmop',
+    'simplexml', 'soap', 'sockets', 'sodium', 'spl', 'sqlite3', 'standard',
+    'sysvmsg', 'sysvsem', 'sysvshm', 'tidy', 'tokenizer', 'xml', 'xmlreader',
+    'xmlwriter', 'xsl', 'zip', 'zlib', 'ffi', 'pdo_dblib', 'pdo_sqlsrv',
+    'sqlsrv', 'enchant', 'pspell', 'snmp', 'imap', 'xmlrpc',
+]
+
 RY_PECL_COMMON_EXTENSIONS = [
     {'name': 'redis', 'desc': 'Redis客户端', 'category': 'cache'},
     {'name': 'memcached', 'desc': 'Memcached客户端', 'category': 'cache'},
@@ -1357,35 +1704,14 @@ RY_PECL_COMMON_EXTENSIONS = [
     {'name': 'swoole', 'desc': '高性能异步网络通信框架', 'category': 'framework'},
     {'name': 'xlswriter', 'desc': 'Excel读写扩展', 'category': 'utility'},
     {'name': 'imagick', 'desc': 'ImageMagick图像处理', 'category': 'image'},
-    {'name': 'gd', 'desc': 'GD图像处理(通常内置)', 'category': 'image'},
-    {'name': 'fileinfo', 'desc': '文件信息检测(通常内置)', 'category': 'utility'},
-    {'name': 'opcache', 'desc': '脚本字节码缓存(通常内置)', 'category': 'performance'},
-    {'name': 'pcntl', 'desc': '进程控制(仅Linux)', 'category': 'system'},
-    {'name': 'posix', 'desc': 'POSIX函数(仅Linux)', 'category': 'system'},
-    {'name': 'soap', 'desc': 'SOAP协议支持', 'category': 'protocol'},
-    {'name': 'sockets', 'desc': 'Socket通信扩展', 'category': 'network'},
-    {'name': 'bcmath', 'desc': '任意精度数学运算', 'category': 'math'},
-    {'name': 'gmp', 'desc': 'GNU多精度运算', 'category': 'math'},
-    {'name': 'intl', 'desc': '国际化支持', 'category': 'i18n'},
-    {'name': 'xsl', 'desc': 'XSLT转换', 'category': 'utility'},
-    {'name': 'ldap', 'desc': 'LDAP目录访问', 'category': 'protocol'},
-    {'name': 'pgsql', 'desc': 'PostgreSQL客户端', 'category': 'database'},
-    {'name': 'pdo_pgsql', 'desc': 'PDO PostgreSQL驱动', 'category': 'database'},
-    {'name': 'sqlsrv', 'desc': 'SQL Server客户端', 'category': 'database'},
-    {'name': 'pdo_sqlsrv', 'desc': 'PDO SQL Server驱动', 'category': 'database'},
-    {'name': 'pdo_dblib', 'desc': 'PDO DBLib驱动', 'category': 'database'},
-    {'name': 'pdo_odbc', 'desc': 'PDO ODBC驱动', 'category': 'database'},
-    {'name': 'enchant', 'desc': '拼写检查', 'category': 'utility'},
-    {'name': 'pspell', 'desc': '拼写检查', 'category': 'utility'},
-    {'name': 'snmp', 'desc': 'SNMP协议', 'category': 'network'},
-    {'name': 'tidy', 'desc': 'HTML Tidy修复', 'category': 'utility'},
-    {'name': 'xmlrpc', 'desc': 'XML-RPC协议', 'category': 'protocol'},
-    {'name': 'imap', 'desc': 'IMAP邮件协议', 'category': 'protocol'},
-    {'name': 'sysvmsg', 'desc': 'System V消息队列', 'category': 'system'},
-    {'name': 'sysvsem', 'desc': 'System V信号量', 'category': 'system'},
-    {'name': 'sysvshm', 'desc': 'System V共享内存', 'category': 'system'},
-    {'name': 'shmop', 'desc': '共享内存操作', 'category': 'system'},
-    {'name': 'ffi', 'desc': '外部函数接口(PHP7.4+)', 'category': 'system'},
+    {'name': 'yaml', 'desc': 'YAML解析器', 'category': 'utility'},
+    {'name': 'rdkafka', 'desc': 'Kafka客户端', 'category': 'cache'},
+    {'name': 'amqp', 'desc': 'AMQP消息队列协议', 'category': 'cache'},
+    {'name': 'event', 'desc': 'Libevent事件驱动', 'category': 'network'},
+    {'name': 'grpc', 'desc': 'gRPC框架', 'category': 'framework'},
+    {'name': 'protobuf', 'desc': 'Protocol Buffers', 'category': 'utility'},
+    {'name': 'ds', 'desc': '数据结构扩展', 'category': 'utility'},
+    {'name': 'uv', 'desc': 'Libuv异步IO', 'category': 'network'},
 ]
 
 def RY_GET_PECL_EXTENSIONS(version=None, is_windows=True):
@@ -1395,11 +1721,20 @@ def RY_GET_PECL_EXTENSIONS(version=None, is_windows=True):
     if not os.path.exists(php_path):
         return {'installed': [], 'available': []}
     installed_exts = RY_GET_PHP_EXTENSIONS(version, is_windows)
+    installed_lower = [e.lower() for e in installed_exts]
+    ext_versions = RY_GET_PHP_EXTENSIONS_WITH_VERSION(version, is_windows)
+    ext_dir = os.path.join(soft_paths['install_abspath_path'], 'ext') if is_windows else None
     installed = []
     available = []
     for ext in RY_PECL_COMMON_EXTENSIONS:
-        ext_info = {'name': ext['name'], 'desc': ext['desc'], 'category': ext['category']}
-        if ext['name'] in installed_exts:
+        has_file = os.path.exists(os.path.join(ext_dir, f'php_{ext["name"]}.dll')) if is_windows else True
+        windows_supported = ext['name'] not in RY_PECL_WINDOWS_UNSUPPORTED
+        ext_info = {
+            'name': ext['name'], 'desc': ext['desc'], 'category': ext['category'],
+            'has_file': has_file, 'windows_supported': windows_supported,
+            'version': ext_versions.get(ext['name'], ''),
+        }
+        if ext['name'].lower() in installed_lower:
             installed.append(ext_info)
         else:
             available.append(ext_info)
@@ -1411,8 +1746,13 @@ RY_PECL_WINDOWS_DOWNLOAD_MAP = {
     'imagick': 'https://windows.php.net/downloads/pecl/releases/imagick/',
     'xlswriter': 'https://windows.php.net/downloads/pecl/releases/xlswriter/',
     'memcached': 'https://windows.php.net/downloads/pecl/releases/memcached/',
-    'swoole': '',
+    'yaml': 'https://windows.php.net/downloads/pecl/releases/yaml/',
+    'protobuf': 'https://windows.php.net/downloads/pecl/releases/protobuf/',
+    'grpc': 'https://windows.php.net/downloads/pecl/releases/grpc/',
+    'ds': 'https://windows.php.net/downloads/pecl/releases/ds/',
 }
+
+RY_PECL_WINDOWS_UNSUPPORTED = ['swoole', 'rdkafka', 'amqp', 'event', 'uv']
 
 def _ry_get_php_thread_safety(php_path):
     try:
@@ -1487,19 +1827,10 @@ def _ry_install_pecl_extension_windows(version, ext_name, soft_paths, php_path, 
     ext_dir = os.path.join(soft_paths['install_abspath_path'], 'ext')
     dll_path = os.path.join(ext_dir, f'php_{ext_name}.dll')
     if os.path.exists(dll_path):
-        if os.path.exists(conf_path):
-            content = ReadFile(conf_path)
-            active_pattern = r'^\s*extension\s*=\s*' + re.escape(ext_name) + r'\s*$'
-            if re.search(active_pattern, content, re.MULTILINE):
-                return {'success': False, 'msg': f'{ext_name} 扩展文件已存在且已启用'}
-            comment_pattern = r'^\s*;\s*extension\s*=\s*' + re.escape(ext_name) + r'\s*$'
-            match = re.search(comment_pattern, content, re.MULTILINE)
-            if match:
-                content = content[:match.start()] + f'extension = {ext_name}' + content[match.end():]
-            else:
-                content = content + f'\nextension = {ext_name}\n'
-            WriteFile(conf_path, content)
-        return {'success': True, 'msg': f'{ext_name} 已启用（DLL已存在）'}
+        result = RY_TOGGLE_PHP_EXTENSION(version, ext_name, enable=True, is_windows=True)
+        if result:
+            return {'success': True, 'msg': f'{ext_name} 已启用（DLL已存在）'}
+        return {'success': False, 'msg': f'{ext_name} 扩展文件已存在且已启用'}
     ts_mode = _ry_get_php_thread_safety(php_path)
     arch = _ry_get_php_arch()
     dll_url = _ry_find_pecl_dll_url(ext_name, version, ts_mode, arch)
@@ -1540,17 +1871,7 @@ def _ry_install_pecl_extension_windows(version, ext_name, soft_paths, php_path, 
         if os.path.exists(zip_path):
             DeleteFile(zip_path)
         return {'success': False, 'msg': f'解压扩展包失败: {str(e)[:200]}'}
-    if os.path.exists(conf_path):
-        content = ReadFile(conf_path)
-        active_pattern = r'^\s*extension\s*=\s*' + re.escape(ext_name) + r'\s*$'
-        if not re.search(active_pattern, content, re.MULTILINE):
-            comment_pattern = r'^\s*;\s*extension\s*=\s*' + re.escape(ext_name) + r'\s*$'
-            match = re.search(comment_pattern, content, re.MULTILINE)
-            if match:
-                content = content[:match.start()] + f'extension = {ext_name}' + content[match.end():]
-            else:
-                content = content + f'\nextension = {ext_name}\n'
-            WriteFile(conf_path, content)
+    RY_TOGGLE_PHP_EXTENSION(version, ext_name, enable=True, is_windows=True)
     return {'success': True, 'msg': f'{ext_name} 扩展安装成功'}
 
 def RY_INSTALL_PECL_EXTENSION(version=None, ext_name="", is_windows=True):
@@ -1560,48 +1881,21 @@ def RY_INSTALL_PECL_EXTENSION(version=None, ext_name="", is_windows=True):
     conf_path = soft_paths['windows_abspath_conf_path'] if is_windows else soft_paths['linux_abspath_conf_path']
     if not os.path.exists(php_path):
         return {'success': False, 'msg': 'PHP未安装'}
-    builtin_exts = ['bcmath', 'calendar', 'ctype', 'curl', 'date', 'dom', 'exif', 'fileinfo',
-                    'filter', 'ftp', 'gd', 'gettext', 'hash', 'iconv', 'intl', 'json', 'ldap',
-                    'libxml', 'mbstring', 'mysqli', 'mysqlnd', 'odbc', 'opcache', 'openssl',
-                    'pcntl', 'pcre', 'pdo', 'pdo_mysql', 'pdo_pgsql', 'pdo_sqlite', 'pdo_odbc',
-                    'pgsql', 'phar', 'posix', 'readline', 'reflection', 'session', 'shmop',
-                    'simplexml', 'soap', 'sockets', 'sodium', 'spl', 'sqlite3', 'standard',
-                    'sysvmsg', 'sysvsem', 'sysvshm', 'tidy', 'tokenizer', 'xml', 'xmlreader',
-                    'xmlwriter', 'xsl', 'zip', 'zlib', 'ffi', 'pdo_dblib', 'pdo_sqlsrv',
-                    'sqlsrv', 'enchant', 'pspell', 'snmp', 'imap', 'xmlrpc']
-    if ext_name in builtin_exts:
-        if not os.path.exists(conf_path):
-            return {'success': False, 'msg': 'php.ini不存在'}
-        content = ReadFile(conf_path)
-        active_pattern = r'^\s*extension\s*=\s*' + re.escape(ext_name) + r'\s*$'
-        if re.search(active_pattern, content, re.MULTILINE):
-            return {'success': False, 'msg': f'{ext_name} 已经是启用状态'}
-        comment_pattern = r'^\s*;\s*extension\s*=\s*' + re.escape(ext_name) + r'\s*$'
-        match = re.search(comment_pattern, content, re.MULTILINE)
-        if match:
-            content = content[:match.start()] + f'extension = {ext_name}' + content[match.end():]
-        else:
-            if is_windows:
-                dll_pattern = r'^\s*;\s*extension\s*=\s*' + re.escape(ext_name) + r'\s*$'
-                dll_match = re.search(dll_pattern, content, re.MULTILINE)
-                if dll_match:
-                    content = content[:dll_match.start()] + f'extension = {ext_name}' + content[dll_match.end():]
-                else:
-                    ext_line = f'\nextension = {ext_name}\n'
-                    content = content + ext_line
-            else:
-                ext_line = f'\nextension = {ext_name}\n'
-                content = content + ext_line
-        WriteFile(conf_path, content)
-        return {'success': True, 'msg': f'{ext_name} 已启用'}
+    if ext_name in RY_PHP_BUILTIN_EXTENSIONS:
+        result = RY_TOGGLE_PHP_EXTENSION(version, ext_name, enable=True, is_windows=is_windows)
+        if result:
+            return {'success': True, 'msg': f'{ext_name} 已启用'}
+        return {'success': False, 'msg': f'{ext_name} 启用失败'}
     if is_windows:
+        if ext_name in RY_PECL_WINDOWS_UNSUPPORTED:
+            return {'success': False, 'msg': f'{ext_name} 扩展不支持Windows系统，请在Linux环境下安装'}
         return _ry_install_pecl_extension_windows(version, ext_name, soft_paths, php_path, conf_path)
     pecl_path = os.path.join(soft_paths['install_abspath_path'], 'bin', 'pecl')
     if os.path.exists(pecl_path):
         try:
             result = subprocess.run(
                 [pecl_path, 'install', ext_name],
-                capture_output=True, text=True, timeout=300,
+                capture_output=True, text=True, timeout=600,
                 env={**os.environ, 'PHP_PEAR_PHP_BIN': php_path}
             )
             if result.returncode == 0:
@@ -1620,7 +1914,7 @@ def RY_INSTALL_PECL_EXTENSION(version=None, ext_name="", is_windows=True):
                 err_msg = result.stderr.strip() if result.stderr else result.stdout.strip()
                 return {'success': False, 'msg': f'安装失败: {err_msg[:200]}'}
         except subprocess.TimeoutExpired:
-            return {'success': False, 'msg': '安装超时，请稍后重试'}
+            return {'success': False, 'msg': f'{ext_name} 安装超时（超过10分钟），编译安装可能需要较长时间，请稍后查看扩展列表确认是否安装成功'}
         except Exception as e:
             return {'success': False, 'msg': f'安装异常: {str(e)[:200]}'}
     else:
@@ -1633,15 +1927,6 @@ def RY_UNINSTALL_PECL_EXTENSION(version=None, ext_name="", is_windows=True):
     conf_path = soft_paths['windows_abspath_conf_path'] if is_windows else soft_paths['linux_abspath_conf_path']
     if not os.path.exists(php_path):
         return {'success': False, 'msg': 'PHP未安装'}
-    builtin_exts = ['bcmath', 'calendar', 'ctype', 'curl', 'date', 'dom', 'exif', 'fileinfo',
-                    'filter', 'ftp', 'gd', 'gettext', 'hash', 'iconv', 'intl', 'json', 'ldap',
-                    'libxml', 'mbstring', 'mysqli', 'mysqlnd', 'odbc', 'opcache', 'openssl',
-                    'pcntl', 'pcre', 'pdo', 'pdo_mysql', 'pdo_pgsql', 'pdo_sqlite', 'pdo_odbc',
-                    'pgsql', 'phar', 'posix', 'readline', 'reflection', 'session', 'shmop',
-                    'simplexml', 'soap', 'sockets', 'sodium', 'spl', 'sqlite3', 'standard',
-                    'sysvmsg', 'sysvsem', 'sysvshm', 'tidy', 'tokenizer', 'xml', 'xmlreader',
-                    'xmlwriter', 'xsl', 'zip', 'zlib', 'ffi', 'pdo_dblib', 'pdo_sqlsrv',
-                    'sqlsrv', 'enchant', 'pspell', 'snmp', 'imap', 'xmlrpc']
     if not os.path.exists(conf_path):
         return {'success': False, 'msg': 'php.ini不存在'}
     content = ReadFile(conf_path)
@@ -1651,8 +1936,16 @@ def RY_UNINSTALL_PECL_EXTENSION(version=None, ext_name="", is_windows=True):
         content = content[:m.start()] + f';extension = {ext_name}' + content[m.end():]
     if matches:
         WriteFile(conf_path, content)
-    if ext_name in builtin_exts or is_windows:
+    if ext_name in RY_PHP_BUILTIN_EXTENSIONS:
         return {'success': True, 'msg': f'{ext_name} 已禁用'}
+    if is_windows:
+        dll_path = os.path.join(soft_paths['install_abspath_path'], 'ext', f'php_{ext_name}.dll')
+        if os.path.exists(dll_path):
+            try:
+                DeleteFile(dll_path)
+            except Exception:
+                pass
+        return {'success': True, 'msg': f'{ext_name} 已卸载'}
     pecl_path = os.path.join(soft_paths['install_abspath_path'], 'bin', 'pecl')
     if os.path.exists(pecl_path):
         try:
@@ -1662,7 +1955,11 @@ def RY_UNINSTALL_PECL_EXTENSION(version=None, ext_name="", is_windows=True):
                 input='yes\n',
                 env={**os.environ, 'PHP_PEAR_PHP_BIN': php_path}
             )
-            return {'success': True, 'msg': f'{ext_name} 已卸载'}
+            if result.returncode == 0:
+                return {'success': True, 'msg': f'{ext_name} 已卸载'}
+            else:
+                err_msg = result.stderr.strip() if result.stderr else result.stdout.strip()
+                return {'success': False, 'msg': f'卸载失败: {err_msg[:200]}'}
         except Exception as e:
             return {'success': False, 'msg': f'卸载异常: {str(e)[:200]}'}
     return {'success': True, 'msg': f'{ext_name} 已禁用'}

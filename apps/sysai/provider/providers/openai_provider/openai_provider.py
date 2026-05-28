@@ -148,6 +148,10 @@ class OpenAIModel(BaseLLMModel):
         if built_tools:
             params['tools'] = built_tools
 
+        extra_body = kwargs.get('extra_body')
+        if extra_body:
+            params['extra_body'] = extra_body
+
         try:
             response = self.client.chat.completions.create(**params)
             if built_tools:

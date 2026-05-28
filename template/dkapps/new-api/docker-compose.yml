@@ -1,0 +1,23 @@
+services:
+  RUYI_DKAPP:
+    image: calciumion/new-api:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - ${HOST_IP}:${NEWAPI_PORT}:3000
+    volumes:
+      - ${APP_PATH}/data:/data
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

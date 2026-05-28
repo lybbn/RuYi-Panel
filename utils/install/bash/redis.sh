@@ -91,6 +91,9 @@ Uninstall_soft() {
     rm -rf /etc/systemd/system/redis.service
 }
 
+# 释放Linux文件系统缓存（page cache）
+trap 'sync && echo 3 > /proc/sys/vm/drop_caches 2>/dev/null' EXIT
+
 if [ "$action_type" == 'install' ];then
     if [ -z "${redis_version}" ]; then
         exit

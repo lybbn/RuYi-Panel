@@ -21,13 +21,13 @@
 import os,platform,re
 import time
 from pathlib import Path
-from utils.common import DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand,ReadFile,ConvertToUnixLineEndings
+from utils.common import DeleteDir,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommand,ReadFile,ConvertToUnixLineEndings,CreateInstallProcess,CleanupInstallProcess,SafeReadStderr,ReleaseMemory
 from utils.security.files import download_url_file,get_file_name_from_url
 import subprocess
 import importlib
 from utils.server.system import system
 from django.conf import settings
-from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
+from apps.systask.subprocessMg import job_subprocess_add
 
 def get_go_path_info(version):
     root_path = GetInstallPath()+"/go"
@@ -53,8 +53,7 @@ def get_go_path_info(version):
     
 def go_install_call_back(version={},call_back=None,ok=True):
     if call_back:
-        job_id = version['job_id']
-        job_subprocess_del(job_id)
+        job_id = version.get('job_id')
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -167,23 +166,26 @@ def Install_Go(type=2,version={},is_windows=True,call_back=None):
             # 转换脚本换行符为 Unix 格式
             script_path = GetInstallPath()+'/ruyi/utils/install/bash/go.sh'
             ConvertToUnixLineEndings(script_path)
-            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            #r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'],filename], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            r_process = CreateInstallProcess(['bash', script_path,'install',version['c_version'],filename])
             job_subprocess_add(version['job_id'],r_process)
-            # 持续读取输出
-            while True:
-                r_output = r_process.stdout.readline()
-                if r_output == '' and r_process.poll() is not None:
-                    break
-                if r_output:
-                    WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
-                time.sleep(0.1)
-            # 获取标准错误
-            r_stderr = r_process.stderr.read()
-            if r_stderr:
-                if not os.path.exists(soft_paths['linux_abspath_exe_path']) or "ERROR: Install go fielded" in str(r_stderr):
-                    raise Exception(r_stderr.strip())
+            try:
+                while True:
+                    r_output = r_process.stdout.readline()
+                    if r_output == '' and r_process.poll() is not None:
+                        break
+                    if r_output:
+                        WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                    time.sleep(0.1)
+                r_stderr = SafeReadStderr(r_process)
+                if r_stderr:
+                    if not os.path.exists(soft_paths['linux_abspath_exe_path']) or "ERROR: Install go fielded" in str(r_stderr):
+                        raise Exception(r_stderr.strip()[:2000])
+            finally:
+                CleanupInstallProcess(r_process, version['job_id'])
+                r_process = None
             WriteFile(log_path,f"开始创建默认GO环境...\n",mode='a',write=is_write_log)
-            create_default_env(version['c_version'],soft_paths['install_abspath_path'],is_windows=is_windows)#创建默认go环境
+            create_default_env(version['c_version'],soft_paths['install_abspath_path'],is_windows=is_windows)
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
         
@@ -191,10 +193,15 @@ def Install_Go(type=2,version={},is_windows=True,call_back=None):
         version['install_path'] = install_directory
         go_install_call_back(version=version,call_back=call_back,ok=True)
         WriteFile(log_path,"-------------------安装任务已结束-------------------\n",mode='a',write=is_write_log)
+        version.clear()
+        soft_paths.clear()
+        ReleaseMemory()
         return True
     except Exception as e:
         WriteFile(log_path,f"【错误】异常信息如下：\n{e}",mode='a',write=is_write_log)
         go_install_call_back(version=version,call_back=call_back,ok=False)
+        version.clear()
+        ReleaseMemory()
         return False
     
 def Uninstall_Go(version=None,is_windows=True):

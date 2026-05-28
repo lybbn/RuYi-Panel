@@ -21,7 +21,7 @@
 import os
 import re
 import time
-from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,GetRandomSet,ConvertToUnixLineEndings
+from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,GetRandomSet,ConvertToUnixLineEndings,CreateInstallProcess,CleanupInstallProcess,SafeReadStderr,ReleaseMemory
 from utils.security.files import download_url_file,get_file_name_from_url,get_github_quick_downloadurl
 from pathlib import Path
 import subprocess
@@ -29,7 +29,7 @@ import importlib
 from utils.server.system import system
 from utils.ruyiclass.redisClass import RedisClient
 from django.conf import settings
-from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
+from apps.systask.subprocessMg import job_subprocess_add
 
 def get_redis_path_info():
     root_path = GetInstallPath()
@@ -56,8 +56,7 @@ def get_redis_path_info():
 
 def redis_install_call_back(version={},call_back=None,ok=True):
     if call_back:
-        job_id = version['job_id']
-        job_subprocess_del(job_id)
+        job_id = version.get('job_id')
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -126,22 +125,24 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
             # 转换脚本换行符为 Unix 格式
             script_path = GetInstallPath()+'/ruyi/utils/install/bash/redis.sh'
             ConvertToUnixLineEndings(script_path)
-            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            #r_process = subprocess.Popen(['bash', script_path,'install',version['c_version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            r_process = CreateInstallProcess(['bash', script_path,'install',version['c_version']])
             job_subprocess_add(version['job_id'],r_process)
-            # 持续读取输出
-            while True:
-                r_output = r_process.stdout.readline()
-                if r_output == '' and r_process.poll() is not None:
-                    break
-                if r_output:
-                    WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
-                time.sleep(0.1)
-
-            # 获取标准错误
-            r_stderr = r_process.stderr.read()
-            if r_stderr:
-                if not os.path.exists(soft_paths['install_path']+'/redis-cli'):
-                    raise ValueError(r_stderr.strip())
+            try:
+                while True:
+                    r_output = r_process.stdout.readline()
+                    if r_output == '' and r_process.poll() is not None:
+                        break
+                    if r_output:
+                        WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                    time.sleep(0.1)
+                r_stderr = SafeReadStderr(r_process)
+                if r_stderr:
+                    if not os.path.exists(soft_paths['install_path']+'/redis-cli'):
+                        raise ValueError(r_stderr.strip()[:2000])
+            finally:
+                CleanupInstallProcess(r_process, version['job_id'])
+                r_process = None
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
         
@@ -173,10 +174,15 @@ def Install_Redis(type=2,version={},is_windows=True,call_back=None):
         Start_Redis(is_windows=is_windows)
         WriteFile(log_path,"reids启动成功\n",mode='a',write=is_write_log)
         WriteFile(log_path,"-------------------安装任务已结束-------------------\n",mode='a',write=is_write_log)
+        version.clear()
+        soft_paths.clear()
+        ReleaseMemory()
         return True
     except Exception as e:
         WriteFile(log_path,f"【错误】异常信息如下：\n{e}",mode='a',write=is_write_log)
         redis_install_call_back(version=version,call_back=call_back,ok=False)
+        version.clear()
+        ReleaseMemory()
         return False
 
 def Uninstall_Redis(is_windows=True):

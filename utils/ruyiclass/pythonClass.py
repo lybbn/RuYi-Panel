@@ -20,7 +20,7 @@
 import configparser
 import psutil,time,datetime
 import re,os,subprocess
-from utils.common import current_os,ReadFile,RunCommand,GetLogsPath,WriteFile,ast_convert,DeleteFile
+from utils.common import current_os,ReadFile,RunCommand,GetLogsPath,WriteFile,ast_convert,DeleteFile,CleanupInstallProcess,SafeReadStderr
 from utils.install.python import get_python_path_info
 from django.conf import settings
 from apps.system.models import Sites
@@ -288,11 +288,11 @@ class PythonClient:
         运行命令（保持子进程独立，不受父进程退出后而被终止）
         """
         if not self.is_windows:
-            preexec_fn = lambda: os.setuid(0)#默认root的uid
+            preexec_fn = lambda: os.setuid(0)
             if user:preexec_fn = self.get_preexec_fn(user)
-            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.PIPE,shell=shell,preexec_fn=preexec_fn, env=env)
+            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,shell=shell,preexec_fn=preexec_fn, env=env,start_new_session=True)
         else:
-            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdout=subprocess.PIPE,stderr=subprocess.PIPE,shell=shell,env=env,creationflags=subprocess.CREATE_NO_WINDOW)
+            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,shell=shell,env=env,creationflags=subprocess.CREATE_NO_WINDOW)
 
     def exec_bat(self,pid_file=None,bat_path=None):
         if not os.path.exists(bat_path):
@@ -788,16 +788,18 @@ class PythonClient:
             return False
         else:
             r_process = subprocess.Popen([pyexe, "-m",tool,self.pyenv_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            # 持续读取输出
-            while True:
-                r_output = r_process.stdout.readline()
-                if r_output == '' and r_process.poll() is not None:
-                    break
-                if r_output:
-                    self.write_create_log(f"{r_output.strip()}")
-            if r_process.returncode == 0:
-                return True
-            return False
+            try:
+                while True:
+                    r_output = r_process.stdout.readline()
+                    if r_output == '' and r_process.poll() is not None:
+                        break
+                    if r_output:
+                        self.write_create_log(f"{r_output.strip()}")
+                if r_process.returncode == 0:
+                    return True
+                return False
+            finally:
+                CleanupInstallProcess(r_process)
     
     def install_requirements(self,cont={},log=True):
         """
@@ -817,19 +819,21 @@ class PythonClient:
             return False
         else:
             r_process = subprocess.Popen([pipexe, "install","-r",requirements,"-i",pipsource], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            # 持续读取输出
-            while True:
-                r_output = r_process.stdout.readline()
-                if r_output == '' and r_process.poll() is not None:
-                    break
-                if r_output:
-                    self.write_create_log(f"{r_output.strip()}")
-            if r_process.returncode == 0:
-                return True
-            error_output = r_process.stderr.read()
-            if error_output.strip():  # 如果有错误内容才写入
-                self.write_create_log(f"\n{error_output.strip()}")
-            return False
+            try:
+                while True:
+                    r_output = r_process.stdout.readline()
+                    if r_output == '' and r_process.poll() is not None:
+                        break
+                    if r_output:
+                        self.write_create_log(f"{r_output.strip()}")
+                if r_process.returncode == 0:
+                    return True
+                error_output = SafeReadStderr(r_process)
+                if error_output.strip():
+                    self.write_create_log(f"\n{error_output.strip()[:2000]}")
+                return False
+            finally:
+                CleanupInstallProcess(r_process)
         
     def install_extra_requirements(self,log=True):
         """
@@ -855,16 +859,18 @@ class PythonClient:
             else:
                 self.write_create_log(f"开启安装额外pip包：{extra_pip}")
                 r_process = subprocess.Popen([pipexe, "install",extra_pip,"-i",pipsource], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                # 持续读取输出
-                while True:
-                    r_output = r_process.stdout.readline()
-                    if r_output == '' and r_process.poll() is not None:
-                        break
-                    if r_output:
-                        self.write_create_log(f"{r_output.strip()}")
-                if r_process.returncode == 0:
-                    return True
-                return False
+                try:
+                    while True:
+                        r_output = r_process.stdout.readline()
+                        if r_output == '' and r_process.poll() is not None:
+                            break
+                        if r_output:
+                            self.write_create_log(f"{r_output.strip()}")
+                    if r_process.returncode == 0:
+                        return True
+                    return False
+                finally:
+                    CleanupInstallProcess(r_process)
         return True
     
     def get_requirements_list(self):

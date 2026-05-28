@@ -191,15 +191,6 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
         timeout = 60 * 15
         start_time = time.time()
 
-        def _delete_stale_log(fp):
-            if os.path.exists(fp):
-                try:
-                    os.remove(fp)
-                except Exception:
-                    pass
-
-        await asyncio.to_thread(_delete_stale_log, filepath)
-
         while not await asyncio.to_thread(os.path.exists, filepath):
             if time.time() - start_time >= 30:
                 await self.send_message(action='error', message="⏳ 等待日志文件超时，可能升级进程未启动")

@@ -23,11 +23,11 @@ import time
 import subprocess
 from utils.common import (
     ReadFile, WriteFile, DeleteDir, GetTmpPath, GetInstallPath,
-    RunCommand, RunCommandReturnCode, ConvertToUnixLineEndings,GetLogsPath
+    RunCommand, RunCommandReturnCode, ConvertToUnixLineEndings,GetLogsPath,CreateInstallProcess,CleanupInstallProcess,SafeReadStderr,ReleaseMemory
 )
 from utils.security.files import download_url_file
 from django.conf import settings
-from apps.systask.subprocessMg import job_subprocess_add, job_subprocess_del
+from apps.systask.subprocessMg import job_subprocess_add
 import importlib
 
 def get_fail2ban_path_info():
@@ -51,8 +51,7 @@ def get_fail2ban_path_info():
 
 def fail2ban_install_call_back(version={}, call_back=None, ok=True):
     if call_back:
-        job_id = version['job_id']
-        job_subprocess_del(job_id)
+        job_id = version.get('job_id')
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -123,28 +122,24 @@ def Install_Fail2Ban(version={}, call_back=None):
         script_path = os.path.join(settings.BASE_DIR, "utils", "install", "bash", "fail2ban.sh")
         ConvertToUnixLineEndings(script_path)
         
-        r_process = subprocess.Popen(
-            ['bash', script_path, 'install', version.get('c_version', 'auto'), ''],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            preexec_fn=os.setsid
+        r_process = CreateInstallProcess(
+            ['bash', script_path, 'install', version.get('c_version', 'auto'), '']
         )
-        
         job_subprocess_add(version['job_id'], r_process)
-        
-        while True:
-            r_output = r_process.stdout.readline()
-            if r_output == '' and r_process.poll() is not None:
-                break
-            if r_output:
-                WriteFile(log_path, f"{r_output.strip()}\n", mode='a', write=is_write_log)
-            time.sleep(0.1)
-        
-        r_stderr = r_process.stderr.read()
-        if r_stderr:
-            WriteFile(log_path, f"[stderr] {r_stderr.strip()}\n", mode='a', write=is_write_log)
+        try:
+            while True:
+                r_output = r_process.stdout.readline()
+                if r_output == '' and r_process.poll() is not None:
+                    break
+                if r_output:
+                    WriteFile(log_path, f"{r_output.strip()}\n", mode='a', write=is_write_log)
+                time.sleep(0.1)
+            r_stderr = SafeReadStderr(r_process)
+            if r_stderr:
+                WriteFile(log_path, f"[stderr] {r_stderr.strip()[:2000]}\n", mode='a', write=is_write_log)
+        finally:
+            CleanupInstallProcess(r_process, version['job_id'])
+            r_process = None
         
         if not is_fail2ban_installed():
             raise Exception("Fail2Ban安装失败")
@@ -163,11 +158,16 @@ def Install_Fail2Ban(version={}, call_back=None):
         fail2ban_install_call_back(version=version, call_back=call_back, ok=True)
         
         WriteFile(log_path, "-------------------安装任务已结束-------------------\n", mode='a', write=is_write_log)
+        version.clear()
+        soft_paths.clear()
+        ReleaseMemory()
         return True
         
     except Exception as e:
         WriteFile(log_path, f"【错误】异常信息如下：\n{e}\n", mode='a', write=is_write_log)
         fail2ban_install_call_back(version=version, call_back=call_back, ok=False)
+        version.clear()
+        ReleaseMemory()
         return False
 
 def Uninstall_Fail2Ban():

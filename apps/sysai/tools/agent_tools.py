@@ -202,6 +202,9 @@ todos 数组中每项必须包含：
 - status: 任务状态（pending/in_progress/completed/cancelled）
 - priority: 优先级（high/medium/low）
 
+示例：
+[{"id": "1", "content": "检查系统环境", "status": "in_progress", "priority": "high"}, {"id": "2", "content": "安装依赖", "status": "pending", "priority": "high"}]
+
 Args:
     todos: 待办任务数组，每项包含id、content、status、priority
     session_id: 会话ID

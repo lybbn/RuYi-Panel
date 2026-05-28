@@ -83,7 +83,7 @@ Vue3 + Vite + Python3 + Django
 - **容器终端**：在线容器Shell终端
 - **容器设置**：容器资源限制、环境变量、端口映射等配置
 - **GPU支持**：NVIDIA GPU容器分配
-- **应用商店**：一键安装常用应用（WordPress、Nextcloud、GitLab、Jenkins、MySQL、Redis等）
+- **应用商店**：一键安装常用应用（WordPress、Discuz!、PostgreSQL、MySQL、Redis、RabbitMQ、OpenClaw、Hermers Agent等）
 - **应用备份**：Docker应用数据备份与恢复
 
 ### 📁 文件管理
@@ -131,13 +131,12 @@ Vue3 + Vite + Python3 + Django
 - **网站备份**：网站文件定时备份
 - **目录备份**：指定目录定时备份
 - **应用备份**：Docker应用数据备份
-- **本地/远程存储**：支持本地和远程备份存储
+- **本地/远程存储**：支持本地和远程备份存储（暂未实现）
 
 ### 🛠️ 软件商店
 - **环境安装**：Nginx、MySQL、Go、Redis、Python、PHP等一键安装
 - **版本管理**：多版本Go共存与切换
 - **Python环境**：Python版本管理与虚拟环境
-- **图片工具**：在线图片处理工具
 
 ### 📊 监控系统
 - **实时监控**：CPU、内存、磁盘IO、网络IO实时数据采集
@@ -150,7 +149,7 @@ Vue3 + Vite + Python3 + Django
 - **用户管理**：用户名、密码修改
 - **SSL配置**：面板SSL证书配置
 - **OpenAPI**：开放API接口配置
-- **授权许可**：商业授权管理
+- **授权许可**：商业授权管理（暂未启用）
 
 ## 面板安全（问题解答）
 
@@ -220,6 +219,10 @@ Vue3 + Vite + Python3 + Django
 
 <img src="https://foruda.gitee.com/images/1738813129276998940/d8beb4f2_4823422.jpeg" referrerpolicy="no-referrer" />
 
+### 如意AI智能体
+
+<img src="https://foruda.gitee.com/images/1779060459595387777/1351b96b_4823422.png" referrerpolicy="no-referrer" />
+
 ### Waf防火墙
 
 <img src="https://foruda.gitee.com/images/1772073000035694789/caed6251_4823422.png" referrerpolicy="no-referrer" />
@@ -234,11 +237,11 @@ Vue3 + Vite + Python3 + Django
 
 ### 网站管理
 
-<img src="https://foruda.gitee.com/images/1738813212161749528/6a548a53_4823422.jpeg" referrerpolicy="no-referrer" />
+<img src="https://foruda.gitee.com/images/1779066220638078505/df6c9442_4823422.png" referrerpolicy="no-referrer" />
 
 ### 容器管理
 
-<img src="https://foruda.gitee.com/images/1741523756230508106/12ebab70_4823422.png" referrerpolicy="no-referrer" />
+<img src="https://foruda.gitee.com/images/1779066137393632362/c7099ae6_4823422.png" referrerpolicy="no-referrer" />
 
 ### 计划任务
 
@@ -250,7 +253,7 @@ Vue3 + Vite + Python3 + Django
 
 ### 应用商店
 
-<img src="https://foruda.gitee.com/images/1738813465814599623/b4c983a6_4823422.jpeg" referrerpolicy="no-referrer" />
+<img src="https://foruda.gitee.com/images/1779066322669594255/a1bc3168_4823422.png" referrerpolicy="no-referrer" />
 
 [更多预览](https://gitee.com/lybbn/RuYi-Panel/wikis/pages?sort_id=13387675&doc_id=6451384)
 

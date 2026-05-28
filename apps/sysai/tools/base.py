@@ -27,6 +27,7 @@ _PARAM_ALIASES = {
     'database_name': {'db_name', 'dbname', 'db'},
     'container_id': {'container', 'container_name', 'docker_id'},
     'image': {'image_name', 'docker_image', 'image_id'},
+    'todos': {'tasks', 'items', 'task_list', 'todo_list'},
 }
 
 
@@ -374,6 +375,9 @@ class AIToolRegistry:
 
     def get_definition(self, name: str) -> Optional[ToolDefinition]:
         return self._definitions.get(name)
+
+    def get_metadata(self, name: str) -> Optional[Dict[str, Any]]:
+        return self._metadata.get(name)
 
     def get_all_definitions(self) -> List[ToolDefinition]:
         return list(self._definitions.values())

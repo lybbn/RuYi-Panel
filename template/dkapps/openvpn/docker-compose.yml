@@ -1,0 +1,25 @@
+services:
+  RUYI_DKAPP:
+    image: kylemanna/openvpn:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - ${HOST_IP}:${OVPN_PORT}:1194/${OVPN_PROTO}
+    volumes:
+      - ${APP_PATH}/data:/etc/openvpn
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

@@ -10,17 +10,28 @@
 			"title": "Nginx",
 			"name": "nginx",
 			"installed": 0,
-			"versions": [{
+			"versions": [ {
+				"id": 4,
+				"version": "openresty",
+				"c_version": "1.29.2.3",
+				"url": "https://openresty.org/download/openresty-1.29.2.3.tar.gz"
+			},{
+				"id": 3,
+				"version": "openresty",
+				"c_version": "1.27.1.2",
+				"url": "https://mirrors.huaweicloud.com/openresty/v1.27.1.2/openresty-1.27.1.2.tar.gz"
+			},{
 				"id": 1,
+				"version": "1.29",
+				"c_version": "1.29.4",
+				"hide": true,
+				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.29.4.tar.gz"
+			},{
+				"id": 2,
 				"version": "1.27",
 				"c_version": "1.27.5",
+				"hide": true,
 				"url": "https://mirrors.huaweicloud.com/nginx/nginx-1.27.5.tar.gz"
-			}, {
-				"id": 2,
-				"version": "openresty",
-				"c_version": "1.25.3.2",
-				"hide":true,
-				"url": "https://mirrors.huaweicloud.com/openresty/v1.25.3.2/openresty-1.25.3.2.tar.gz"
 			}],
 			"author": "nginx.org",
 			"home": "https://www.nginx.org",
@@ -88,6 +99,11 @@
 			"name": "docker",
 			"installed": 0,
 			"versions": [{
+				"id": 3,
+				"version": "29.0",
+				"c_version": "29.2.0",
+				"url":""
+			},{
 				"id": 2,
 				"version": "28.0",
 				"c_version": "28.0.2",
@@ -126,17 +142,37 @@
 			"price": 0,
 			"show": 1
 		},{
+			"id": 14,
+			"sort": 14,
+			"icon": "fail2ban.png",
+			"title": "Fail2Ban",
+			"name": "fail2ban",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "stable",
+				"c_version": "stable",
+				"url": ""
+			}],
+			"author": "fail2ban.org",
+			"home": "https://www.fail2ban.org",
+			"type": 5,
+			"typename": "安全防护",
+			"desc": "Fail2Ban防暴力破解服务，保护SSH、Web等服务免受暴力破解攻击",
+			"price": 0,
+			"show": 1
+		},{
 			"id": 24,
 			"sort": 24,
 			"icon": "python.png",
-			"title": "Python3.13.3",
+			"title": "Python3.13.9",
 			"name": "python",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "3.13.3",
-				"c_version": "3.13.3",
-				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.13.3.tgz"
+				"version": "3.13.9",
+				"c_version": "3.13.9",
+				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.13.9.tgz"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -166,6 +202,26 @@
 			"price": 0,
 			"show": 1
 		},{
+			"id": 26,
+			"sort": 26,
+			"icon": "python.png",
+			"title": "Python3.14.4",
+			"name": "python",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "3.14.4",
+				"c_version": "3.14.4",
+				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.14.4.tgz"
+			}],
+			"author": "python.org",
+			"home": "https://www.python.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Python是一种解释型、面向对象、动态数据类型的高级程序设计语言",
+			"price": 0,
+			"show": 1
+		},{
 			"id": 90,
 			"sort": 90,
 			"icon": "go.png",
@@ -186,17 +242,77 @@
 			"price": 0,
 			"show": 1
 		},{
+			"id": 100,
+			"sort": 100,
+			"icon": "go.png",
+			"title": "Go1.26.2",
+			"name": "go",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "1.26.2",
+				"c_version": "1.26.2",
+				"url": "https://mirrors.aliyun.com/golang/go1.26.2.linux-amd64.tar.gz"
+			}],
+			"author": "golang.google.cn",
+			"home": "https://golang.google.cn/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Go(Golang)由Google开发的静态强类型、编译型、并发型，并具有垃圾回收功能的编程语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 110,
+			"sort": 110,
+			"icon": "nodejs.png",
+			"title": "Node.js22",
+			"name": "nodejs",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "22.16.0",
+				"c_version": "22.16.0",
+				"url": "https://mirrors.huaweicloud.com/nodejs/v22.16.0/node-v22.16.0-linux-x64.tar.xz"
+			}],
+			"author": "nodejs.org",
+			"home": "https://nodejs.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Node.js是基于Chrome V8引擎的JavaScript运行时，用于构建高性能网络应用",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 120,
+			"sort": 120,
+			"icon": "nodejs.png",
+			"title": "Node.js20",
+			"name": "nodejs",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "20.19.2",
+				"c_version": "20.19.2",
+				"url": "https://mirrors.huaweicloud.com/nodejs/v20.19.2/node-v20.19.2-linux-x64.tar.xz"
+			}],
+			"author": "nodejs.org",
+			"home": "https://nodejs.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Node.js是基于Chrome V8引擎的JavaScript运行时，用于构建高性能网络应用",
+			"price": 0,
+			"show": 1
+		},{
 			"id": 199,
 			"sort": 199,
 			"icon": "php.png",
-			"title": "PHP8.4.4",
+			"title": "PHP8.4",
 			"name": "php",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "8.4.4",
-				"c_version": "8.4.4",
-				"url": "https://www.php.net/distributions/php-8.4.4.tar.gz"
+				"version": "8.4.20",
+				"c_version": "8.4.20",
+				"url": "https://www.php.net/distributions/php-8.4.20.tar.gz"
 			}],
 			"author": "php.net",
 			"home": "https://www.php.net/",
@@ -204,7 +320,87 @@
 			"typename": "运行环境",
 			"desc": "PHP是一种广泛用于Web开发的开源服务器端脚本语言",
 			"price": 0,
-			"show": 0
+			"show": 1
+		},{
+			"id": 200,
+			"sort": 200,
+			"icon": "php.png",
+			"title": "PHP8.3",
+			"name": "php",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "8.3.30",
+				"c_version": "8.3.30",
+				"url": "https://www.php.net/distributions/php-8.3.30.tar.gz"
+			}],
+			"author": "php.net",
+			"home": "https://www.php.net/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "PHP是一种广泛用于Web开发的开源服务器端脚本语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 201,
+			"sort": 201,
+			"icon": "php.png",
+			"title": "PHP8.2",
+			"name": "php",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "8.2.30",
+				"c_version": "8.2.30",
+				"url": "https://www.php.net/distributions/php-8.2.30.tar.gz"
+			}],
+			"author": "php.net",
+			"home": "https://www.php.net/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "PHP是一种广泛用于Web开发的开源服务器端脚本语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 202,
+			"sort": 202,
+			"icon": "php.png",
+			"title": "PHP8.1",
+			"name": "php",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "8.1.34",
+				"c_version": "8.1.34",
+				"url": "https://www.php.net/distributions/php-8.1.34.tar.gz"
+			}],
+			"author": "php.net",
+			"home": "https://www.php.net/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "PHP是一种广泛用于Web开发的开源服务器端脚本语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 203,
+			"sort": 203,
+			"icon": "php.png",
+			"title": "PHP7.4",
+			"name": "php",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "7.4.33",
+				"c_version": "7.4.33",
+				"url": "https://www.php.net/distributions/php-7.4.33.tar.gz"
+			}],
+			"author": "php.net",
+			"home": "https://www.php.net/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "PHP是一种广泛用于Web开发的开源服务器端脚本语言（旧版兼容）",
+			"price": 0,
+			"show": 1
 		}]
 	},
 	"windows": {
@@ -336,15 +532,15 @@
 			"id": 24,
 			"sort": 24,
 			"icon": "python.png",
-			"title": "Python3.13.3",
+			"title": "Python3.13.9",
 			"name": "python",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "3.13.3",
-				"c_version": "3.13.3",
-				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.13.3-embed-amd64.zip",
-				"url1": "https://mirrors.aliyun.com/python-release/windows/python-3.13.3-amd64.exe"
+				"version": "3.13.9",
+				"c_version": "3.13.9",
+				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.13.9-embed-amd64.zip",
+				"url1": "https://mirrors.aliyun.com/python-release/windows/python-3.13.9-amd64.exe"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -375,6 +571,27 @@
 			"price": 0,
 			"show": 1
 		},{
+			"id": 26,
+			"sort": 26,
+			"icon": "python.png",
+			"title": "Python3.14.4",
+			"name": "python",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "3.14.4",
+				"c_version": "3.14.4",
+				"url": "https://mirrors.aliyun.com/python-release/windows/python-3.14.4-embed-amd64.zip",
+				"url1": "https://mirrors.aliyun.com/python-release/windows/python-3.14.4-amd64.exe"
+			}],
+			"author": "python.org",
+			"home": "https://www.python.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Python是一种解释型、面向对象、动态数据类型的高级程序设计语言",
+			"price": 0,
+			"show": 1
+		},{
 			"id": 90,
 			"sort": 90,
 			"icon": "go.png",
@@ -392,6 +609,126 @@
 			"type": 4,
 			"typename": "运行环境",
 			"desc": "Go(Golang)由Google开发的静态强类型、编译型、并发型，并具有垃圾回收功能的编程语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 100,
+			"sort": 100,
+			"icon": "go.png",
+			"title": "Go1.26.2",
+			"name": "go",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "1.26.2",
+				"c_version": "1.26.2",
+				"url": "https://mirrors.aliyun.com/golang/go1.26.2.windows-amd64.zip"
+			}],
+			"author": "golang.google.cn",
+			"home": "https://golang.google.cn/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Go(Golang)由Google开发的静态强类型、编译型、并发型，并具有垃圾回收功能的编程语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 110,
+			"sort": 110,
+			"icon": "nodejs.png",
+			"title": "Node.js22",
+			"name": "nodejs",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "22.16.0",
+				"c_version": "22.16.0",
+				"url": "https://mirrors.huaweicloud.com/nodejs/v22.16.0/node-v22.16.0-win-x64.zip"
+			}],
+			"author": "nodejs.org",
+			"home": "https://nodejs.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Node.js是基于Chrome V8引擎的JavaScript运行时，用于构建高性能网络应用",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 120,
+			"sort": 120,
+			"icon": "nodejs.png",
+			"title": "Node.js20",
+			"name": "nodejs",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "20.19.2",
+				"c_version": "20.19.2",
+				"url": "https://mirrors.huaweicloud.com/nodejs/v20.19.2/node-v20.19.2-win-x64.zip"
+			}],
+			"author": "nodejs.org",
+			"home": "https://nodejs.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Node.js是基于Chrome V8引擎的JavaScript运行时，用于构建高性能网络应用",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 199,
+			"sort": 199,
+			"icon": "php.png",
+			"title": "PHP8.4",
+			"name": "php",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "8.4.20",
+				"c_version": "8.4.20",
+				"url": "https://windows.php.net/downloads/releases/php-8.4.20-nts-Win32-vs17-x64.zip"
+			}],
+			"author": "php.net",
+			"home": "https://www.php.net/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "PHP是一种广泛用于Web开发的开源服务器端脚本语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 200,
+			"sort": 200,
+			"icon": "php.png",
+			"title": "PHP8.3",
+			"name": "php",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "8.3.30",
+				"c_version": "8.3.30",
+				"url": "https://windows.php.net/downloads/releases/php-8.3.30-nts-Win32-vs16-x64.zip"
+			}],
+			"author": "php.net",
+			"home": "https://www.php.net/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "PHP是一种广泛用于Web开发的开源服务器端脚本语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 201,
+			"sort": 201,
+			"icon": "php.png",
+			"title": "PHP8.2",
+			"name": "php",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "8.2.30",
+				"c_version": "8.2.30",
+				"url": "https://gitee.com/lybbn/RuYi-Panel/releases/download/v1.1.2/php-8.2.30-nts-Win32-vs16-x64.zip"
+			}],
+			"author": "php.net",
+			"home": "https://www.php.net/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "PHP是一种广泛用于Web开发的开源服务器端脚本语言",
 			"price": 0,
 			"show": 1
 		}]

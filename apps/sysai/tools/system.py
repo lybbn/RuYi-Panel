@@ -349,6 +349,10 @@ def execute_command(command: str, timeout: int = 30):
     - Linux系统使用：ls、ps、grep、systemctl、journalctl 等Linux命令
     - 不确定操作系统时，先用 get_system_info 工具查询
 
+    **路径规则：命令中涉及文件或目录路径时，必须使用绝对路径，禁止使用相对路径！**
+    - 正确：ls /var/log/nginx/access.log、type C:\Windows\System32\drivers\etc\hosts
+    - 错误：ls ./nginx/access.log、type hosts
+
     禁止执行的危险操作：
     - 删除系统文件或目录（如 rm -rf、del /f /s）
     - 修改系统关键配置
@@ -356,7 +360,7 @@ def execute_command(command: str, timeout: int = 30):
     - 安装或卸载系统级软件包（除非用户明确要求）
 
     Args:
-        command: 要执行的命令（必须适配当前操作系统）
+        command: 要执行的命令（必须适配当前操作系统，路径必须使用绝对路径）
         timeout: 命令超时时间（秒），默认30秒
     """
     from apps.sysai.agent.file_safety import is_command_denied
@@ -396,8 +400,10 @@ def start_command(command: str, cwd: str = ''):
     - Windows系统使用：dir、tasklist、netstat、sc、powershell 等Windows命令
     - Linux系统使用：ls、ps、grep、systemctl 等Linux命令
 
+    **路径规则：命令中涉及文件或目录路径时，必须使用绝对路径，禁止使用相对路径！**
+
     Args:
-        command: 要执行的命令（必须适配当前操作系统）
+        command: 要执行的命令（必须适配当前操作系统，路径必须使用绝对路径）
         cwd: 命令执行的工作目录，默认为当前目录
     """
     from apps.sysai.agent.file_safety import is_command_denied

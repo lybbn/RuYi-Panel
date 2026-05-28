@@ -66,7 +66,7 @@ def _cleanup_idle_agents():
             agent = _agents.pop(sid, None)
             if agent:
                 try:
-                    agent.stop()
+                    agent.stop(reason='idle_timeout')
                 except Exception:
                     pass
             _agents_last_access.pop(sid, None)
@@ -107,11 +107,11 @@ def _get_or_create_agent(session_id, model, config=None, user_input='', agent_id
 
             agent_config = config or {}
 
-            agent.require_command_confirm = agent_config.get('require_command_confirm', True)
+            agent.require_command_confirm = agent_config.get('require_command_confirm', 'medium_high')
             agent.max_tool_iterations = agent_config.get('max_tool_iterations', 20)
             agent.max_context_messages = agent_config.get('max_context_messages', 30)
             agent.web_search = agent_config.get('web_search', False)
-            agent.enable_memory = agent_config.get('enable_memory', True)
+            agent.enable_memory = agent_config.get('enable_memory', False)
             agent.memory_recall_threshold = agent_config.get('memory_recall_threshold', 10)
 
             smart_mode = agent_config.get('smart_mode', False)
@@ -251,10 +251,10 @@ def _get_or_create_agent(session_id, model, config=None, user_input='', agent_id
         return agent
 
 
-def _stop_agent(session_id):
+def _stop_agent(session_id, reason='user'):
     with _agents_lock:
         if session_id in _agents:
-            _agents[session_id].stop()
+            _agents[session_id].stop(reason=reason)
 
 
 def _cleanup_agent(session_id):
@@ -381,12 +381,23 @@ class AIChatMessageViewSet(CustomAPIView):
         if not session:
             return ErrorResponse(msg='会话不存在')
 
-        messages = AIChatMessage.objects.filter(session=session).order_by('create_at')
+        messages = AIChatMessage.objects.filter(session=session).exclude(role='tool').order_by('create_at')
         total_count = messages.count()
 
         limit = int(req_data.get('limit', 0))
         offset = int(req_data.get('offset', 0))
-        if limit > 0:
+        before_id = req_data.get('before', '')
+
+        if before_id and limit > 0:
+            before_msg = AIChatMessage.objects.filter(id=before_id, session=session).first()
+            if before_msg:
+                older_messages = AIChatMessage.objects.filter(
+                    session=session, create_at__lt=before_msg.create_at
+                ).exclude(role='tool').order_by('-create_at')[:limit]
+                messages = list(reversed(older_messages))
+            else:
+                messages = []
+        elif limit > 0:
             if offset > 0:
                 messages = messages[offset:offset + limit]
             else:
@@ -417,7 +428,7 @@ class AIChatMessageViewSet(CustomAPIView):
                 item['answer_text'] = msg.content
             data.append(item)
 
-        return SuccessResponse(data=data, total=total_count)
+        return SuccessResponse(data=data, total=total_count, limit=limit or total_count)
 
     def delete(self, request):
         req_data = get_parameter_dic(request)
@@ -591,18 +602,18 @@ class AIChatStreamView(CustomAPIView):
             sys_config = AIModel.objects_all.filter(name='__sys_config__').first()
             if sys_config and sys_config.extra_params:
                 global_cfg = sys_config.extra_params
-                agent_config['max_tool_iterations'] = global_cfg.get('max_turns', 20)
-                agent_config['require_command_confirm'] = global_cfg.get('require_command_confirm', True)
+                agent_config['max_tool_iterations'] = global_cfg.get('max_turns', 100)
+                agent_config['require_command_confirm'] = global_cfg.get('require_command_confirm', 'medium_high')
                 agent_config['max_context_messages'] = global_cfg.get('max_context_messages', 30)
                 agent_config['web_search'] = global_cfg.get('enable_web_search', False)
             else:
                 agent_config['max_tool_iterations'] = 20
-                agent_config['require_command_confirm'] = True
+                agent_config['require_command_confirm'] = 'medium_high'
                 agent_config['max_context_messages'] = 30
                 agent_config['web_search'] = False
         except Exception:
             agent_config['max_tool_iterations'] = 20
-            agent_config['require_command_confirm'] = True
+            agent_config['require_command_confirm'] = 'medium_high'
             agent_config['max_context_messages'] = 30
             agent_config['web_search'] = False
 
@@ -939,6 +950,7 @@ class AIChatStreamView(CustomAPIView):
         thread = threading.Thread(target=run_agent, daemon=True)
         thread.start()
 
+        completed_normally = False
         try:
             if compact_info:
                 is_compacted = True
@@ -1044,7 +1056,8 @@ class AIChatStreamView(CustomAPIView):
                             blk['arguments'] = arguments
                             blk['tool_type'] = tool_type
                             break
-                    yield f'data: {json.dumps({"type": "tool_confirm", "tool_name": tool_name, "call_id": call_id, "confirm_id": confirm_id, "arguments": arguments, "tool_type": tool_type}, ensure_ascii=False)}\n\n'
+                    confirm_timeout = event.get('timeout', 600)
+                    yield f'data: {json.dumps({"type": "tool_confirm", "tool_name": tool_name, "call_id": call_id, "confirm_id": confirm_id, "arguments": arguments, "tool_type": tool_type, "timeout": confirm_timeout}, ensure_ascii=False)}\n\n'
 
                 elif event['type'] == 'form_request':
                     tool_name = event.get('tool', '') or 'unknown'
@@ -1115,10 +1128,12 @@ class AIChatStreamView(CustomAPIView):
                         total_usage['output_tokens'] = usage.get('output_tokens', 0) or total_usage['output_tokens']
 
                     if agent.is_stopped():
+                        stop_reason = agent.get_stop_reason()
+                        display_stop_reason = 'user' if stop_reason == 'user' else 'interrupted'
                         if assistant_msg:
                             assistant_msg.is_stop = True
                             if assistant_msg.stop_reason not in ('length', 'limit'):
-                                assistant_msg.stop_reason = 'user'
+                                assistant_msg.stop_reason = display_stop_reason
                             assistant_msg.content = full_content
                             assistant_msg.reasoning_content = full_reasoning
                             assistant_msg.tool_calls = tool_calls_collected
@@ -1132,7 +1147,7 @@ class AIChatStreamView(CustomAPIView):
                                 reasoning_content=full_reasoning,
                                 tool_calls=tool_calls_collected,
                                 is_stop=True,
-                                stop_reason='user',
+                                stop_reason=display_stop_reason,
                                 metadata={'blocks': blocks},
                             )
                     else:
@@ -1143,19 +1158,17 @@ class AIChatStreamView(CustomAPIView):
 
                     self._record_usage(session, model, total_usage, content=full_content, user_message=message)
 
-                    msg_id = str(assistant_msg.id) if assistant_msg else ''
-                    done_data = {"type": "done", "message_id": msg_id, "session_id": str(session.id)}
-                    if total_usage.get('total_tokens') or total_usage.get('input_tokens') or total_usage.get('output_tokens'):
-                        done_data['usage'] = {
-                            'total_tokens': total_usage.get('total_tokens', 0),
-                            'input_tokens': total_usage.get('input_tokens', 0),
-                            'output_tokens': total_usage.get('output_tokens', 0),
-                        }
-                    yield f'data: {json.dumps(done_data, ensure_ascii=False)}\n\n'
+                    need_generate_title = is_new_session
+                    if not need_generate_title and session:
+                        msg_count_before = AIChatMessage.objects.filter(session=session, role='user').count()
+                        default_title = message[:30] + ('...' if len(message) > 30 else '')
+                        if msg_count_before <= 1 and session.title == default_title:
+                            need_generate_title = True
 
-                    if is_new_session and full_content:
+                    if need_generate_title:
                         try:
-                            logger.info(f'开始生成会话标题: session={session.id}, msg_len={len(message)}, resp_len={len(full_content)}')
+                            title_response = full_content or full_reasoning or ''
+                            logger.info(f'开始生成会话标题: session={session.id}, msg_len={len(message)}, resp_len={len(title_response)}, has_content={bool(full_content)}, has_reasoning={bool(full_reasoning)}, is_new_session={is_new_session}')
                             from apps.sysai.agent.title_generator import generate_title
 
                             def _title_callback(sid, title):
@@ -1168,7 +1181,7 @@ class AIChatStreamView(CustomAPIView):
                                 except Exception as te:
                                     logger.warning(f'标题更新DB失败: {te}')
 
-                            new_title = generate_title(message, full_content, str(session.id), model)
+                            new_title = generate_title(message, title_response, str(session.id), model)
                             if new_title:
                                 _title_callback(str(session.id), new_title)
                                 yield f'data: {json.dumps({"type": "title_update", "session_id": str(session.id), "title": new_title}, ensure_ascii=False)}\n\n'
@@ -1177,7 +1190,18 @@ class AIChatStreamView(CustomAPIView):
                         except Exception as te:
                             logger.warning(f'标题生成异常: {te}')
 
+                    msg_id = str(assistant_msg.id) if assistant_msg else ''
+                    done_data = {"type": "done", "message_id": msg_id, "session_id": str(session.id)}
+                    if total_usage.get('total_tokens') or total_usage.get('input_tokens') or total_usage.get('output_tokens'):
+                        done_data['usage'] = {
+                            'total_tokens': total_usage.get('total_tokens', 0),
+                            'input_tokens': total_usage.get('input_tokens', 0),
+                            'output_tokens': total_usage.get('output_tokens', 0),
+                        }
+                    yield f'data: {json.dumps(done_data, ensure_ascii=False)}\n\n'
+
                     yield 'data: [DONE]\n\n'
+                    completed_normally = True
                     return
 
                 elif event['type'] == 'warning':
@@ -1253,6 +1277,7 @@ class AIChatStreamView(CustomAPIView):
 
             yield f'data: {json.dumps({"type": "done", "message_id": str(assistant_msg.id) if assistant_msg else "", "session_id": str(session.id)}, ensure_ascii=False)}\n\n'
             yield 'data: [DONE]\n\n'
+            completed_normally = True
 
         except GeneratorExit:
             if not assistant_msg and (full_content or tool_calls_collected):
@@ -1300,7 +1325,8 @@ class AIChatStreamView(CustomAPIView):
             yield f'data: {json.dumps({"type": "error", "content": error_msg}, ensure_ascii=False)}\n\n'
             yield 'data: [DONE]\n\n'
         finally:
-            _stop_agent(str(session.id))
+            if not completed_normally:
+                _stop_agent(str(session.id), reason='cleanup')
             _cleanup_agent(str(session.id))
             agent.tool_registry.remove_progress_callback(str(session.id))
 
@@ -1548,7 +1574,7 @@ class AIChatStreamView(CustomAPIView):
                 'content': f'抱歉，对话过程中出现了错误：{error_msg}',
             }
         finally:
-            _stop_agent(str(session.id))
+            _stop_agent(str(session.id), reason='cleanup')
             _cleanup_agent(str(session.id))
 
 

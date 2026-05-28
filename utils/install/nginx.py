@@ -22,14 +22,14 @@ import os,re
 import time
 import requests
 import psutil
-from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,GetRandomSet,ConvertToUnixLineEndings
+from utils.common import ReadFile,is_service_running,GetTmpPath,GetInstallPath,WriteFile,DeleteFile,GetLogsPath,RunCommandReturnCode,GetPidCpuPercent,RunCommand,GetProcessNameInfo,GetRandomSet,ConvertToUnixLineEndings,CreateInstallProcess,CleanupInstallProcess,SafeReadStderr,ReleaseMemory
 from utils.security.files import download_url_file,get_file_name_from_url,get_github_quick_downloadurl
 from pathlib import Path
 from django.conf import settings
 import subprocess
 import importlib
 from utils.server.system import system
-from apps.systask.subprocessMg import job_subprocess_add,job_subprocess_del
+from apps.systask.subprocessMg import job_subprocess_add
 
 def get_nginx_path_info():
     root_path = GetInstallPath()
@@ -56,8 +56,7 @@ def get_nginx_path_info():
 
 def nginx_install_call_back(version={},call_back=None,ok=True):
     if call_back:
-        job_id = version['job_id']
-        job_subprocess_del(job_id)
+        job_id = version.get('job_id')
         module_path, function_name = call_back.rsplit('.', 1)
         module = importlib.import_module(module_path)
         function = getattr(module, function_name)
@@ -119,22 +118,24 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
             # 转换脚本换行符为 Unix 格式
             script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","nginx.sh")
             ConvertToUnixLineEndings(script_path)
-            r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'],version['version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            #r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'],version['version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
+            r_process = CreateInstallProcess(['bash', script_path,'install',version['c_version'],version['version']])
             job_subprocess_add(version['job_id'],r_process)
-            # 持续读取输出
-            while True:
-                r_output = r_process.stdout.readline()
-                if r_output == '' and r_process.poll() is not None:
-                    break
-                if r_output:
-                    WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
-                time.sleep(0.1)
-
-            # 获取标准错误
-            r_stderr = r_process.stderr.read()
-            if r_stderr:
-                if not os.path.exists(soft_paths['linux_exe_path']):
-                    raise ValueError(r_stderr.strip())
+            try:
+                while True:
+                    r_output = r_process.stdout.readline()
+                    if r_output == '' and r_process.poll() is not None:
+                        break
+                    if r_output:
+                        WriteFile(log_path,f"{r_output.strip()}\n",mode='a',write=is_write_log)
+                    time.sleep(0.1)
+                r_stderr = SafeReadStderr(r_process)
+                if r_stderr:
+                    if not os.path.exists(soft_paths['linux_exe_path']):
+                        raise ValueError(r_stderr.strip()[:2000])
+            finally:
+                CleanupInstallProcess(r_process, version['job_id'])
+                r_process = None
             version_file = os.path.join(install_directory,'version.ry')
             WriteFile(version_file,version['c_version'])
             WriteFile(log_path,"正在配置nginx...\n",mode='a',write=is_write_log)
@@ -164,6 +165,9 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
         Start_Nginx(is_windows=is_windows)
         WriteFile(log_path,"nginx启动成功\n",mode='a',write=is_write_log)
         WriteFile(log_path,"-------------------安装任务已结束-------------------\n",mode='a',write=is_write_log)
+        version.clear()
+        soft_paths.clear()
+        ReleaseMemory()
         return True
     except Exception as e:
         WriteFile(log_path,f"【错误】异常信息如下：\n{e}",mode='a',write=is_write_log)
@@ -177,6 +181,8 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
         except Exception as cleanup_err:
             WriteFile(log_path,f"清理安装目录失败: {cleanup_err}\n",mode='a',write=is_write_log)
         nginx_install_call_back(version=version,call_back=call_back,ok=False)
+        version.clear()
+        ReleaseMemory()
         return False
 
 def Uninstall_Nginx(is_windows=True):
@@ -688,9 +694,9 @@ http {{
     scgi_temp_path {scgi_temp_path};
     
     proxy_cache_path {proxy_cache_path} levels=1:2 keys_zone=cache_one:20m max_size=5g inactive=1d;
-    proxy_connect_timeout 60;
-    proxy_read_timeout 60;
-    proxy_send_timeout 60;
+    proxy_connect_timeout 60s;
+    proxy_read_timeout 300;
+    proxy_send_timeout 300;
     proxy_buffer_size 32k;
     proxy_buffers 4 64k;
     proxy_busy_buffers_size 128k;

@@ -1,0 +1,32 @@
+services:
+  RUYI_DKAPP:
+    image: gitlab/gitlab-ce:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    hostname: gitlab
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://${HOST_IP}:${GITLAB_PORT}'
+        gitlab_rails['gitlab_shell_ssh_port'] = ${GITLAB_SSH_PORT}
+        puma['worker_processes'] = 0
+        sidekiq['max_concurrency'] = 5
+        prometheus_monitoring['enable'] = false
+    ports:
+      - ${HOST_IP}:${GITLAB_PORT}:${GITLAB_PORT}
+      - ${HOST_IP}:${GITLAB_SSH_PORT}:22
+    volumes:
+      - ${APP_PATH}/config:/etc/gitlab
+      - ${APP_PATH}/data:/var/opt/gitlab
+      - ${APP_PATH}/logs:/var/log/gitlab
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

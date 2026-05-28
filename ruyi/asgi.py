@@ -105,7 +105,6 @@ class ErrorHandlingMiddleware:
             # })
             logger.error(f"[Global] websocket Error: {str(error)}")
         except Exception as send_error:
-            # logger.error(f"Failed to send websocket close frame: {send_error}")
             pass
 
 # 构建基础ASGI应用

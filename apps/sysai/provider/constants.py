@@ -50,6 +50,12 @@ def _init_providers():
     except ImportError as e:
         logger.warning(f'OpenRouter Provider 加载失败: {e}')
 
+    try:
+        from apps.sysai.provider.providers.xiaomi_provider.xiaomi_provider import XiaomiProvider
+        PROVIDER_MAPPING['xiaomi'] = XiaomiProvider
+    except ImportError as e:
+        logger.warning(f'Xiaomi Provider 加载失败: {e}')
+
 
 def get_provider_class(provider_key: str) -> Type[BaseAIProvider]:
     _init_providers()

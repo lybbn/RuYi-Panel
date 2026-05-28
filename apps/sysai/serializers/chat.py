@@ -23,7 +23,7 @@ class AIModelListSerializer(serializers.ModelSerializer):
     class Meta:
         model = AIModel
         fields = ['id', 'name', 'model_name', 'provider', 'model_type',
-                  'api_base', 'api_key', 'max_tokens', 'temperature', 'top_p',
+                  'api_base', 'api_key', 'max_tokens', 'context_length', 'temperature', 'top_p',
                   'api_version', 'api_secret', 'extra_params',
                   'is_enabled', 'is_default', 'sort_order']
 

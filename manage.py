@@ -6,6 +6,9 @@ import sys
 
 def main():
     """Run administrative tasks."""
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    if BASE_DIR not in sys.path:
+        sys.path.insert(0, BASE_DIR)
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ruyi.settings')
     try:
         from django.core.management import execute_from_command_line
@@ -15,7 +18,7 @@ def main():
             "available on your PYTHONPATH environment variable? Did you "
             "forget to activate a virtual environment?"
         ) from exc
-    if len(sys.argv) > 1 and sys.argv[1] in ['collectstatic','shell','createsuperuser','startapp','startproject','test','testserver']:
+    if len(sys.argv) > 1 and sys.argv[1] in ['collectstatic','shell','runserver','createsuperuser','startapp','startproject','test','testserver']:
         pass
     else:
         execute_from_command_line(sys.argv)

@@ -1264,8 +1264,8 @@ def RestartRuyi():
     重启如意
     """
     try:
-        os.system("systemctl stop ruyi;systemctl start ruyi")
-    except:
+        os.system("systemctl restart ruyi")
+    except Exception:
         pass
 
 def GetUidName(file_path,uid=0):

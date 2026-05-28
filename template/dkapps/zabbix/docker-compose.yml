@@ -1,0 +1,25 @@
+services:
+  RUYI_DKAPP:
+    image: zabbix/zabbix-appliance:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    environment:
+      TZ: Asia/Shanghai
+      ZBX_SERVER_NAME: ${ZABBIX_SERVER_NAME}
+    ports:
+      - ${HOST_IP}:${ZABBIX_PORT}:8080
+    volumes:
+      - ${APP_PATH}/data:/var/lib/mysql
+      - ${APP_PATH}/zbx:/usr/lib/zabbix
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

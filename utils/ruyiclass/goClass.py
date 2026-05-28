@@ -177,11 +177,11 @@ class GoClient:
         运行命令（保持子进程独立，不受父进程退出后而被终止）
         """
         if not self.is_windows:
-            preexec_fn = lambda: os.setuid(0)#默认root的uid
+            preexec_fn = lambda: os.setuid(0)
             if user:preexec_fn = self.get_preexec_fn(user)
-            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdin=subprocess.PIPE,stdout=subprocess.PIPE, stderr=subprocess.PIPE,shell=shell,preexec_fn=preexec_fn, env=env)
+            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,shell=shell,preexec_fn=preexec_fn, env=env,start_new_session=True)
         else:
-            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdout=subprocess.PIPE,stderr=subprocess.PIPE,shell=shell,env=env,creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+            subprocess.Popen(cmdstr,cwd=cwd,bufsize=4096,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,shell=shell,env=env,creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
     
     def exec_bat(self, pid_file=None, bat_path=None):
         if not os.path.exists(bat_path):

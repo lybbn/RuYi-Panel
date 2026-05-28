@@ -1,0 +1,30 @@
+services:
+  RUYI_DKAPP:
+    image: nousresearch/hermes-agent:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: unless-stopped
+    environment:
+      - API_SERVER_ENABLED=true
+      - API_SERVER_HOST=${API_SERVER_HOST}
+      - API_SERVER_KEY=${API_SERVER_KEY}
+      - HERMES_DASHBOARD=${HERMES_DASHBOARD}
+      - TZ=${TIMEZONE}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - ${HOST_IP}:${HERMES_GATEWAY_PORT}:8642
+      - ${HOST_IP}:${HERMES_DASHBOARD_PORT}:9119
+    volumes:
+      - ${APP_PATH}/data:/opt/data
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true
