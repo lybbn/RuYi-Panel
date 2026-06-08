@@ -14,8 +14,9 @@ from apps.system.views.SiteGroupViews import SiteGroupViewSet
 from apps.system.views.sysconfigViews import RYSysconfigManageView,RYGetInterfacesView,RYSysLicenseView,RYUpdateSysManageView,RYGetSysLocalAndAppsServiceView
 from apps.system.views.soft_shop import RYSoftShopListView,RYSoftShopManageView,RYSoftInstallLogsView,RYSoftInfoManageView
 from apps.system.views.serv_manage import RYServManageView
-from apps.system.views.databases_manage import DatabasesViewSet
+from apps.system.views.databases_manage import DatabasesViewSet, RemoteRedisViewSet, RemoteMysqlViewSet, RemotePgsqlViewSet, RemoteMongodbViewSet, PgsqlDatabaseViewSet, MongodbDatabaseViewSet, SqliteDatabaseViewSet
 from apps.system.views.site_manage import RYSiteManageView,RYSiteDomainManageView,RYSSLManageView,RYSiteBackupManageView
+from apps.system.views.ssl_cert_views import RYSSLCertManageView
 from apps.system.views.sys_firewall import RYSysFirewallView
 from apps.system.views.python_manage import RYPythonManageView,RYPythonSiteManageView
 from apps.system.views.go_manage import RYGoManageView,RYGoProjectManageView
@@ -35,12 +36,20 @@ system_url.register(r'terminal', TerminalServerViewSet)
 system_url.register(r'common_command', CommonCommandsViewSet)
 system_url.register(r'sitegroup', SiteGroupViewSet)
 system_url.register(r'databases', DatabasesViewSet)
+system_url.register(r'remote_redis', RemoteRedisViewSet)
+system_url.register(r'remote_mysql', RemoteMysqlViewSet)
+system_url.register(r'remote_pgsql', RemotePgsqlViewSet)
+system_url.register(r'remote_mongodb', RemoteMongodbViewSet)
+system_url.register(r'pgsql_databases', PgsqlDatabaseViewSet, basename='pgsql_databases')
+system_url.register(r'mongodb_databases', MongodbDatabaseViewSet, basename='mongodb_databases')
+system_url.register(r'sqlite_db', SqliteDatabaseViewSet, basename='sqlite_db')
 
 urlpatterns = [
     path('getSysMonitor/', GetSystemMonitorAllView.as_view(), name='首页系统监控'),
     path('sitesManage/', RYSiteManageView.as_view(), name='网站管理'),
     path('sitesDomainMg/', RYSiteDomainManageView.as_view(), name='网站域名管理'),
     path('sslMg/', RYSSLManageView.as_view(), name='SSL管理'),
+    path('sslCertMg/', RYSSLCertManageView.as_view(), name='SSL证书管理'),
     path('sitesBakMg/', RYSiteBackupManageView.as_view(), name='网站备份管理'),
     path('fileManage/', RYFileManageView.as_view(), name='文件操作'),
     path('fileManage/download/', RYFileDownloadView.as_view(), name='文件下载'),
@@ -60,6 +69,10 @@ urlpatterns = [
     path('servmanage/', RYServManageView.as_view(), name='服务器/面板管理'),
     path('databases/dbpass/', DatabasesViewSet.as_view({'post':'databasePass'}), name='数据库密码管理'),
     path('databases/dbtools/', DatabasesViewSet.as_view({'post':'dbTools'}), name='数据库管理工具'),
+    path('pgsql_databases/dbpass/', PgsqlDatabaseViewSet.as_view({'post':'databasePass'}), name='PgSQL数据库密码管理'),
+    path('pgsql_databases/dbtools/', PgsqlDatabaseViewSet.as_view({'post':'dbTools'}), name='PgSQL数据库管理工具'),
+    path('mongodb_databases/dbpass/', MongodbDatabaseViewSet.as_view({'post':'databasePass'}), name='MongoDB数据库密码管理'),
+    path('mongodb_databases/dbtools/', MongodbDatabaseViewSet.as_view({'post':'dbTools'}), name='MongoDB数据库管理工具'),
     path('sysFirewall/', RYSysFirewallView.as_view(), name='系统防火墙管理'),
     path('sysProcessList/', RYSysProcessListView.as_view(), name='系统进程管理列表'),
     path('sysProcessMg/', RYSysProcessOperateView.as_view(), name='系统进程管理'),

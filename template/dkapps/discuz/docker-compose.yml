@@ -1,6 +1,6 @@
 services:
   RUYI_DKAPP:
-    image: tencentci/discuz:latest
+    image: tencentci/discuz:${VERSION}
     deploy:
       resources:
         limits:

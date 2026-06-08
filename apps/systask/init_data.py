@@ -31,11 +31,13 @@ def get_default_crontab_tasks():
         shell_body2 = f'cd /d "{root_path}"\npython manage.py renewSSL'
         shell_body3 = f'cd /d "{root_path}"\npython manage.py cleanMonitor'
         shell_body4 = f'cd /d "{root_path}"\npython manage.py cleanWafLogs'
+        shell_body5 = f'cd /d "{root_path}"\npython manage.py cleanWafTempIp'
     else:
         shell_body1 = f'cd "{root_path}" && /usr/local/ruyi/python/bin/python3 manage.py checkSitesEnd'
         shell_body2 = f'cd "{root_path}" && /usr/local/ruyi/python/bin/python3 manage.py renewSSL'
         shell_body3 = f'cd "{root_path}" && /usr/local/ruyi/python/bin/python3 manage.py cleanMonitor'
         shell_body4 = f'cd "{root_path}" && /usr/local/ruyi/python/bin/python3 manage.py cleanWafLogs'
+        shell_body5 = f'cd "{root_path}" && /usr/local/ruyi/python/bin/python3 manage.py cleanWafTempIp'
     
     return [
         {
@@ -101,6 +103,22 @@ def get_default_crontab_tasks():
             "minute": 0,
             "second": 0,
             "shell_body": shell_body4,
+        },
+        {
+            "id": 5,
+            "job_id": "sys_job_clean_waf_temp_ip_001",
+            "name": "清理WAF过期临时封禁IP",
+            "is_sys": 0,
+            "status": 1,
+            "period_type": 1,
+            "year": 0,
+            "month": 0,
+            "week": 0,
+            "day": 0,
+            "hour": 3,
+            "minute": 30,
+            "second": 0,
+            "shell_body": shell_body5,
         },
     ]
 

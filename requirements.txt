@@ -34,3 +34,5 @@ geoip2
 openai
 tiktoken
 httpx-sse
+pyotp
+qrcode[pil]

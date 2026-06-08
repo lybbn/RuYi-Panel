@@ -82,6 +82,15 @@ def panel_docker_square_list(search: str = ''):
 def panel_docker_square_catalog(search: str = '', app_type: str = ''):
     """获取如意面板Docker广场的应用目录（可安装的应用列表）。当用户需要了解广场中有哪些应用可以安装时使用此工具。
 
+    返回结果中包含每个应用的formFields（安装参数表单），AI应根据formFields确定安装时需要提供哪些参数。
+    特别注意selectapps类型的字段，表示该应用依赖其他服务（如WordPress依赖MySQL），需要先安装依赖服务。
+
+    常见formFields字段说明：
+    - type=number: 端口号，需确保端口未被占用
+    - type=password: 密码，如未提供可自动生成
+    - type=selectapps: 依赖服务选择，child.envkey为依赖服务的连接参数envkey
+    - outport=true: 对外开放端口，需检查端口可用性
+
     Args:
         search: 搜索关键词，按应用名称或描述搜索
         app_type: 应用类型筛选，如 website、database、devtool、media 等
@@ -114,16 +123,38 @@ def panel_docker_square_catalog(search: str = '', app_type: str = ''):
         for item in softlist:
             appname = item.get('appname', '')
             installed_count = RyDockerApps.objects.filter(appname=appname).count()
+
+            form_fields = item.get('formFields', [])
+            simplified_fields = []
+            has_dependency = False
+            for field in form_fields:
+                field_info = {
+                    'label': field.get('label', ''),
+                    'envkey': field.get('envkey', ''),
+                    'type': field.get('type', ''),
+                    'default': field.get('default', ''),
+                    'required': field.get('required', False),
+                    'outport': field.get('outport', False),
+                }
+                if field.get('type') == 'selectapps':
+                    has_dependency = True
+                    field_info['values'] = field.get('values', [])
+                    field_info['child'] = field.get('child', {})
+                    field_info['tips'] = field.get('tips', '')
+                simplified_fields.append(field_info)
+
             result.append({
                 'appid': item.get('appid'),
                 'appname': appname,
                 'title': item.get('title', appname),
                 'desc': item.get('desc', ''),
                 'type': item.get('type', ''),
-                'icon': item.get('icon', ''),
+                'typename': item.get('typename', ''),
                 'version': item.get('version', ''),
                 'installed': installed_count > 0,
                 'installed_count': installed_count,
+                'has_dependency': has_dependency,
+                'form_fields': simplified_fields,
             })
 
         return {
@@ -138,12 +169,27 @@ def panel_docker_square_catalog(search: str = '', app_type: str = ''):
 def panel_docker_square_install(appname: str, name: str, params: dict = None):
     """从如意面板Docker广场一键安装应用。⚠️此为高危操作，会创建Docker容器并可能开放端口。
 
-    安装前应先用panel_docker_square_catalog查询该应用是否存在，并了解其参数要求。
+    安装流程：
+    1. 先用panel_docker_square_catalog查询该应用是否存在，并了解其formFields参数要求
+    2. 如果应用有依赖服务（has_dependency=true，form_fields中有type=selectapps的字段），需先安装依赖服务
+    3. 依赖服务的child.envkey值格式为"{gateway}:{port}"，如"172.18.0.1:13306"
+    4. 调用此工具安装应用
+
+    当依赖服务未安装时，此工具会返回need_dependency=true和install_options，此时必须询问用户选择安装方式：
+    - 选项1：从容器广场一键安装（推荐，自动配置网络和依赖关系）
+    - 选项2：使用Docker原生方式安装（手动配置，灵活度更高）
+    不要自行决定安装方式，必须让用户选择。
+
+    如果广场中不存在该应用，应告知用户该应用不在容器广场中，询问是否使用docker原生方式部署。
 
     Args:
-        appname: 广场应用名称，如 wordpress、nextcloud、gitlab 等（必须是广场目录中存在的appname）
-        name: 安装后的实例名称，需唯一标识，如 my-wordpress、my-nextcloud
-        params: 应用参数字典，不同应用参数不同，通常包含端口映射、密码等配置。常见参数如：{"PORT": "8080", "MYSQL_ROOT_PASSWORD": "123456"}
+        appname: 广场应用名称，如 wordpress、nextcloud、gitlab、mysql 等（必须是广场目录中存在的appname）
+        name: 安装后的实例名称，需唯一标识，如 my-wordpress、my-mysql
+        params: 应用参数字典，不同应用参数不同。参数envkey必须与formFields中的envkey一致。
+            常见参数：
+            - 端口类：{"wordpress_port": 18080, "mysql_port": 13306}
+            - 密码类：{"mysql_password": "yourpassword", "mysql_root_password": "rootpwd"}
+            - 依赖服务类：{"wordpress_db_host": "172.18.0.1:13306"}（selectapps的child.envkey）
     """
     try:
         if not appname or not name:
@@ -161,8 +207,12 @@ def panel_docker_square_install(appname: str, name: str, params: dict = None):
                 break
 
         if not app_info:
-            available = ', '.join([a.get('appname', '') for a in apps_list[:20]])
-            return {'error': f'广场中不存在应用: {appname}，部分可用应用: {available}'}
+            available = [a.get('appname', '') for a in apps_list if a.get('show', 1) != 0]
+            return {
+                'error': f'容器广场中不存在应用: {appname}',
+                'suggestion': '该应用不在容器广场中，请询问用户是否使用Docker原生方式部署（docker run / docker compose）',
+                'available_apps': available[:30],
+            }
 
         appid = app_info.get('appid', '')
         version = app_info.get('version', 'latest')
@@ -170,11 +220,88 @@ def panel_docker_square_install(appname: str, name: str, params: dict = None):
 
         form_fields = app_info.get('formFields', [])
         default_params = {}
+        selectapps_fields = []
         for field in form_fields:
             envkey = field.get('envkey', '')
             default_val = field.get('default', '')
             if envkey and default_val:
                 default_params[envkey] = default_val
+            if field.get('type') == 'selectapps':
+                selectapps_fields.append(field)
+
+        if selectapps_fields:
+            from utils.ruyiclass.dockerClass import DockerClient
+            dc = DockerClient()
+            docker_ruyi_network_gateway = dc.get_network_gateway("ruyi-network")
+            docker_ruyi_network_gateway = docker_ruyi_network_gateway or "127.0.0.1"
+
+            for sa_field in selectapps_fields:
+                sa_values = sa_field.get('values', [])
+                sa_child = sa_field.get('child', {})
+                child_envkey = sa_child.get('envkey', '')
+                if not child_envkey:
+                    continue
+
+                sa_appname = default_params.get(sa_field.get('envkey', ''), '')
+                if not sa_appname:
+                    if sa_values:
+                        sa_appname = sa_values[0].get('value', '')
+
+                child_value = ''
+                if params and child_envkey in params:
+                    child_value = params[child_envkey]
+
+                if not child_value:
+                    from apps.system.models import RySoftShop
+                    local_service = RySoftShop.objects.filter(name=sa_appname, installed=True).first()
+                    if local_service:
+                        from utils.common import current_os as cur_os
+                        from apps.system.management.commands.panelcli import Ry_Get_Soft_Port
+                        lport = Ry_Get_Soft_Port(name=sa_appname, is_windows=(cur_os == 'windows'))
+                        if sa_appname == 'mysql':
+                            child_value = f"{docker_ruyi_network_gateway}:{lport}"
+                        else:
+                            child_value = f"{docker_ruyi_network_gateway}:{lport}"
+                    else:
+                        dk_service = RyDockerApps.objects.filter(appname=sa_appname).first()
+                        if dk_service:
+                            dk_params = {}
+                            if dk_service.params:
+                                try:
+                                    dk_params = json.loads(dk_service.params) if isinstance(dk_service.params, str) else dk_service.params
+                                except Exception:
+                                    dk_params = {}
+                            dk_port = ''
+                            for key, value in dk_params.items():
+                                if '_port' in key.lower():
+                                    dk_port = str(value)
+                                    break
+                            if dk_port:
+                                if sa_appname == 'mysql':
+                                    child_value = f"{docker_ruyi_network_gateway}:{dk_port}"
+                                else:
+                                    child_value = f"{docker_ruyi_network_gateway}:{dk_port}"
+                        else:
+                            dep_in_square = False
+                            for a in apps_list:
+                                if a.get('appname') == sa_appname and a.get('show', 1) != 0:
+                                    dep_in_square = True
+                                    break
+                            options = []
+                            if dep_in_square:
+                                options.append(f'1. 从容器广场一键安装 {sa_appname}（推荐，自动配置网络和依赖）')
+                            options.append(f'{"2" if dep_in_square else "1"}. 使用Docker原生方式安装 {sa_appname}（手动配置，灵活度更高）')
+                            return {
+                                'need_dependency': True,
+                                'error': f'应用 {appname} 依赖 {sa_appname} 服务，但当前未安装。请询问用户选择安装方式：',
+                                'dependency_appname': sa_appname,
+                                'child_envkey': child_envkey,
+                                'dependency_in_square': dep_in_square,
+                                'install_options': options,
+                                'suggestion': f'请询问用户选择安装方式后再继续。如果选择容器广场安装，使用 panel_docker_square_install(appname="{sa_appname}", name="自定义实例名")；如果选择Docker原生安装，使用 docker_run 或 docker_compose 工具。',
+                            }
+
+                default_params[child_envkey] = child_value
 
         if params:
             default_params.update(params)
@@ -208,12 +335,20 @@ def panel_docker_square_install(appname: str, name: str, params: dict = None):
             allowport=False,
             advanced=False,
         )
+        DB_PIP_MAP = {
+            'pgsql': 'psycopg2-binary',
+            'mongodb': 'pymongo',
+        }
+        if appname in DB_PIP_MAP:
+            from utils.common import pip_install_package
+            pip_install_package(DB_PIP_MAP[appname])
 
         return {
             'success': True,
             'message': f'{appname}({name}) 安装任务已提交，{msg}',
             'appname': appname,
             'name': name,
+            'params': default_params,
         }
     except Exception as e:
         return {'error': f'安装Docker广场应用失败: {str(e)}'}

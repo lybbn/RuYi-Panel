@@ -30,6 +30,7 @@ import datetime
 import platform
 import chardet
 import subprocess
+import importlib
 from rest_framework.request import Request
 from django.http import QueryDict
 from django.conf import settings
@@ -96,6 +97,48 @@ def get_python_pip():
             "pip":"rypip"
         }
 
+
+def pip_install_package(package_name):
+    """
+    @name 按需安装pip包，兼容Windows和Linux
+    @param package_name pip包名，如 psycopg2-binary、pymongo
+    @return (bool, str) 是否成功, 消息
+    @author lybbn<2024-11-13>
+    """
+    PIP_IMPORT_MAP = {
+        'psycopg2-binary': 'psycopg2',
+        'pymongo': 'pymongo',
+        'boto3': 'boto3',
+        'oss2': 'oss2',
+        'cos-python-sdk-v5': 'qcloud_cos',
+        'qiniu': 'qiniu',
+        'webdavclient3': 'webdav3',
+        'msal': 'msal',
+    }
+    import_name = PIP_IMPORT_MAP.get(package_name, package_name.replace('-', '_').split('[')[0])
+    try:
+        importlib.import_module(import_name)
+        return True, "已安装"
+    except ImportError:
+        pass
+    pip_info = get_python_pip()
+    pip_cmd = pip_info.get("pip", "pip")
+    try:
+        result = subprocess.run(
+            [pip_cmd, "install", package_name, "-q", "-i", "https://mirrors.aliyun.com/pypi/simple/", "--trusted-host", "mirrors.aliyun.com"],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        if result.returncode == 0:
+            return True, "安装成功"
+        else:
+            return False, result.stderr or "安装失败"
+    except subprocess.TimeoutExpired:
+        return False, "安装超时"
+    except Exception as e:
+        return False, str(e)
+
 def check_is_port(port):
     """
     @name 是否有效端口
@@ -120,6 +163,22 @@ def check_is_ipv4(ip):
         r'(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
     )
     return bool(pattern.match(ip))
+
+def parse_accept_ips(accept_ips):
+    """
+    @name 解析允许的IP地址字符串，支持逗号、换行符、分号分隔，返回去重后的列表
+    @author lybbn
+    """
+    if not accept_ips:
+        return []
+    accept_ips = accept_ips.replace('\\n', ',').replace('\\r', ',').replace(';', ',')
+    ips = re.split(r'[,\n\r]+', accept_ips)
+    ips = [ip.strip() for ip in ips if ip.strip()]
+    seen = []
+    for ip in ips:
+        if ip not in seen:
+            seen.append(ip)
+    return seen
 
 def is_valid_ipv4_segment(ip_segment):
     """

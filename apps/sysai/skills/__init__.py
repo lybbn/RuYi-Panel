@@ -25,7 +25,6 @@ class SkillManager:
 
     SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'template', 'agent', 'skills')
     DATA_SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'data', 'agent', 'skills')
-    EVOLVED_SKILLS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'data', 'agent', 'evolved_skills')
     SKILLS_STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'data', 'agent', 'skills_state.json')
 
     @classmethod
@@ -88,7 +87,7 @@ class SkillManager:
         skills = []
         seen_names = set()
 
-        for skills_dir in [self.EVOLVED_SKILLS_DIR, self.DATA_SKILLS_DIR, self.SKILLS_DIR]:
+        for skills_dir in [self.DATA_SKILLS_DIR, self.SKILLS_DIR]:
             if not os.path.exists(skills_dir):
                 continue
             for root, dirs, files in os.walk(skills_dir):
@@ -96,9 +95,7 @@ class SkillManager:
                     skill = self._load_skill_from_dir(root)
                     if skill and skill.name not in seen_names:
                         seen_names.add(skill.name)
-                        if skills_dir == self.EVOLVED_SKILLS_DIR:
-                            skill.metadata['_source'] = skill.metadata.get('source') or 'user'
-                        elif skills_dir == self.DATA_SKILLS_DIR:
+                        if skills_dir == self.DATA_SKILLS_DIR:
                             skill.metadata['_source'] = skill.metadata.get('source') or 'user'
                         else:
                             skill.metadata['_source'] = skill.metadata.get('source') or 'builtin'

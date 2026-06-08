@@ -40,6 +40,8 @@ class RuyiDatabasesRouter:
             return 'waf'
         elif model._meta.app_label == 'sysai':
             return 'ai'
+        elif model._meta.app_label == 'sysnode':
+            return 'node'
         return 'default'
 
     def db_for_write(self, model, **hints):
@@ -63,6 +65,8 @@ class RuyiDatabasesRouter:
             return 'waf'
         elif model._meta.app_label == 'sysai':
             return 'ai'
+        elif model._meta.app_label == 'sysnode':
+            return 'node'
         return 'default'
 
     def allow_migrate(self, db, app_label, model_name=None, **hints):
@@ -88,5 +92,7 @@ class RuyiDatabasesRouter:
             return db == 'waf'
         elif app_label == 'sysai':
             return db == 'ai'
+        elif app_label == 'sysnode':
+            return db == 'node'
         else:
             return db == 'default'

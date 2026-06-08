@@ -996,7 +996,7 @@ def EditFirewallRule(param={}):
     except:
         return False
 
-def DelFirewallRule(param={}):
+def DelFirewallRule(param={},is_reload=True):
     """
     删除防火墙规则(需管理员权限)
     """

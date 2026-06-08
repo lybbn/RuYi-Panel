@@ -131,6 +131,9 @@ INSTALLED_APPS = [
     'apps.syswaf',
     'apps.sysai',
     'apps.syscheck',
+    'apps.sysdomain',
+    'apps.sysnode',
+    'apps.syscloud',
 ]
 
 MIDDLEWARE = [
@@ -234,6 +237,11 @@ DATABASES = {
     'ai': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': os.path.join(BASE_DIR, 'data', 'db', 'ruyi_ai.db'),
+        'OPTIONS': {'init_command': '; '.join(f'PRAGMA {k}={v}' for k, v in SQLITE_PRAGMAS.items())},
+    },
+    'node': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': os.path.join(BASE_DIR, 'data', 'db', 'ruyi_node.db'),
         'OPTIONS': {'init_command': '; '.join(f'PRAGMA {k}={v}' for k, v in SQLITE_PRAGMAS.items())},
     }
 }

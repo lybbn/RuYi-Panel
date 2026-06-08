@@ -5,10 +5,10 @@ from apps.sysai.views.chat import (
     AIModelDiscoverView, AIAgentListView, AIAgentAutoCollectView, AICustomAgentView,
     AIToolToggleView, AICompactChatView,
     AIFileUploadView, AIServerFileBrowseView,
-    AIMCPStatusView, AISkillEvolutionView, AIToolsetInfoView,
+    AIMCPStatusView, AIToolsetInfoView,
 )
-from apps.sysai.views.tools import AIToolInfoView, AISkillListView, AISkillToggleView, AISkillImportView, AISkillDeleteView, AISkillEvolutionHistoryView
-from apps.sysai.views.config import AIConfigView, AIUsageView, AIUsageExportView, AIUsageResetView, AIChatExportView, AICuratorView
+from apps.sysai.views.tools import AIToolInfoView, AISkillListView, AISkillToggleView, AISkillImportView, AISkillDeleteView
+from apps.sysai.views.config import AIConfigView, AIUsageView, AIUsageExportView, AIUsageResetView, AIChatExportView
 
 urlpatterns = [
     path('sessions/', AIChatSessionViewSet.as_view(), name='ai_sessions'),
@@ -38,8 +38,5 @@ urlpatterns = [
     path('files/upload/', AIFileUploadView.as_view(), name='ai_file_upload'),
     path('files/browse/', AIServerFileBrowseView.as_view(), name='ai_file_browse'),
     path('mcp/', AIMCPStatusView.as_view(), name='ai_mcp'),
-    path('evolution/', AISkillEvolutionView.as_view(), name='ai_evolution'),
-    path('evolution/history/', AISkillEvolutionHistoryView.as_view(), name='ai_evolution_history'),
-    path('curator/', AICuratorView.as_view(), name='ai_curator'),
     path('toolsets/', AIToolsetInfoView.as_view(), name='ai_toolsets'),
 ]

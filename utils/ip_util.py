@@ -16,9 +16,88 @@
 
 import os
 import ipaddress
+import json
+import time
+import threading
 from qqwry import QQwry
 from django.conf import settings
 from utils.security.files import download_url_file
+
+class IPCache:
+    _instance = None
+    _lock = threading.Lock()
+    CACHE_DIR = os.path.join(settings.BASE_DIR, 'data', 'cache') if hasattr(settings, 'BASE_DIR') else None
+    CACHE_FILE = None
+    CACHE_EXPIRE_DAYS = 30
+    _cache = {}
+    _dirty = False
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._init_cache()
+        return cls._instance
+    
+    @classmethod
+    def _init_cache(cls):
+        if cls._initialized:
+            return
+        cls.CACHE_DIR = os.path.join(settings.BASE_DIR, 'data', 'cache')
+        cls.CACHE_FILE = os.path.join(cls.CACHE_DIR, 'ip_location.json')
+        cls._cache = {}
+        cls._dirty = False
+        cls._load()
+        cls._initialized = True
+    
+    @classmethod
+    def _load(cls):
+        try:
+            if cls.CACHE_FILE and os.path.exists(cls.CACHE_FILE):
+                with open(cls.CACHE_FILE, 'r', encoding='utf-8') as f:
+                    cls._cache = json.load(f)
+        except:
+            cls._cache = {}
+    
+    @classmethod
+    def _save(cls):
+        if not cls._dirty:
+            return
+        try:
+            os.makedirs(cls.CACHE_DIR, exist_ok=True)
+            with open(cls.CACHE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(cls._cache, f, ensure_ascii=False, indent=2)
+            cls._dirty = False
+        except Exception as e:
+            print(f"[IPCache] 保存缓存失败: {e}")
+    
+    @classmethod
+    def get(cls, ip):
+        data = cls._cache.get(ip)
+        if not data:
+            return None
+        if time.time() - data.get('ts', 0) > cls.CACHE_EXPIRE_DAYS * 86400:
+            del cls._cache[ip]
+            cls._dirty = True
+            return None
+        return data
+    
+    @classmethod
+    def set(cls, ip, location, **kwargs):
+        cls._cache[ip] = {
+            'location': location,
+            'ts': time.time(),
+            **kwargs
+        }
+        cls._dirty = True
+        if len(cls._cache) % 100 == 0:
+            cls._save()
+    
+    @classmethod
+    def flush(cls):
+        cls._save()
 
 def is_valid_ipv4(ip):
     '''
@@ -80,18 +159,40 @@ class IPQQwry:
         @return list ['国家–省份–市')] 处理后 
         '''
         results = []
-        if not IPQQwry._load_qqwry():
-            return [""] * len(ip_list)
-        try:
-            for ip in ip_list:
-                if is_valid_ipv4(ip):
-                    result = IPQQwry._qqwry.lookup(ip)
-                    results.append(result[0] if result else "")
-                else:
-                    results.append("")
-        except Exception as e:
-            print(f"[IPQQwry] 查询IP归属地失败: {e}")
-            results = [""] * (len(ip_list) - len(results))
+        cache = IPCache()
+        need_query = []
+        query_indices = []
+        
+        for i, ip in enumerate(ip_list):
+            cached = cache.get(ip)
+            if cached and cached.get('location'):
+                results.append(cached['location'])
+            else:
+                results.append(None)
+                need_query.append(ip)
+                query_indices.append(i)
+        
+        if need_query and IPQQwry._load_qqwry():
+            try:
+                for idx, ip in zip(query_indices, need_query):
+                    if is_valid_ipv4(ip):
+                        result = IPQQwry._qqwry.lookup(ip)
+                        location = result[0] if result else ""
+                        results[idx] = location
+                        if location:
+                            cache.set(ip, location)
+                    else:
+                        results[idx] = ""
+            except Exception as e:
+                print(f"[IPQQwry] 查询IP归属地失败: {e}")
+                for idx in query_indices:
+                    if results[idx] is None:
+                        results[idx] = ""
+        else:
+            for i in range(len(results)):
+                if results[i] is None:
+                    results[i] = ""
+        
         return results
 
     def lookup(self, ip):
@@ -101,12 +202,19 @@ class IPQQwry:
         @param ip IP地址
         @return str 归属地字符串
         '''
+        cache = IPCache()
+        cached = cache.get(ip)
+        if cached and cached.get('location'):
+            return cached['location']
         if not IPQQwry._load_qqwry():
             return ""
         try:
             if is_valid_ipv4(ip):
                 result = IPQQwry._qqwry.lookup(ip)
-                return result[0] if result else ""
+                location = result[0] if result else ""
+                if location:
+                    cache.set(ip, location)
+                return location
             return ""
         except Exception as e:
             print(f"[IPQQwry] 查询IP归属地失败: {e}")
@@ -170,6 +278,17 @@ class GeoIP2Lookup:
             'longitude': None,
             'location': ''
         }
+        cache = IPCache()
+        cached = cache.get(ip)
+        if cached and cached.get('location') and 'latitude' in cached:
+            return {
+                'country': cached.get('country', ''),
+                'province': cached.get('province', ''),
+                'city': cached.get('city', ''),
+                'latitude': cached.get('latitude'),
+                'longitude': cached.get('longitude'),
+                'location': cached.get('location', '')
+            }
         if not cls._load_database():
             return result
         try:
@@ -182,6 +301,13 @@ class GeoIP2Lookup:
             result['longitude'] = response.location.longitude
             location_parts = [result['country'], result['province'], result['city']]
             result['location'] = ' '.join(filter(None, location_parts))
+            if result['location']:
+                cache.set(ip, result['location'], 
+                         country=result['country'],
+                         province=result['province'],
+                         city=result['city'],
+                         latitude=result['latitude'],
+                         longitude=result['longitude'])
             return result
         except Exception as e:
             return result
@@ -256,5 +382,8 @@ def get_server_location():
     except Exception as e:
         print(f"[get_server_location] 获取服务器位置失败: {e}")
     return result
+
+import atexit
+atexit.register(lambda: IPCache.flush())
 
 

@@ -20,6 +20,7 @@ from utils.common import (
     get_parameter_dic,
     isSSHRunning,
 )
+from utils.install.fail2ban import get_fail2ban_status
 from utils.customView import CustomAPIView
 from utils.jsonResponse import DetailResponse, ErrorResponse, SuccessResponse
 
@@ -394,10 +395,12 @@ class RYSysSSHManageView(CustomAPIView):
         action = req.get('action', 'overview')
 
         if action == 'overview':
+            fail2ban_status = get_fail2ban_status()
             data = {
                 'running': bool(isSSHRunning()),
                 'config': _get_ssh_config_view(),
                 'stats': _calc_stats(),
+                'fail2ban': fail2ban_status,
             }
             return DetailResponse(data=data)
 

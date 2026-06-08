@@ -87,9 +87,9 @@ def create_root_certificate(password=None,days=365*10):
     ).serial_number(
         random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(datetime.timezone.utc)
     ).not_valid_after(
-        datetime.datetime.utcnow() + datetime.timedelta(days=days)
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)
     ).add_extension(
         BasicConstraints(ca=True, path_length=None), critical=True,
     ).sign(key, hashes.SHA256())
@@ -154,9 +154,9 @@ def create_signed_certificate(root_cert=None, root_key=None, hosts=[],days=365*1
     ).serial_number(
         random_serial_number()
     ).not_valid_before(
-        datetime.datetime.utcnow()
+        datetime.datetime.now(datetime.timezone.utc)
     ).not_valid_after(
-        datetime.datetime.utcnow() + datetime.timedelta(days=days)
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)
     ).add_extension(
         KeyUsage(
             digital_signature=True,
@@ -305,9 +305,9 @@ def getCertInfo(cert_path=settings.RUYI_CERTKEY_PATH_FILE,cert_content=None,mode
             if attribute.oid._name == "organizationName":
                 organization_name = attribute.value
                 break
-    not_valid_after = info.not_valid_after.strftime("%Y-%m-%d %H:%M:%S")
-    if not organization_name.find("Let's Encrypt") == -1:#转为北京时间
-        not_valid_after = trans_cert_timeout_to_bj(info.not_valid_after_utc)
+    not_valid_after = trans_cert_timeout_to_bj(info.not_valid_after_utc)
+    if organization_name.find("Let's Encrypt") == -1:
+        not_valid_after = info.not_valid_after_utc.strftime("%Y-%m-%d %H:%M:%S")
     # 获取颁发给的域名列表 (Subject Alternative Name)
     san = None
     try:

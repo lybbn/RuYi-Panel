@@ -86,7 +86,7 @@ class MonitorMemory(models.Model):
 class MonitorDiskIO(models.Model):
     """
     磁盘IO监控历史数据
-    参考宝塔面板：存储每秒速率（差值计算）
+    存储每秒速率（差值计算）
     """
     record_time = models.DateTimeField(verbose_name="记录时间", db_index=True)
     disk_name = models.CharField(max_length=50, default='', verbose_name="磁盘名称", db_index=True)
@@ -115,7 +115,7 @@ class MonitorDiskIO(models.Model):
 class MonitorNetwork(models.Model):
     """
     网络流量监控历史数据
-    参考宝塔面板：存储每秒速率（差值计算），支持多网卡
+    存储每秒速率（差值计算），支持多网卡
     """
     record_time = models.DateTimeField(verbose_name="记录时间", db_index=True)
     interface_name = models.CharField(max_length=50, default='', verbose_name="网卡名称", db_index=True)

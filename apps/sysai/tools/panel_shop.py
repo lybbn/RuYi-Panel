@@ -1,6 +1,8 @@
 import json
+import os
+import datetime
 from apps.sysai.tools.base import register_tool
-from utils.common import GetSoftList, current_os
+from utils.common import GetSoftList, current_os, GetLogsPath
 from utils.install.install_soft import Check_Soft_Installed, Ry_Start_Soft, Ry_Stop_Soft, Ry_Restart_Soft, Ry_Reload_Soft, Ry_Uninstall_Soft
 from apps.sysshop.models import RySoftShop
 from apps.systask.models import SysTaskCenter
@@ -84,7 +86,11 @@ def panel_shop_install(soft_name: str, version_id: int = 0):
 
     安装前应先用panel_shop_list查询该软件是否已安装及可用的版本。如果软件已安装则不要重复安装。
 
-    ⚠️重要：Nginx仅支持安装OpenResty版本（version字段为"openresty"的版本），不支持安装标准Nginx版本。安装Nginx时无需指定version_id，系统会自动选择OpenResty版本。
+    ⚠️重要规则：
+    1. Nginx仅支持安装OpenResty版本（version字段为"openresty"的版本），不支持安装标准Nginx版本。安装Nginx时无需指定version_id，系统会自动选择OpenResty版本。
+    2. 如果之前的安装任务失败了，不要自动重新安装。应先告知用户失败原因，等用户明确表示要重试后再调用此工具。
+    3. 每次只应安装一个软件，不要在一次回复中连续调用多次panel_shop_install。
+    4. 任务提交后返回的note中会提示不要立即查询状态。安装是异步的，任务刚提交时状态为等待中，此时查询状态没有意义。应告知用户安装已提交，等用户主动询问进度时再调用panel_shop_task_status查询。
 
     Args:
         soft_name: 软件名称，如 nginx、mysql、redis、php、python、go 等（必须是应用商店中存在的名称）
@@ -179,7 +185,7 @@ def panel_shop_install(soft_name: str, version_id: int = 0):
             'message': f'{soft_name}-{version["c_version"]} 安装任务已提交',
             'task_id': task.id,
             'job_id': job_id,
-            'note': '安装是异步执行的，可通过panel_shop_task_status查询安装进度',
+            'note': '安装是异步执行的，任务刚提交时状态为等待中。请勿立即调用panel_shop_task_status查询状态，应告知用户安装已提交并在后台执行。等用户主动询问进度时再查询。',
         }
     except Exception as e:
         return {'error': f'安装失败: {str(e)}'}
@@ -285,37 +291,114 @@ def panel_shop_manage(soft_name: str, action: str, version: str = ''):
         return {'error': f'操作失败: {str(e)}'}
 
 
+def _read_log_tail(log_path: str, max_lines: int = 30) -> str:
+    if not log_path or not os.path.exists(log_path):
+        return ''
+    try:
+        with open(log_path, 'rb') as f:
+            f.seek(0, 2)
+            file_size = f.tell()
+            if file_size == 0:
+                return ''
+            block_size = 8192
+            lines = []
+            pos = file_size
+            while pos > 0 and len(lines) < max_lines + 1:
+                read_size = min(block_size, pos)
+                pos -= read_size
+                f.seek(pos)
+                block = f.read(read_size)
+                block_lines = block.split(b'\n')
+                lines = block_lines + lines
+            tail_lines = [l.decode('utf-8', errors='replace') for l in lines[-max_lines:]]
+            return '\n'.join(tail_lines).strip()
+    except Exception:
+        return ''
+
+
 @register_tool(id='panel_shop_task_status', category='panel', name_cn='安装任务状态', risk_level='low')
 def panel_shop_task_status(task_id: int = 0):
-    """查询如意面板应用商店的安装任务状态。当用户询问软件安装进度时使用。
+    """查询如意面板应用商店的安装任务状态。当用户询问软件安装进度或安装失败原因时使用。
+
+    返回结果包含log_tail字段（日志最后30行），可直接查看安装进度和错误信息，无需额外调用read_file读取日志文件。
+    如果任务已完成（成功或失败），会直接返回结果，不需要再次查询。
+    如果任务失败，请根据log_tail中的错误信息分析原因并告知用户，等待用户决定是否重试，不要自动重新安装。
+    如果log_tail中没有明确的错误信息（如"【错误】"、"异常信息如下"等），不要猜测失败原因，如实告知用户"任务已失败，日志中未显示具体错误原因"。
 
     Args:
         task_id: 任务ID，从panel_shop_install返回的task_id获取。为0时查询所有进行中的任务
     """
     try:
+        task_id = int(task_id) if task_id else 0
         if task_id > 0:
             task = SysTaskCenter.objects.filter(id=task_id).first()
             if not task:
                 return {'error': f'任务 {task_id} 不存在'}
             status_map = {0: '等待中', 1: '执行中', 2: '失败', 3: '成功'}
-            return {
+            params = task.get_params() if task.params else {}
+            name = params.get('name', '') if task.type == 0 else ''
+            log_path = os.path.join(os.path.abspath(GetLogsPath()), name, task.log) if name and task.log else ''
+
+            duration = task.duration
+            elapsed = 0
+            if task.status == 1 and task.exec_at:
+                elapsed = int((datetime.datetime.now() - task.exec_at).total_seconds())
+
+            if task.status == 1 and task.job_id:
+                try:
+                    from django_apscheduler.models import DjangoJob
+                    if not DjangoJob.objects.filter(id=task.job_id).exists():
+                        task.status = 2
+                        task.save(update_fields=['status'])
+                except Exception:
+                    pass
+
+            result = {
                 'task_id': task.id,
                 'name': task.name,
                 'status': status_map.get(task.status, '未知'),
                 'status_code': task.status,
-                'duration': task.duration,
+                'duration': duration or elapsed,
+                'log_path': log_path,
                 'create_at': str(task.create_at),
             }
+
+            if task.status == 1 and log_path:
+                result['log_tail'] = _read_log_tail(log_path, 30)
+                result['hint'] = '任务仍在执行中，log_tail为日志最后30行，可据此判断进度。如果log_tail为空说明日志尚未写入。请告知用户当前进度，等待用户后续指令。'
+            elif task.status == 2:
+                log_tail = _read_log_tail(log_path, 50)
+                result['log_tail'] = log_tail
+                has_end_marker = '---安装任务已结束---' in log_tail if log_tail else False
+                if has_end_marker:
+                    result['actual_status'] = '成功'
+                    result['hint'] = '虽然任务状态显示失败，但日志中包含"安装任务已结束"标记，说明安装实际已成功完成。告知用户安装已成功。'
+                else:
+                    error_keywords = ['【错误】', '异常信息如下']
+                    has_error_in_log = any(kw.lower() in log_tail.lower() for kw in error_keywords) if log_tail else False
+                    result['has_error_in_log'] = has_error_in_log
+                    if has_error_in_log:
+                        result['hint'] = '任务已失败。log_tail中包含错误信息，请提取关键错误信息告知用户。不要使用read_file或execute_command重复读取日志。等待用户决定是否重试，不要自动重新安装。'
+                    else:
+                        result['hint'] = '任务已失败，但log_tail中没有明确的错误信息。如实告知用户"任务已失败，日志中未显示具体错误原因，可能是安装初始化阶段异常"。不要猜测失败原因（如网络问题等），不要使用read_file或execute_command读取日志。等待用户决定是否重试。'
+            elif task.status == 3:
+                result['hint'] = '任务已成功完成，告知用户安装结果。'
+
+            return result
         else:
             tasks = SysTaskCenter.objects.filter(status__in=[0, 1]).order_by('-create_at')[:10]
             status_map = {0: '等待中', 1: '执行中', 2: '失败', 3: '成功'}
             result = []
             for task in tasks:
+                elapsed = 0
+                if task.status == 1 and task.exec_at:
+                    elapsed = int((datetime.datetime.now() - task.exec_at).total_seconds())
                 result.append({
                     'task_id': task.id,
                     'name': task.name,
                     'status': status_map.get(task.status, '未知'),
                     'status_code': task.status,
+                    'duration': task.duration or elapsed,
                     'create_at': str(task.create_at),
                 })
             return {

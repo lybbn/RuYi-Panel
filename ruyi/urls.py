@@ -27,6 +27,7 @@ from utils.security.security_path import security_path_view,response_404_view
 urlpatterns = [
     path('api/captcha/', CaptchaView.as_view()),
     path('api/token/', LoginView.as_view(), name='login'),
+    path('api/token/otp_verify/', OTPVerifyView.as_view(), name='otp_verify'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('fileMedia/', RYFileMediaView.as_view(), name='file_media'),
     path('download/', RYGetFileDownloadView.as_view(), name='download'),
@@ -40,6 +41,9 @@ urlpatterns = [
     path('api/waf/', include('apps.syswaf.urls')),
     path('api/ai/', include('apps.sysai.urls')),
     path('api/syscheck/', include('apps.syscheck.urls')),
+    path('api/domain/', include('apps.sysdomain.urls')),
+    path('api/node/', include('apps.sysnode.urls')),
+    path('api/cloud/', include('apps.syscloud.urls')),
     path('static/<path:path>', streamingmedia_serve, {'document_root': os.path.join(settings.STATIC_ROOT, "static") },),  # 处理静态文件
     path('media/<path:path>', streamingmedia_serve, {'document_root': os.path.join(settings.STATIC_ROOT, "static") },),  # 处理媒体文件
     re_path(r'^(logo\.png|favicon\.ico)$', streamingmedia_serve, {'document_root': settings.STATIC_ROOT},),

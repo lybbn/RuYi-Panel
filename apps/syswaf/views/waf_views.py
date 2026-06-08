@@ -16,6 +16,14 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Count, Sum, Q
 from django.db.models.functions import TruncDate, TruncHour, TruncDay, TruncMinute
 from datetime import datetime, timedelta
+
+def _naive_parse_dt(s):
+    """解析ISO格式日期字符串并去除时区信息，兼容SQLite (USE_TZ=False)"""
+    if isinstance(s, datetime):
+        return s.replace(tzinfo=None)
+    s = s.strip().replace('Z', '+00:00')
+    return datetime.fromisoformat(s).replace(tzinfo=None)
+
 from utils.viewset import CustomModelViewSet
 from utils.customView import CustomAPIView
 from utils.jsonResponse import SuccessResponse, DetailResponse, ErrorResponse
@@ -144,6 +152,19 @@ class WafGlobalConfigViewSet(CustomModelViewSet):
         sync.sync_global_config()
         RuyiAddOpLog(request, msg="【WAF防护】-【拦截页面配置】保存", module="wafmg")
         return DetailResponse(msg="拦截页面配置保存成功")
+
+    @action(methods=['POST'], detail=False)
+    def save_data_retention_config(self, request):
+        instance = self.get_object()
+        log_retention_days = request.data.get('log_retention_days')
+        ip_list_retention_days = request.data.get('ip_list_retention_days')
+        if log_retention_days is not None:
+            instance.log_retention_days = int(log_retention_days)
+        if ip_list_retention_days is not None:
+            instance.ip_list_retention_days = int(ip_list_retention_days)
+        instance.save()
+        RuyiAddOpLog(request, msg="【WAF防护】-【数据清理配置】保存", module="wafmg")
+        return DetailResponse(msg="数据清理配置保存成功")
     
     @action(methods=['GET'], detail=False)
     def get_all_lists(self, request):
@@ -554,6 +575,17 @@ class WafIpListViewSet(CustomModelViewSet):
     filterset_fields = ('list_type', 'entry_type', 'source', 'enabled', 'site_id', 'ip_version')
     search_fields = ('ip', 'remark', 'location')
     ordering_fields = ('create_at', 'trigger_count')
+
+    def get_queryset(self):
+        from django.utils import timezone
+        # 自动将已过期的临时封禁IP标记为禁用（保留记录便于审计）
+        WafIpList.objects.filter(
+            list_type='temp',
+            expire_at__isnull=False,
+            expire_at__lt=timezone.now(),
+            enabled=True
+        ).update(enabled=False)
+        return super().get_queryset()
     
     def create(self, request, *args, **kwargs):
         ip = request.data.get('ip')
@@ -596,11 +628,34 @@ class WafIpListViewSet(CustomModelViewSet):
         return result
     
     def _get_ip_location(self, ip):
+        if not ip:
+            return ''
         try:
-            results = IPQQwry.get_local_ips_area([ip.split('/')[0]])
-            return results[0] if results else ''
+            clean_ip = ip.split('/')[0].strip()
         except:
             return ''
+        if not clean_ip:
+            return ''
+        try:
+            if is_private_ip(clean_ip):
+                return '局域网IP'
+        except:
+            pass
+        # 优先使用 GeoIP2（和攻击日志一致，支持IPv4/IPv6，返回结构化数据）
+        try:
+            geo_data = GeoIP2Lookup.lookup(clean_ip)
+            if geo_data and geo_data.get('location'):
+                return geo_data['location']
+        except:
+            pass
+        # 回退到 QQwry
+        try:
+            results = IPQQwry.get_local_ips_area([clean_ip])
+            if results and results[0]:
+                return results[0]
+        except:
+            pass
+        return ''
     
     @action(methods=['POST'], detail=False)
     def batch_import(self, request):
@@ -630,6 +685,38 @@ class WafIpListViewSet(CustomModelViewSet):
         
         RuyiAddOpLog(request, msg=f"【WAF防护】-【IP名单】批量导入{created_count}条IP到{'黑名单' if list_type == 'blacklist' else '白名单'}", module="wafmg")
         return DetailResponse(msg=f"成功导入{created_count}条IP")
+    
+    @action(methods=['POST'], detail=False)
+    def batch_delete(self, request):
+        ids = request.data.get('ids', [])
+        if not ids:
+            return ErrorResponse(msg="请选择要删除的IP")
+        
+        deleted_count = WafIpList.objects.filter(id__in=ids).count()
+        WafIpList.objects.filter(id__in=ids).delete()
+        
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【IP名单】批量删除{deleted_count}条IP", module="wafmg")
+        return DetailResponse(msg=f"成功删除{deleted_count}条IP")
+
+    @action(methods=['POST'], detail=False)
+    def refresh_location(self, request):
+        """批量刷新IP归属地（刷新location为空的记录，或全部刷新）"""
+        refresh_all = request.data.get('refresh_all', False)
+        if refresh_all:
+            ip_list = WafIpList.objects.exclude(entry_type='group').exclude(ip='')
+        else:
+            ip_list = WafIpList.objects.filter(location='').exclude(entry_type='group').exclude(ip='')
+        
+        updated = 0
+        for item in ip_list:
+            location = self._get_ip_location(item.ip)
+            if location:
+                item.location = location
+                item.save(update_fields=['location'])
+                updated += 1
+        
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【IP名单】刷新归属地{updated}条", module="wafmg")
+        return DetailResponse(data={'updated': updated}, msg=f"已刷新{updated}条IP归属地")
     
     @action(methods=['POST'], detail=True)
     def toggle(self, request, pk=None):
@@ -678,18 +765,35 @@ class WafIpListViewSet(CustomModelViewSet):
 class WafAttackLogViewSet(CustomModelViewSet):
     queryset = WafAttackLog.objects.all()
     serializer_class = WafAttackLogSerializer
-    filterset_fields = ('site_id', 'attack_type', 'severity', 'action_taken', 'src_ip')
+    filterset_fields = ('site_id', 'attack_type', 'action_taken', 'src_ip', 'is_false_positive', 'dst_url')
     search_fields = ('src_ip', 'dst_url', 'attack_type')
     ordering_fields = ('create_at', 'severity')
     
     def get_queryset(self):
         queryset = super().get_queryset()
-        start_date = self.request.query_params.get('start_date')
-        end_date = self.request.query_params.get('end_date')
-        if start_date:
-            queryset = queryset.filter(create_at__gte=start_date)
-        if end_date:
-            queryset = queryset.filter(create_at__lte=end_date)
+        # 支持前端全局时间选择器传入的 start_time/end_time
+        start_time = self.request.query_params.get('start_time')
+        end_time = self.request.query_params.get('end_time')
+        # 兼容旧参数名
+        if not start_time:
+            start_time = self.request.query_params.get('start_date')
+        if not end_time:
+            end_time = self.request.query_params.get('end_date')
+        if start_time:
+            try:
+                queryset = queryset.filter(create_at__gte=_naive_parse_dt(start_time))
+            except Exception:
+                queryset = queryset.filter(create_at__gte=start_time)
+        if end_time:
+            try:
+                queryset = queryset.filter(create_at__lte=_naive_parse_dt(end_time))
+            except Exception:
+                queryset = queryset.filter(create_at__lte=end_time)
+        # 支持逗号分隔的 severity 过滤（如 critical,high）
+        severity = self.request.query_params.get('severity')
+        if severity and ',' in severity:
+            severity_list = [s.strip() for s in severity.split(',') if s.strip()]
+            queryset = queryset.filter(severity__in=severity_list)
         return queryset
     
     def retrieve(self, request, *args, **kwargs):
@@ -727,44 +831,45 @@ class WafAttackLogViewSet(CustomModelViewSet):
     
     @action(methods=['GET'], detail=False)
     def stats(self, request):
-        today = datetime.now().date()
-        today_start = datetime.combine(today, datetime.min.time())
+        start_time = request.query_params.get('start_time')
+        end_time = request.query_params.get('end_time')
         
-        today_count = WafAttackLog.objects.filter(create_at__gte=today_start).count()
-        today_blocked = WafAttackLog.objects.filter(
-            create_at__gte=today_start,
-            action_taken='block'
-        ).count()
-        today_high_risk = WafAttackLog.objects.filter(
-            create_at__gte=today_start,
-            severity__in=['critical', 'high']
-        ).count()
-        unique_attackers = WafAttackLog.objects.filter(
-            create_at__gte=today_start
-        ).values('src_ip').distinct().count()
+        if start_time and end_time:
+            try:
+                filter_start = _naive_parse_dt(start_time)
+                filter_end = _naive_parse_dt(end_time)
+            except Exception:
+                today = datetime.now().date()
+                filter_start = datetime.combine(today, datetime.min.time())
+                filter_end = datetime.now()
+        else:
+            today = datetime.now().date()
+            filter_start = datetime.combine(today, datetime.min.time())
+            filter_end = datetime.now()
+        
+        base_qs = WafAttackLog.objects.filter(create_at__gte=filter_start, create_at__lte=filter_end)
+        
+        today_count = base_qs.count()
+        today_blocked = base_qs.filter(action_taken='block').count()
+        today_high_risk = base_qs.filter(severity__in=['critical', 'high']).count()
+        unique_attackers = base_qs.values('src_ip').distinct().count()
         
         week_count = WafAttackLog.objects.filter(
-            create_at__gte=today_start - timedelta(days=7)
+            create_at__gte=filter_start - timedelta(days=7)
         ).count()
         month_count = WafAttackLog.objects.filter(
-            create_at__gte=today_start - timedelta(days=30)
+            create_at__gte=filter_start - timedelta(days=30)
         ).count()
         
-        by_type = WafAttackLog.objects.filter(
-            create_at__gte=today_start
-        ).values('attack_type').annotate(
+        by_type = base_qs.values('attack_type').annotate(
             count=Count('id')
         ).order_by('-count')[:10]
         
-        by_severity = WafAttackLog.objects.filter(
-            create_at__gte=today_start
-        ).values('severity').annotate(
+        by_severity = base_qs.values('severity').annotate(
             count=Count('id')
         )
         
-        top_ips = WafAttackLog.objects.filter(
-            create_at__gte=today_start
-        ).values('src_ip', 'src_location').annotate(
+        top_ips = base_qs.values('src_ip', 'src_location').annotate(
             count=Count('id')
         ).order_by('-count')[:10]
         
@@ -783,22 +888,62 @@ class WafAttackLogViewSet(CustomModelViewSet):
     @action(methods=['GET'], detail=False)
     def trend(self, request):
         period = request.query_params.get('period', '24h')
+        start_time_param = request.query_params.get('start_time')
+        end_time_param = request.query_params.get('end_time')
+        
+        # 如果传入了时间范围参数，优先使用
+        if start_time_param and end_time_param:
+            try:
+                filter_start = _naive_parse_dt(start_time_param)
+                filter_end = _naive_parse_dt(end_time_param)
+            except Exception:
+                filter_start = datetime.now() - timedelta(hours=24)
+                filter_end = datetime.now()
+            
+            if period in ('1h', '24h'):
+                trend_data = WafAttackLog.objects.filter(
+                    create_at__gte=filter_start,
+                    create_at__lte=filter_end
+                ).annotate(
+                    time=TruncMinute('create_at')
+                ).values('time').annotate(
+                    count=Count('id'),
+                    blocked=Count('id', filter=Q(action_taken='block'))
+                ).order_by('time')
+                for item in trend_data:
+                    if item.get('time'):
+                        item['time'] = item['time'].isoformat()
+            else:
+                trend_data = WafAttackLog.objects.filter(
+                    create_at__gte=filter_start,
+                    create_at__lte=filter_end
+                ).annotate(
+                    date=TruncDate('create_at')
+                ).values('date').annotate(
+                    count=Count('id'),
+                    blocked=Count('id', filter=Q(action_taken='block'))
+                ).order_by('date')
+                for item in trend_data:
+                    if item.get('date'):
+                        item['date'] = item['date'].isoformat()
+            
+            return DetailResponse(data=list(trend_data))
+        
+        # 兼容旧的 period 参数
         today = datetime.now().date()
         today_start = datetime.combine(today, datetime.min.time())
         
-        if period == '1h':
-            start_time = datetime.now() - timedelta(hours=1)
-            trend_data = WafAttackLog.objects.filter(
-                create_at__gte=start_time
-            ).annotate(
-                time=TruncMinute('create_at')
-            ).values('time').annotate(
+        if period == 'all':
+            # 全部数据，按天聚合
+            trend_data = WafAttackLog.objects.annotate(
+                date=TruncDate('create_at')
+            ).values('date').annotate(
                 count=Count('id'),
                 blocked=Count('id', filter=Q(action_taken='block'))
-            ).order_by('time')
+            ).order_by('date')
             for item in trend_data:
-                if item.get('time'):
-                    item['time'] = item['time'].isoformat()
+                if item.get('date'):
+                    item['date'] = item['date'].isoformat()
         elif period == '24h':
             start_time = datetime.now() - timedelta(hours=24)
             trend_data = WafAttackLog.objects.filter(
@@ -885,6 +1030,8 @@ class WafAttackLogViewSet(CustomModelViewSet):
             'province': province,
             'city': city,
             'isp': '未知',  # qqwry库可能不包含运营商信息
+            'is_blacklisted': WafIpList.objects.filter(ip=ip, list_type='blacklist').exists(),
+            'is_whitelisted': WafIpList.objects.filter(ip=ip, list_type='whitelist').exists(),
         })
     
     @action(methods=['POST'], detail=False)
@@ -892,6 +1039,100 @@ class WafAttackLogViewSet(CustomModelViewSet):
         deleted_count, _ = WafAttackLog.objects.all().delete()
         RuyiAddOpLog(request, msg=f"【WAF防护】-【攻击日志】清空{deleted_count}条记录", module="wafmg")
         return DetailResponse(data={'deleted_count': deleted_count}, msg=f"已清空 {deleted_count} 条攻击日志")
+
+    @action(methods=['POST'], detail=True)
+    def mark_false_positive(self, request, pk=None):
+        """标记为误报，可选同时加白"""
+        instance = self.get_object()
+        reason = request.data.get('reason', '')
+        add_whitelist = request.data.get('add_whitelist', False)
+        whitelist_type = request.data.get('whitelist_type', 'url')  # url 或 ip
+
+        instance.is_false_positive = True
+        instance.false_positive_reason = reason
+        instance.false_positive_at = datetime.now()
+        instance.false_positive_by = request.user.username if hasattr(request, 'user') and request.user else 'system'
+        instance.save()
+
+        whitelist_info = ''
+        if add_whitelist:
+            if whitelist_type == 'url':
+                url = instance.dst_url
+                # 提取路径部分（去掉查询参数）
+                path = url.split('?')[0] if url else ''
+                WafUrlWhitelist.objects.create(
+                    url=path,
+                    match_type='prefix',
+                    remark=f'误报自动加白 - {instance.attack_type} - {reason}',
+                    enabled=True
+                )
+                whitelist_info = f'，已将 {path} 加入URL白名单'
+            elif whitelist_type == 'ip':
+                WafIpList.objects.create(
+                    ip=instance.src_ip,
+                    list_type='whitelist',
+                    remark=f'误报自动加白 - {reason}',
+                    source='auto'
+                )
+                whitelist_info = f'，已将 {instance.src_ip} 加入IP白名单'
+
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【攻击日志】标记误报 ID:{instance.id}{whitelist_info}", module="wafmg")
+        return DetailResponse(msg=f'已标记为误报{whitelist_info}')
+
+    @action(methods=['POST'], detail=True)
+    def unmark_false_positive(self, request, pk=None):
+        """取消误报标记"""
+        instance = self.get_object()
+        instance.is_false_positive = False
+        instance.false_positive_reason = ''
+        instance.false_positive_at = None
+        instance.false_positive_by = ''
+        instance.save()
+        RuyiAddOpLog(request, msg=f"【WAF防护】-【攻击日志】取消误报标记 ID:{instance.id}", module="wafmg")
+        return DetailResponse(msg='已取消误报标记')
+
+    @action(methods=['GET'], detail=False)
+    def top_stats(self, request):
+        """攻击TOP统计：攻击类型TOP5 + 攻击IP TOP5 + 被攻击URL TOP5"""
+        start_time = request.query_params.get('start_time')
+        end_time = request.query_params.get('end_time')
+        
+        if start_time and end_time:
+            try:
+                filter_start = _naive_parse_dt(start_time)
+                filter_end = _naive_parse_dt(end_time)
+            except Exception:
+                today = datetime.now().date()
+                filter_start = datetime.combine(today, datetime.min.time())
+                filter_end = datetime.now()
+        else:
+            today = datetime.now().date()
+            filter_start = datetime.combine(today, datetime.min.time())
+            filter_end = datetime.now()
+        
+        base_qs = WafAttackLog.objects.filter(
+            create_at__gte=filter_start,
+            create_at__lte=filter_end,
+            is_false_positive=False
+        )
+
+        top_attack_types = list(base_qs.values('attack_type').annotate(
+            count=Count('id')
+        ).order_by('-count')[:5])
+
+        top_ips = list(base_qs.values('src_ip', 'src_location').annotate(
+            count=Count('id')
+        ).order_by('-count')[:5])
+
+        top_urls = list(base_qs.values('dst_url').annotate(
+            count=Count('id')
+        ).order_by('-count')[:5])
+
+        return DetailResponse(data={
+            'top_attack_types': top_attack_types,
+            'top_ips': top_ips,
+            'top_urls': top_urls,
+        })
 
 
 class WafUrlWhitelistViewSet(CustomModelViewSet):
@@ -1242,7 +1483,6 @@ class WafDashboardView(CustomAPIView):
         
         server_location = get_server_location()
         
-        block_rate = round((today_blocked / today_attacks * 100), 1) if today_attacks > 0 else 0
         trend_percent = round(((today_attacks - yesterday_attacks) / yesterday_attacks * 100), 1) if yesterday_attacks > 0 else 0
         
         return DetailResponse(data={
@@ -1256,10 +1496,10 @@ class WafDashboardView(CustomAPIView):
                 'total_attacks': total_attacks,
                 'unique_attackers_today': unique_attackers_today,
                 'unique_attackers_total': unique_attackers_total,
-                'block_rate': block_rate,
                 'trend_percent': trend_percent,
             },
             'waf_status': waf_config.waf_status,
+            'alert_enabled': waf_config.alert_enabled,
             'attack_types': attack_types,
             'severity_breakdown': severity_breakdown,
             'top_ips': top_ips,
@@ -1356,10 +1596,12 @@ class WafInternalApiView(CustomAPIView):
                             src_city = geo_data['city'] or ''
                             src_latitude = geo_data['latitude']
                             src_longitude = geo_data['longitude']
-                    except:
-                        pass
+                    except Exception as e:
+                        import logging
+                        logger = logging.getLogger('syswaf')
+                        logger.warning(f"IP location lookup failed for {src_ip}: {e}")
                 
-                WafAttackLog.objects.create(
+                attack_log = WafAttackLog.objects.create(
                     site_id=log_data.get('site_id'),
                     rule_id=log_data.get('rule_id'),
                     attack_type=str(log_data.get('attack_type', 'unknown'))[:50],
@@ -1400,8 +1642,12 @@ class WafInternalApiView(CustomAPIView):
         if not ip:
             return ErrorResponse(msg="IP 地址不能为空", status=400)
         
-        if list_type not in ['blacklist', 'whitelist']:
+        if list_type not in ['blacklist', 'whitelist', 'temp']:
             return ErrorResponse(msg="无效的名单类型", status=400)
+        
+        # 有过期时间的黑名单自动设为临时封禁
+        if list_type == 'blacklist' and expire_at:
+            list_type = 'temp'
         
         try:
             from apps.syswaf.models import WafIpList

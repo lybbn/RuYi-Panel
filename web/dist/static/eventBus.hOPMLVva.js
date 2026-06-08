@@ -1,0 +1,1 @@
+const e={},t={on(t,o){e[t]||(e[t]=[]),e[t].push(o)},off(t,o){e[t]&&(o?e[t]=e[t].filter(e=>e!==o):delete e[t])},emit(t,...o){e[t]&&e[t].forEach(e=>{try{e(...o)}catch(t){}})},once(e,t){const o=(...c)=>{t(...c),this.off(e,o)};this.on(e,o)},clear(){Object.keys(e).forEach(t=>delete e[t])}};export{t as e};

@@ -144,6 +144,69 @@ class Databases(BaseModel):
         app_label = "system"
 
 
+class RemoteRedis(BaseModel):
+
+    db_host = models.CharField(max_length=255, verbose_name='服务器地址', default='127.0.0.1')
+    db_port = models.IntegerField(verbose_name='数据库端口', default=6379)
+    db_password = models.CharField(max_length=255, verbose_name='访问密码', null=True, blank=True)
+    remark = models.CharField(max_length=255, verbose_name='备注', null=True, blank=True)
+
+    class Meta:
+        db_table = table_prefix + "remote_redis"
+        verbose_name = '远程Redis服务器'
+        verbose_name_plural = verbose_name
+        ordering = ('-create_at',)
+        app_label = "system"
+
+
+class RemoteMysql(BaseModel):
+
+    db_host = models.CharField(max_length=255, verbose_name='服务器地址', default='127.0.0.1')
+    db_port = models.IntegerField(verbose_name='数据库端口', default=3306)
+    db_user = models.CharField(max_length=255, verbose_name='用户名', default='root')
+    db_password = models.CharField(max_length=255, verbose_name='访问密码', null=True, blank=True)
+    remark = models.CharField(max_length=255, verbose_name='备注', null=True, blank=True)
+
+    class Meta:
+        db_table = table_prefix + "remote_mysql"
+        verbose_name = '远程MySQL服务器'
+        verbose_name_plural = verbose_name
+        ordering = ('-create_at',)
+        app_label = "system"
+
+
+class RemoteMongodb(BaseModel):
+
+    db_host = models.CharField(max_length=255, verbose_name='服务器地址', default='127.0.0.1')
+    db_port = models.IntegerField(verbose_name='数据库端口', default=27017)
+    db_user = models.CharField(max_length=255, verbose_name='用户名', default='root')
+    db_password = models.CharField(max_length=255, verbose_name='访问密码', null=True, blank=True)
+    remark = models.CharField(max_length=255, verbose_name='备注', null=True, blank=True)
+
+    class Meta:
+        db_table = table_prefix + "remote_mongodb"
+        verbose_name = '远程MongoDB服务器'
+        verbose_name_plural = verbose_name
+        ordering = ('-create_at',)
+        app_label = "system"
+
+
+class RemotePgsql(BaseModel):
+
+    db_host = models.CharField(max_length=255, verbose_name='服务器地址', default='127.0.0.1')
+    db_port = models.IntegerField(verbose_name='数据库端口', default=5432)
+    db_user = models.CharField(max_length=255, verbose_name='用户名', default='postgres')
+    db_password = models.CharField(max_length=255, verbose_name='访问密码', null=True, blank=True)
+    remark = models.CharField(max_length=255, verbose_name='备注', null=True, blank=True)
+
+    class Meta:
+        db_table = table_prefix + "remote_pgsql"
+        verbose_name = '远程PgSQL服务器'
+        verbose_name_plural = verbose_name
+        ordering = ('-create_at',)
+        app_label = "system"
+
+
 class TerminalServer(BaseModel):
     PROTOCOL_CHOICES = (
         ("ssh", "SSH"),
@@ -192,6 +255,20 @@ class CommonCommands(BaseModel):
         verbose_name_plural = verbose_name
         ordering = ('-create_at',)
         app_label = "system"
+
+class SqliteDatabase(BaseModel):
+
+    name = models.CharField(max_length=255, verbose_name='数据库名称')
+    path = models.CharField(max_length=500, verbose_name='数据库文件路径')
+    remark = models.CharField(max_length=255, verbose_name='备注', null=True, blank=True)
+
+    class Meta:
+        db_table = table_prefix + "sqlite_database"
+        verbose_name = 'SQLite数据库'
+        verbose_name_plural = verbose_name
+        ordering = ('-create_at',)
+        app_label = "system"
+
 
 class Config(models.Model):
 

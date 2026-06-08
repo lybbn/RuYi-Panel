@@ -48,6 +48,11 @@
 			"name": "redis",
 			"installed": 0,
 			"versions": [{
+				"id": 3,
+				"version": "8.0",
+				"c_version": "8.0.6",
+				"url": "https://mirrors.huaweicloud.com/redis/redis-8.0.6.tar.gz"
+			},{
 				"id": 1,
 				"version": "7.2",
 				"c_version": "7.2.8",
@@ -57,6 +62,16 @@
 				"version": "7.4",
 				"c_version": "7.4.3",
 				"url": "https://mirrors.huaweicloud.com/redis/redis-7.4.3.tar.gz"
+			},{
+				"id": 4,
+				"version": "8.4",
+				"c_version": "8.4.3",
+				"url": "https://mirrors.huaweicloud.com/redis/redis-8.4.3.tar.gz"
+			},{
+				"id": 5,
+				"version": "8.6",
+				"c_version": "8.6.3",
+				"url": "https://mirrors.huaweicloud.com/redis/redis-8.6.3.tar.gz"
 			}],
 			"author": "redis.io",
 			"home": "https://redis.io",
@@ -83,12 +98,72 @@
 				"version": "8.0",
 				"c_version": "8.0.28",
 				"url": "https://mirrors.aliyun.com/mysql/MySQL-8.0/mysql-boost-8.0.28.tar.gz"
+			},{
+				"id": 3,
+				"version": "8.0",
+				"c_version": "8.0.29",
+				"url": "https://mirrors.huaweicloud.com/mysql/Downloads/MySQL-8.0/mysql-boost-8.0.29.tar.gz"
 			}],
 			"author": "mysql.com",
 			"home": "https://www.mysql.com",
 			"type": 2,
 			"typename": "数据库",
 			"desc": "MySQL是一个流行的开源关系型数据库管理系统，被广泛地应用在中小型网站中",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 204,
+			"sort": 204,
+			"icon": "postgresql.png",
+			"title": "PostgreSQL",
+			"name": "pgsql",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "16",
+				"c_version": "16.9",
+				"url": "https://mirrors.aliyun.com/postgresql/source/v16.9/postgresql-16.9.tar.gz"
+			},{
+				"id": 2,
+				"version": "17",
+				"c_version": "17.9",
+				"url": "https://mirrors.aliyun.com/postgresql/source/v17.9/postgresql-17.9.tar.gz"
+			},{
+				"id": 3,
+				"version": "18",
+				"c_version": "18.4",
+				"url": "https://mirrors.aliyun.com/postgresql/source/v18.4/postgresql-18.4.tar.gz"
+			}],
+			"author": "postgresql.org",
+			"home": "https://www.postgresql.org/",
+			"type": 2,
+			"typename": "数据库",
+			"desc": "PostgreSQL是一个功能强大的开源对象关系型数据库系统，拥有超过35年的活跃开发历史，以其可靠性、功能健壮性和性能著称",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 205,
+			"sort": 205,
+			"icon": "mongodb.png",
+			"title": "MongoDB",
+			"name": "mongodb",
+			"installed": 0,
+			"versions": [{
+				"id": 2,
+				"version": "8.0",
+				"c_version": "8.0.10",
+				"url": "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-ubuntu2204-8.0.10.tgz"
+			},{
+				"id": 1,
+				"version": "7.0",
+				"c_version": "7.0.20",
+				"url": "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-ubuntu2204-7.0.20.tgz"
+			}],
+			"author": "mongodb.com",
+			"home": "https://www.mongodb.com/",
+			"type": 2,
+			"typename": "数据库",
+			"desc": "MongoDB是一个开源的NoSQL文档型数据库，高性能、高可用、易扩展，适合大数据和实时Web应用",
 			"price": 0,
 			"show": 1
 		},{
@@ -99,9 +174,14 @@
 			"name": "docker",
 			"installed": 0,
 			"versions": [{
+				"id": 4,
+				"version": "29.0",
+				"c_version": "29.5.2",
+				"url":""
+			},{
 				"id": 3,
 				"version": "29.0",
-				"c_version": "29.2.0",
+				"c_version": "29.2.1",
 				"url":""
 			},{
 				"id": 2,
@@ -205,14 +285,14 @@
 			"id": 26,
 			"sort": 26,
 			"icon": "python.png",
-			"title": "Python3.14.4",
+			"title": "Python3.14.5",
 			"name": "python",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "3.14.4",
-				"c_version": "3.14.4",
-				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.14.4.tgz"
+				"version": "3.14.5",
+				"c_version": "3.14.5",
+				"url": "https://mirrors.aliyun.com/python-release/source/Python-3.14.5.tgz"
 			}],
 			"author": "python.org",
 			"home": "https://www.python.org/",
@@ -225,14 +305,14 @@
 			"id": 90,
 			"sort": 90,
 			"icon": "go.png",
-			"title": "Go1.23.8",
+			"title": "Go1.23.9",
 			"name": "go",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "1.23.8",
-				"c_version": "1.23.8",
-				"url": "https://mirrors.aliyun.com/golang/go1.23.8.linux-amd64.tar.gz"
+				"version": "1.23.9",
+				"c_version": "1.23.9",
+				"url": "https://mirrors.aliyun.com/golang/go1.23.9.linux-amd64.tar.gz"
 			}],
 			"author": "golang.google.cn",
 			"home": "https://golang.google.cn/",
@@ -245,20 +325,40 @@
 			"id": 100,
 			"sort": 100,
 			"icon": "go.png",
-			"title": "Go1.26.2",
+			"title": "Go1.26.3",
 			"name": "go",
 			"installed": 0,
 			"versions": [{
 				"id": 1,
-				"version": "1.26.2",
-				"c_version": "1.26.2",
-				"url": "https://mirrors.aliyun.com/golang/go1.26.2.linux-amd64.tar.gz"
+				"version": "1.26.3",
+				"c_version": "1.26.3",
+				"url": "https://mirrors.aliyun.com/golang/go1.26.3.linux-amd64.tar.gz"
 			}],
 			"author": "golang.google.cn",
 			"home": "https://golang.google.cn/",
 			"type": 4,
 			"typename": "运行环境",
 			"desc": "Go(Golang)由Google开发的静态强类型、编译型、并发型，并具有垃圾回收功能的编程语言",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 109,
+			"sort": 109,
+			"icon": "nodejs.png",
+			"title": "Node.js26",
+			"name": "nodejs",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "26.2.0",
+				"c_version": "26.2.0",
+				"url": "https://mirrors.huaweicloud.com/nodejs/v26.2.0/node-v26.2.0-linux-x64.tar.xz"
+			}],
+			"author": "nodejs.org",
+			"home": "https://nodejs.org/",
+			"type": 4,
+			"typename": "运行环境",
+			"desc": "Node.js是基于Chrome V8引擎的JavaScript运行时，用于构建高性能网络应用",
 			"price": 0,
 			"show": 1
 		},{
@@ -481,6 +581,61 @@
 			"type": 2,
 			"typename": "数据库",
 			"desc": "MySQL是一个流行的开源关系型数据库管理系统，被广泛地应用在中小型网站中",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 204,
+			"sort": 204,
+			"icon": "postgresql.png",
+			"title": "PostgreSQL",
+			"name": "pgsql",
+			"installed": 0,
+			"versions": [{
+				"id": 1,
+				"version": "16",
+				"c_version": "16.14",
+				"url": "https://get.enterprisedb.com/postgresql/postgresql-16.14-1-windows-x64-binaries.zip"
+			},{
+				"id": 2,
+				"version": "17",
+				"c_version": "17.10",
+				"url": "https://get.enterprisedb.com/postgresql/postgresql-17.10-1-windows-x64-binaries.zip"
+			},{
+				"id": 3,
+				"version": "18",
+				"c_version": "18.4",
+				"url": "https://get.enterprisedb.com/postgresql/postgresql-18.4-1-windows-x64-binaries.zip"
+			}],
+			"author": "postgresql.org",
+			"home": "https://www.postgresql.org/",
+			"type": 2,
+			"typename": "数据库",
+			"desc": "PostgreSQL是一个功能强大的开源对象关系型数据库系统，拥有超过35年的活跃开发历史，以其可靠性、功能健壮性和性能著称",
+			"price": 0,
+			"show": 1
+		},{
+			"id": 205,
+			"sort": 205,
+			"icon": "mongodb.png",
+			"title": "MongoDB",
+			"name": "mongodb",
+			"installed": 0,
+			"versions": [{
+				"id": 2,
+				"version": "8.0",
+				"c_version": "8.0.10",
+				"url": "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-8.0.10.zip"
+			},{
+				"id": 1,
+				"version": "7.0",
+				"c_version": "7.0.20",
+				"url": "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-7.0.20.zip"
+			}],
+			"author": "mongodb.com",
+			"home": "https://www.mongodb.com/",
+			"type": 2,
+			"typename": "数据库",
+			"desc": "MongoDB是一个开源的NoSQL文档型数据库，高性能、高可用、易扩展，适合大数据和实时Web应用",
 			"price": 0,
 			"show": 1
 		},{

@@ -162,6 +162,36 @@ if object.{key}:
         tool_created, tool_skipped, config_created = init_ai_data(force=self.delete)
         print(f"初始化完成【AI模块数据】: 工具配置新建{tool_created}个/跳过{tool_skipped}个, 系统配置{'新建' if config_created else '已存在'}")
 
+    def init_domain(self):
+        """
+        初始化域名管理数据
+        """
+        from apps.sysdomain.init_data import init_domain_data
+
+        print(f"正在初始化【域名管理数据】")
+        created_count, skipped_count = init_domain_data(force=self.delete)
+        print(f"初始化完成【域名管理数据】: 新建 {created_count} 个, 跳过 {skipped_count} 个")
+
+    def init_node(self):
+        """
+        初始化节点管理数据
+        """
+        from apps.sysnode.init_data import init_node_data
+
+        print(f"正在初始化【节点管理数据】")
+        created_count, skipped_count = init_node_data(force=self.delete)
+        print(f"初始化完成【节点管理数据】: 新建 {created_count} 个, 跳过 {skipped_count} 个")
+
+    def init_cloud(self):
+        """
+        初始化云存储管理数据
+        """
+        from apps.syscloud.init_data import init_cloud_sdk_data
+
+        print(f"正在初始化【云存储管理数据】")
+        created_count, skipped_count = init_cloud_sdk_data(force=self.delete)
+        print(f"初始化完成【云存储管理数据】: 新建 {created_count} 个, 跳过 {skipped_count} 个")
+
     def run(self):
         self.init_users()
         self.init_config()
@@ -171,6 +201,9 @@ if object.{key}:
         self.init_alert_notify_config()
         self.init_waf()
         self.init_ai()
+        self.init_domain()
+        self.init_node()
+        self.init_cloud()
 
 def main(delete=True,username=None,password=None):
     Initialize(delete=delete,username=username,password=password).run()

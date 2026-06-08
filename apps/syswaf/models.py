@@ -36,6 +36,18 @@ class WafGlobalConfig(BaseModel):
     block_page_config = models.TextField(verbose_name='拦截页面配置', default='{}')
     
     log_retention_days = models.IntegerField(default=30, verbose_name='日志保留天数')
+    ip_list_retention_days = models.IntegerField(default=1, verbose_name='过期IP名单保留天数')
+    
+    # 告警配置
+    SEVERITY_CHOICES = (
+        ('critical', '严重'),
+        ('high', '高危'),
+        ('medium', '中危'),
+        ('low', '低危'),
+    )
+    alert_enabled = models.BooleanField(default=False, verbose_name='启用攻击告警')
+    alert_min_severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, default='high', verbose_name='最低告警级别')
+    alert_silence_minutes = models.IntegerField(default=30, verbose_name='告警静默时间(分钟)')
     
     class Meta:
         db_table = table_prefix + "waf_global_config"
@@ -251,23 +263,30 @@ class WafRule(BaseModel):
     
     pattern = models.TextField(verbose_name='匹配规则（正则表达式）')
     targets = models.TextField(verbose_name='匹配目标', default='["url", "post"]')
-    
+    exclude_urls = models.TextField(verbose_name='排除URL路径', default='[]', blank=True)
+
     description = models.TextField(verbose_name='规则描述', default='')
     enabled = models.BooleanField(default=True, verbose_name='是否启用')
     is_builtin = models.BooleanField(default=True, verbose_name='是否内置规则')
-    
+
     trigger_count = models.IntegerField(default=0, verbose_name='触发次数')
-    
+
     class Meta:
         db_table = table_prefix + "waf_rule"
         verbose_name = '防护规则'
         verbose_name_plural = verbose_name
         ordering = ('-severity', 'category', 'id')
         app_label = "syswaf"
-    
+
     def get_targets(self):
         try:
             return json.loads(self.targets)
+        except:
+            return []
+
+    def get_exclude_urls(self):
+        try:
+            return json.loads(self.exclude_urls)
         except:
             return []
 
@@ -380,6 +399,11 @@ class WafAttackLog(BaseModel):
     
     request_id = models.CharField(max_length=50, verbose_name='请求ID', default='')
     
+    is_false_positive = models.BooleanField(default=False, verbose_name='是否误报')
+    false_positive_reason = models.CharField(max_length=255, verbose_name='误报原因', default='', blank=True)
+    false_positive_at = models.DateTimeField(null=True, blank=True, verbose_name='标记误报时间')
+    false_positive_by = models.CharField(max_length=100, verbose_name='标记误报人', default='', blank=True)
+
     class Meta:
         db_table = table_prefix + "waf_attack_log"
         verbose_name = '攻击日志'
@@ -455,3 +479,88 @@ class WafUaList(BaseModel):
         verbose_name = 'UA名单'
         verbose_name_plural = verbose_name
         app_label = "syswaf"
+
+
+class WafReport(BaseModel):
+    """
+    WAF安全报表
+    """
+    REPORT_TYPE_CHOICES = (
+        ('daily', '日报'),
+        ('weekly', '周报'),
+        ('monthly', '月报'),
+        ('custom', '自定义'),
+    )
+    STATUS_CHOICES = (
+        ('generating', '生成中'),
+        ('completed', '已完成'),
+        ('failed', '生成失败'),
+    )
+    FORMAT_CHOICES = (
+        ('html', 'HTML'),
+        ('pdf', 'PDF'),
+        ('excel', 'Excel'),
+    )
+
+    name = models.CharField(max_length=200, verbose_name='报表名称')
+    report_type = models.CharField(max_length=20, choices=REPORT_TYPE_CHOICES, default='daily', verbose_name='报表类型')
+    date_start = models.DateField(verbose_name='统计开始日期')
+    date_end = models.DateField(verbose_name='统计结束日期')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed', verbose_name='状态')
+    attack_count = models.IntegerField(default=0, verbose_name='攻击总数')
+    block_count = models.IntegerField(default=0, verbose_name='拦截数')
+    unique_ip_count = models.IntegerField(default=0, verbose_name='独立IP数')
+    top_ips = models.TextField(verbose_name='TOP攻击IP', default='[]')
+    attack_types = models.TextField(verbose_name='攻击类型分布', default='[]')
+    severity_breakdown = models.TextField(verbose_name='严重级别分布', default='[]')
+    trend_data = models.TextField(verbose_name='趋势数据', default='[]')
+    download_count = models.IntegerField(default=0, verbose_name='下载次数')
+    format = models.CharField(max_length=10, choices=FORMAT_CHOICES, default='html', verbose_name='导出格式')
+    created_by = models.CharField(max_length=50, verbose_name='创建方式', default='manual', help_text='manual/scheduled')
+
+    class Meta:
+        db_table = table_prefix + "waf_report"
+        verbose_name = 'WAF安全报表'
+        verbose_name_plural = verbose_name
+        ordering = ('-create_at',)
+        app_label = "syswaf"
+
+    def get_json_field(self, field_name):
+        try:
+            return json.loads(getattr(self, field_name))
+        except:
+            return []
+
+
+class WafReportSchedule(BaseModel):
+    """
+    WAF定时报表
+    """
+    REPORT_TYPE_CHOICES = (
+        ('daily', '日报'),
+        ('weekly', '周报'),
+        ('monthly', '月报'),
+    )
+
+    name = models.CharField(max_length=100, verbose_name='任务名称')
+    report_type = models.CharField(max_length=20, choices=REPORT_TYPE_CHOICES, default='daily', verbose_name='报表类型')
+    schedule_time = models.TimeField(default='08:00', verbose_name='执行时间')
+    notify_channels = models.TextField(verbose_name='通知渠道', default='[]', help_text='JSON数组，如 ["email","dingtalk"]')
+    receiver_group = models.CharField(max_length=100, verbose_name='接收组', default='', blank=True)
+    is_enabled = models.BooleanField(default=True, verbose_name='是否启用')
+    last_run = models.DateTimeField(null=True, blank=True, verbose_name='最近执行时间')
+    next_run = models.DateTimeField(null=True, blank=True, verbose_name='下次执行时间')
+    run_count = models.IntegerField(default=0, verbose_name='执行次数')
+
+    class Meta:
+        db_table = table_prefix + "waf_report_schedule"
+        verbose_name = 'WAF定时报表'
+        verbose_name_plural = verbose_name
+        ordering = ('-id',)
+        app_label = "syswaf"
+
+    def get_notify_channels(self):
+        try:
+            return json.loads(self.notify_channels)
+        except:
+            return []

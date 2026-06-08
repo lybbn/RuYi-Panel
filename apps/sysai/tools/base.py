@@ -28,6 +28,7 @@ _PARAM_ALIASES = {
     'container_id': {'container', 'container_name', 'docker_id'},
     'image': {'image_name', 'docker_image', 'image_id'},
     'todos': {'tasks', 'items', 'task_list', 'todo_list'},
+    'soft_name': {'name', 'app_name', 'service_name', 'software_name'},
 }
 
 
@@ -470,6 +471,39 @@ class AIToolRegistry:
 
         return resolved
 
+    def _coerce_arguments(self, sig_params: Dict[str, Any], arguments: Dict[str, Any], func: Callable = None) -> Dict[str, Any]:
+        try:
+            type_hints = get_type_hints(func) if func else {}
+        except Exception:
+            type_hints = {}
+
+        coerced = dict(arguments)
+        for pname, param in sig_params.items():
+            if pname in ('self', 'cls'):
+                continue
+            if pname not in coerced:
+                continue
+            value = coerced[pname]
+            expected_type = type_hints.get(pname)
+            if expected_type is None:
+                continue
+
+            try:
+                if expected_type == int and isinstance(value, str):
+                    coerced[pname] = int(value)
+                elif expected_type == float and isinstance(value, str):
+                    coerced[pname] = float(value)
+                elif expected_type == bool and isinstance(value, str):
+                    coerced[pname] = value.lower() in ('true', '1', 'yes')
+                elif expected_type == list and isinstance(value, str):
+                    coerced[pname] = json.loads(value)
+                elif expected_type == dict and isinstance(value, str):
+                    coerced[pname] = json.loads(value)
+            except (ValueError, json.JSONDecodeError):
+                pass
+
+        return coerced
+
     def execute(self, name: str, arguments: Dict[str, Any]) -> str:
         func = self.get_tool(name)
         if not func:
@@ -484,6 +518,7 @@ class AIToolRegistry:
 
             sig = inspect.signature(target_func)
             arguments = self._resolve_param_aliases(sig.parameters, arguments)
+            arguments = self._coerce_arguments(sig.parameters, arguments, target_func)
 
             valid_kwargs = {}
             missing_params = []

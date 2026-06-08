@@ -6,9 +6,9 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _TITLE_PROMPT = (
-    "根据以下对话内容，生成一个简短准确的会话标题（3-10个字）。\n"
+    "根据用户的消息，生成一个简短准确的会话标题（3-10个字）。\n"
     "要求：\n"
-    "1. 标题应概括对话的核心话题\n"
+    "1. 标题应概括用户消息的核心话题或意图\n"
     "2. 只返回标题文本，不要重复、不要加引号、标点或前缀\n"
     "3. 不要输出多余的解释"
 )
@@ -81,7 +81,7 @@ def generate_title(
 
     messages = [
         {"role": "system", "content": _TITLE_PROMPT},
-        {"role": "user", "content": f"用户: {user_snippet}\n\nAI: {assistant_snippet[:200]}"},
+        {"role": "user", "content": user_snippet},
     ]
 
     try:

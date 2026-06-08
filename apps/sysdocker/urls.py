@@ -9,11 +9,12 @@ from rest_framework import routers
 from apps.sysdocker.views.image_view import RYDockerImageManageView
 from apps.sysdocker.views.network_view import RYDockerNetworkManageView
 from apps.sysdocker.views.repo_viewset import RyDockerRepoViewSet
-from apps.sysdocker.views.container_view import RYDockerLimitManageView,RYDockerContainerManageView
+from apps.sysdocker.views.container_view import RYDockerLimitManageView,RYDockerContainerManageView,RYDockerOverviewManageView
 from apps.sysdocker.views.volumes_view import RYDockerVolumesManageView
 from apps.sysdocker.views.square_view import RYDockerSquareAppTagsListManageView,RYUpdateDockerSquareAppsTagsManageView,RYGetDockerSquareAppsListManageView,RYGetDockerSquareAppsManageView
 from apps.sysdocker.views.backupApps_view import RYDockerBackupAppManageView,RYDockerRestoreAppManageView,RYDockerBackupDelManageView,RYDockerBackupDownloadManageView
 from apps.sysdocker.views.gpu_view import RYAIGgpuInfoManageView
+from apps.sysdocker.views.compose_view import RYDockerComposeListManageView,RYDockerComposeManageView
 
 system_url = routers.SimpleRouter()
 system_url.register(r'repos', RyDockerRepoViewSet)
@@ -24,6 +25,7 @@ urlpatterns = [
     path('volumes/', RYDockerVolumesManageView.as_view(), name='存储卷管理'),
     path('containers/', RYDockerContainerManageView.as_view(), name='容器管理'),
     path('containers/limit/', RYDockerLimitManageView.as_view(), name='容器限制（cpu、内存）'),
+    path('overview/', RYDockerOverviewManageView.as_view(), name='总览统计'),
     path('square/apptags/', RYDockerSquareAppTagsListManageView.as_view(), name='应用标签列表'),
     path('square/updateAppsTags/', RYUpdateDockerSquareAppsTagsManageView.as_view(), name='更新应用/标签列表'),
     path('square/appslist/', RYGetDockerSquareAppsListManageView.as_view(), name='获取应用列表'),
@@ -33,5 +35,7 @@ urlpatterns = [
     path('square/delbackup/', RYDockerBackupDelManageView.as_view(), name='删除备份'),
     path('square/downloadbak/', RYDockerBackupDownloadManageView.as_view(), name='下载备份'),
     path('ai/gpuinfo/', RYAIGgpuInfoManageView.as_view(), name='ai gpu 信息'),
+    path('compose/', RYDockerComposeListManageView.as_view(), name='容器编排列表'),
+    path('compose/mg/', RYDockerComposeManageView.as_view(), name='容器编排操作'),
 ]
 urlpatterns += system_url.urls

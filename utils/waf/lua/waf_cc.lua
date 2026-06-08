@@ -125,17 +125,19 @@ function _M.get_tolerance_count(ip)
     return tonumber(count) or 0
 end
 
-function _M.increment_tolerance_count(ip)
+function _M.increment_tolerance_count(ip, period)
     local cache = get_cache()
     if not cache then
         return 0
     end
     
+    local ttl = period or 86400
+    
     local key = get_tolerance_key(ip)
     local count, err = cache:incr(key, 1)
     
     if not count then
-        cache:set(key, 1, 86400)
+        cache:set(key, 1, ttl)
         count = 1
     end
     
@@ -280,8 +282,8 @@ function _M.check_tolerance(ip, site_id, host)
     return false, nil
 end
 
-function _M.record_violation(ip)
-    _M.increment_tolerance_count(ip)
+function _M.record_violation(ip, period)
+    _M.increment_tolerance_count(ip, period)
 end
 
 function _M.add_ip_to_blacklist(ip, duration, reason)
@@ -463,7 +465,6 @@ function _M.check_request(site_id, host)
     
     local cc_blocked, cc_reason, cc_module = _M.check_cc_attack(ip, site_id, host)
     if cc_blocked then
-        _M.record_violation(ip)
         return true, cc_reason, cc_module
     end
     

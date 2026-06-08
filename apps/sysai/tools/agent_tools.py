@@ -213,8 +213,28 @@ Args:
     if not session_id:
         return _xml_response('TodoWrite', 'error', '缺少session_id参数')
 
+    if isinstance(todos, str):
+        try:
+            todos = json.loads(todos)
+        except (json.JSONDecodeError, ValueError):
+            return _xml_response('TodoWrite', 'error', 'todos参数必须是数组，无法解析传入的字符串')
+
     if not isinstance(todos, list):
         return _xml_response('TodoWrite', 'error', 'todos参数必须是数组')
+
+    parsed_todos = []
+    for t in todos:
+        if isinstance(t, str):
+            try:
+                t = json.loads(t)
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if isinstance(t, dict):
+            parsed_todos.append(t)
+    todos = parsed_todos
+
+    if not todos:
+        return _xml_response('TodoWrite', 'error', 'todos数组为空或所有元素格式无效')
 
     in_progress_count = sum(
         1 for t in todos

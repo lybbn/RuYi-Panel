@@ -54,9 +54,9 @@ class SkillAgentManager:
         'template', 'agent', 'skill_agents'
     )
 
-    EVOLVED_SKILLS_DIR = os.path.join(
+    DATA_SKILLS_DIR = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-        'data', 'agent', 'evolved_skills'
+        'data', 'agent', 'skills'
     )
 
     @classmethod
@@ -77,7 +77,7 @@ class SkillAgentManager:
     def _load_all(self):
         self._agents.clear()
         self._scan_skill_dir(self.SKILL_AGENTS_DIR)
-        self._scan_skill_dir(self.EVOLVED_SKILLS_DIR)
+        self._scan_skill_dir(self.DATA_SKILLS_DIR)
 
     def _scan_skill_dir(self, base_dir: str):
         if not os.path.exists(base_dir):
@@ -196,7 +196,7 @@ class SkillAgentManager:
         if not agent_id:
             agent_id = f'custom_{int(__import__("time").time())}'
 
-        agent_dir = os.path.join(self.EVOLVED_SKILLS_DIR, agent_id)
+        agent_dir = os.path.join(self.DATA_SKILLS_DIR, agent_id)
         os.makedirs(agent_dir, exist_ok=True)
 
         skill_md_path = os.path.join(agent_dir, 'SKILL.md')
@@ -228,7 +228,7 @@ class SkillAgentManager:
             return False
 
         agent_dir = os.path.dirname(agent.location)
-        if os.path.exists(agent_dir) and agent_dir.startswith(self.EVOLVED_SKILLS_DIR):
+        if os.path.exists(agent_dir) and agent_dir.startswith(self.DATA_SKILLS_DIR):
             import shutil
             shutil.rmtree(agent_dir)
             del self._agents[agent_id]

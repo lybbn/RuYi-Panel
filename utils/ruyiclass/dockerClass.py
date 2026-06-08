@@ -223,6 +223,8 @@ class DockerClient:
             for image in images:
                 i_attrs = image.attrs
                 tags = i_attrs['RepoTags']
+                if not tags or (len(tags) == 1 and tags[0] == '<none>:<none>'):
+                    continue
                 c_name =tags[0] if tags and len(tags)>0 else ""
                 short_id = image.short_id
                 images_list.append({
@@ -238,15 +240,23 @@ class DockerClient:
             c_name =tags[0] if tags and len(tags)>0 else ""
             short_id = image.short_id
             work_dir = i_attrs.get('GraphDriver', {}).get('Data', {}).get('WorkDir', "")
+            is_dangling = not tags or (len(tags) == 1 and tags[0] == '<none>:<none>')
+            if is_dangling:
+                repo_digests = i_attrs.get('RepoDigests', [])
+                if repo_digests:
+                    c_name = repo_digests[0].split('@')[0] + ':<none>'
+                else:
+                    c_name = '<none>:<none>'
             l_data = {
-                'id': get_sha_id(short_id),#i_attrs.id
+                'id': get_sha_id(short_id),
                 'used': "1" if self.is_image_in_use(container_list=container_list,image_id=image.id) else "0",
                 'name':c_name,
                 'tags': tags,
                 'size': i_attrs.get('Size', 0),
                 'created': i_attrs.get('Created', ""),
                 'work_dir': work_dir,
-                'hostname': i_attrs.get('Config', {}).get('Hostname', "")
+                'hostname': i_attrs.get('Config', {}).get('Hostname', ""),
+                'is_dangling': is_dangling,
             }
             if search:
                 search = search.strip().lower()
@@ -446,6 +456,58 @@ class DockerClient:
         if action_type == "container":
             res,msg = dk_container.main(client=self.client).edit(cont=cont)
         return res,msg
+
+    def upgrade(self,cont={}):
+        """
+        升级容器（用新镜像重建）
+        """
+        action_type = cont.get("action_type",None)
+        if not self.client:return False,"连接容器失败"
+        res=False
+        msg="类型错误"
+        if action_type == "container":
+            res,msg = dk_container.main(client=self.client).upgrade(cont=cont)
+        return res,msg
+
+    def rename(self,cont={}):
+        """
+        重命名容器
+        """
+        action_type = cont.get("action_type",None)
+        if not self.client:return False,"连接容器失败"
+        res=False
+        msg="类型错误"
+        if action_type == "container":
+            res,msg = dk_container.main(client=self.client).rename(cont=cont)
+        return res,msg
+
+    def save_image(self,cont={}):
+        """
+        导出镜像
+        """
+        if not self.client:return False,"连接容器失败"
+        return dk_image.main(client=self.client).save(cont)
+
+    def push_image(self,cont={}):
+        """
+        推送镜像
+        """
+        if not self.client:return False,"连接容器失败"
+        return dk_image.main(client=self.client).push(cont)
+
+    def tag_image(self,cont={}):
+        """
+        设置镜像标签
+        """
+        if not self.client:return False,"连接容器失败"
+        return dk_image.main(client=self.client).tag(cont)
+
+    def load_image(self,cont={}):
+        """
+        导入镜像
+        """
+        if not self.client:return False,"连接容器失败"
+        return dk_image.main(client=self.client).load(cont)
 
     def get_container_logs(self,cont={}):
         """获取容器日志"""

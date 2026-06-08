@@ -24,7 +24,7 @@ from utils.jsonResponse import ErrorResponse,DetailResponse,SuccessResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
 from apps.syslogs.logutil import RuyiAddOpLog
-from utils.ruyiclass.dockerClass import DockerClient
+from utils.ruyiclass.dockerClass import DockerClient, get_sha_id
 
 class RYDockerLimitManageView(CustomAPIView):
     """
@@ -110,4 +110,191 @@ class RYDockerContainerManageView(CustomAPIView):
             if not isok:return ErrorResponse(msg=msg)
             RuyiAddOpLog(request,msg=f"【容器】- 编辑容器：{name}",module="dockermg")
             return DetailResponse(msg=msg)
+        elif action == "upgrade":
+            id = reqData.get('id',"")
+            name = reqData.get('name',"")
+            new_image = reqData.get('new_image',"")
+            if not id:return ErrorResponse(msg="缺少容器ID")
+            if not new_image:return ErrorResponse(msg="缺少新镜像名")
+            reqData['action_type']="container"
+            isok,msg = docker_client.upgrade(reqData)
+            if not isok:return ErrorResponse(msg=msg)
+            RuyiAddOpLog(request,msg=f"【容器】- 升级容器：{name} => {new_image}",module="dockermg")
+            return DetailResponse(msg=msg)
+        elif action == "rename":
+            id = reqData.get('id',"")
+            name = reqData.get('name',"")
+            new_name = reqData.get('new_name',"")
+            if not id:return ErrorResponse(msg="缺少容器ID")
+            if not new_name:return ErrorResponse(msg="缺少新容器名称")
+            reqData['action_type']="container"
+            isok,msg = docker_client.rename(reqData)
+            if not isok:return ErrorResponse(msg=msg)
+            RuyiAddOpLog(request,msg=f"【容器】- 重命名容器：{name} => {new_name}",module="dockermg")
+            return DetailResponse(msg=msg)
         return ErrorResponse(msg="类型错误")
+
+class RYDockerOverviewManageView(CustomAPIView):
+    """
+    get:
+    获取Docker总览统计数据
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self,request):
+        docker_client = DockerClient()
+        if not docker_client.client:
+            return ErrorResponse(msg="Docker未连接，请检查Docker服务是否启动")
+        
+        if not docker_client.is_docker_running():
+            return ErrorResponse(msg="Docker服务未运行，请启动Docker服务")
+        
+        try:
+            containers = docker_client.local_containers_list(all=True)
+            container_list = []
+            running_containers = []
+            running_count = 0
+            stopped_count = 0
+            paused_count = 0
+            
+            for container in containers:
+                try:
+                    c_attrs = container.attrs
+                    c_status = container.status
+                    
+                    if c_status == "running":
+                        running_count += 1
+                        running_containers.append(container)
+                    elif c_status == "paused":
+                        paused_count += 1
+                    else:
+                        stopped_count += 1
+                    
+                    container_list.append({
+                        'id': get_sha_id(container.short_id),
+                        'name': container.name,
+                        'status': c_status,
+                        'image': c_attrs.get('Config', {}).get('Image', ''),
+                        'created': c_attrs.get('Created', ''),
+                        'ip': [net.get('IPAddress', '') for net in c_attrs.get('NetworkSettings', {}).get('Networks', {}).values()],
+                        'ports': c_attrs.get('NetworkSettings', {}).get('Ports', {}),
+                        'cpu_percent': 0,
+                        'online_cpus': 0,
+                        'mem_percent': 0,
+                        'mem_usage': 0,
+                        'mem_limit': 0,
+                        'detail': c_attrs
+                    })
+                except:
+                    continue
+            
+            stats_map = {}
+            for rc in running_containers:
+                try:
+                    stats = rc.stats(stream=False)
+                    cpu_delta = stats['cpu_stats']['cpu_usage']['total_usage'] - stats['precpu_stats']['cpu_usage']['total_usage']
+                    system_delta = stats['cpu_stats']['system_cpu_usage'] - stats['precpu_stats']['system_cpu_usage']
+                    online_cpus = stats['cpu_stats'].get('online_cpus', len(stats['cpu_stats']['cpu_usage'].get('percpu_usage', [1])))
+                    cpu_percent = round((cpu_delta / system_delta) * online_cpus * 100.0, 2) if system_delta > 0 and cpu_delta > 0 else 0
+                    
+                    mem_usage = stats['memory_stats'].get('usage', 0)
+                    mem_limit = stats['memory_stats'].get('limit', 0)
+                    mem_percent = round((mem_usage / mem_limit) * 100, 2) if mem_limit > 0 else 0
+                    
+                    stats_map[rc.name] = {
+                        'cpu_percent': cpu_percent,
+                        'online_cpus': online_cpus,
+                        'mem_percent': mem_percent,
+                        'mem_usage': mem_usage,
+                        'mem_limit': mem_limit
+                    }
+                except:
+                    continue
+            
+            for item in container_list:
+                if item['name'] in stats_map:
+                    s = stats_map[item['name']]
+                    item['cpu_percent'] = s['cpu_percent']
+                    item['online_cpus'] = s['online_cpus']
+                    item['mem_percent'] = s['mem_percent']
+                    item['mem_usage'] = s['mem_usage']
+                    item['mem_limit'] = s['mem_limit']
+            
+            images = docker_client.local_images_list()
+            images_count = len(images)
+            images_size = sum(img.attrs.get('Size', 0) for img in images)
+            
+            networks = docker_client.client.networks.list()
+            networks_count = len(networks)
+            
+            volumes = docker_client.client.volumes.list()
+            volumes_count = len(volumes)
+            volumes_size = 0
+            try:
+                df_info = docker_client.client.df()
+                for vol_info in df_info.get('Volumes', []):
+                    usage = vol_info.get('UsageData', {})
+                    if usage:
+                        volumes_size += usage.get('Size', 0)
+            except Exception:
+                for vol in volumes:
+                    usage = vol.attrs.get('UsageData', {})
+                    if usage:
+                        volumes_size += usage.get('Size', 0)
+            
+            repos_count = 0
+            try:
+                from apps.sysdocker.models import RyDockerRepo
+                repos_count = RyDockerRepo.objects.count()
+            except:
+                pass
+            
+            docker_info = {}
+            try:
+                info = docker_client.client.info()
+                docker_info = {
+                    'server_version': info.get('ServerVersion', ''),
+                    'storage_driver': info.get('Driver', ''),
+                    'containers_total': info.get('Containers', 0),
+                    'containers_running': info.get('ContainersRunning', 0),
+                    'containers_stopped': info.get('ContainersStopped', 0),
+                    'containers_paused': info.get('ContainersPaused', 0),
+                    'images_count': info.get('Images', 0),
+                    'os': info.get('OperatingSystem', ''),
+                    'architecture': info.get('Architecture', ''),
+                    'cpu_count': info.get('NCPU', 0),
+                    'total_memory': info.get('MemTotal', 0),
+                }
+            except Exception as e:
+                import logging
+                import platform
+                logger = logging.getLogger('django')
+                logger.error(f"获取Docker信息失败: {str(e)}")
+                try:
+                    version_info = docker_client.client.version()
+                    docker_info['server_version'] = version_info.get('Version', '')
+                    docker_info['os'] = version_info.get('Os', '')
+                    docker_info['architecture'] = version_info.get('Arch', '')
+                except:
+                    pass
+                docker_info.setdefault('os', platform.system())
+                docker_info.setdefault('architecture', platform.machine())
+                docker_info.setdefault('cpu_count', psutil.cpu_count(logical=True))
+                docker_info.setdefault('total_memory', psutil.virtual_memory().total)
+            
+            return DetailResponse(data={
+                'containers': container_list,
+                'containers_count': len(container_list),
+                'containers_running': running_count,
+                'containers_stopped': stopped_count,
+                'containers_paused': paused_count,
+                'images_count': images_count,
+                'images_size': images_size,
+                'networks_count': networks_count,
+                'volumes_count': volumes_count,
+                'volumes_size': volumes_size,
+                'repos_count': repos_count,
+                'docker_info': docker_info
+            })
+        except Exception as e:
+            return ErrorResponse(msg=f"获取总览数据失败: {str(e)}")

@@ -33,6 +33,8 @@ def _get_tool_type(tool_name: str) -> str:
         return 'skill'
     if tool_name == 'web_search':
         return 'web_search'
+    if tool_name == 'agent_call':
+        return 'agent'
     if tool_name.startswith('mcp_'):
         return 'mcp'
     if tool_name in ('TodoWrite', 'TodoRead'):
@@ -75,7 +77,7 @@ def _cleanup_idle_agents():
 
 
 def _start_async_routing(agent, user_input, ai_model, all_tool_names, disabled_tool_names):
-    from apps.sysai.agent.toolsets import ai_match_toolsets
+    from apps.sysai.agent.toolsets import ai_match_toolsets, _is_panel_general_question
 
     def _route():
         try:
@@ -85,7 +87,12 @@ def _start_async_routing(agent, user_input, ai_model, all_tool_names, disabled_t
                 ts = result.get('toolsets', [])
                 logger.info(f'[AI路由-异步] 结果已缓存, Toolset={ts}, 下轮生效')
             else:
-                agent._pending_ai_route = None
+                # 检测通用面板问题，确保文档工具可用
+                if _is_panel_general_question(user_input):
+                    agent._pending_ai_route = {'toolsets': [], 'need_task': False, 'need_doc': True}
+                    logger.info(f'[AI路由-异步] 检测到通用面板问题, 强制加载文档工具')
+                else:
+                    agent._pending_ai_route = None
         except Exception as e:
             logger.warning(f'[AI路由-异步] 失败: {e}')
             agent._pending_ai_route = None
@@ -128,50 +135,66 @@ def _get_or_create_agent(session_id, model, config=None, user_input='', agent_id
                     ts_names = pending['toolsets']
                     need_task = pending.get('need_task', False)
                     need_doc = pending.get('need_doc', False)
-                    if ts_names:
-                        smart_tools = resolve_tools_by_toolsets(ts_names)
-                        if need_task:
-                            smart_tools.extend(t for t in TASK_TOOLS if t not in smart_tools)
-                        if need_doc:
-                            smart_tools.extend(t for t in DOC_TOOLS if t not in smart_tools)
-                        agent.enabled_tools = [
-                            t for t in smart_tools
-                            if t in all_tool_names and t not in disabled_tool_names
-                        ]
-                        logger.info(f'[Agent重用] AI路由生效: Toolset={ts_names}, 加载{len(agent.enabled_tools)}个工具')
+                    smart_tools = resolve_tools_by_toolsets(ts_names) if ts_names else list(get_minimal_tools())
+                    if need_task:
+                        smart_tools.extend(t for t in TASK_TOOLS if t not in smart_tools)
+                    if need_doc:
+                        smart_tools.extend(t for t in DOC_TOOLS if t not in smart_tools)
+                    agent.enabled_tools = [
+                        t for t in smart_tools
+                        if t in all_tool_names and t not in disabled_tool_names
+                    ]
+                    logger.info(f'[Agent重用] AI路由生效: Toolset={ts_names}, task={need_task}, doc={need_doc}, 加载{len(agent.enabled_tools)}个工具')
                     agent._pending_ai_route = None
 
                 ai_model = agent.model if hasattr(agent, 'model') else None
                 _start_async_routing(agent, resolve_input, ai_model, all_tool_names, disabled_tool_names)
 
             elif not smart_mode and not manual_enabled_tools:
-                from apps.sysai.agent.intent_router import resolve_tools
                 from apps.sysai.models import AIToolConfig
                 disabled_tool_names = set(AIToolConfig.objects.filter(is_enabled=False).values_list('name', flat=True))
                 all_tool_names = list(tool_registry._tools.keys())
 
-                logger.info(f'[Agent重用] session={session_id}, agent_id={agent_id}, user_input={resolve_input[:80]}')
-                resolved_tools, _ = resolve_tools(
-                    user_input=resolve_input,
-                    agent_id=agent_id,
-                    smart_mode=False,
-                    ai_model=agent.model if hasattr(agent, 'model') else None,
-                )
-                if resolved_tools is not None:
-                    before_filter = len(resolved_tools)
+                if 'enabled_tools' in agent_config:
                     agent.enabled_tools = [
-                        t for t in resolved_tools
+                        t for t in agent_config['enabled_tools']
                         if t in all_tool_names and t not in disabled_tool_names
                     ]
-                    filtered_out = [t for t in resolved_tools if t in disabled_tool_names]
-                    if filtered_out:
-                        logger.warning(f'[Agent重用] 被disabled_tool_names过滤的工具: {filtered_out}')
-                    logger.info(f'[Agent重用] 工具解析完成: 解析{before_filter}个, 过滤{len(filtered_out)}个, 最终{len(agent.enabled_tools)}个, require_confirm={agent.require_command_confirm}')
+                    logger.info(f'[Agent重用] 手动模式(无工具选择): smart_mode=False, enabled_tools={agent_config["enabled_tools"]}, 最终{len(agent.enabled_tools)}个工具')
                 else:
-                    agent.enabled_tools = [
-                        t for t in all_tool_names if t not in disabled_tool_names
-                    ]
-                    logger.info(f'[Agent重用] 全量工具模式: {len(agent.enabled_tools)}个工具, require_confirm={agent.require_command_confirm}')
+                    from apps.sysai.agent.intent_router import resolve_tools
+                    logger.info(f'[Agent重用] session={session_id}, agent_id={agent_id}, user_input={resolve_input[:80]}')
+                    resolved_tools, _ = resolve_tools(
+                        user_input=resolve_input,
+                        agent_id=agent_id,
+                        smart_mode=False,
+                        ai_model=agent.model if hasattr(agent, 'model') else None,
+                    )
+                    if resolved_tools is not None:
+                        before_filter = len(resolved_tools)
+                        agent.enabled_tools = [
+                            t for t in resolved_tools
+                            if t in all_tool_names and t not in disabled_tool_names
+                        ]
+                        filtered_out = [t for t in resolved_tools if t in disabled_tool_names]
+                        if filtered_out:
+                            logger.warning(f'[Agent重用] 被disabled_tool_names过滤的工具: {filtered_out}')
+                        logger.info(f'[Agent重用] 工具解析完成: 解析{before_filter}个, 过滤{len(filtered_out)}个, 最终{len(agent.enabled_tools)}个, require_confirm={agent.require_command_confirm}')
+                    else:
+                        agent.enabled_tools = [
+                            t for t in all_tool_names if t not in disabled_tool_names
+                        ]
+                        logger.info(f'[Agent重用] 全量工具模式: {len(agent.enabled_tools)}个工具, require_confirm={agent.require_command_confirm}')
+
+            elif not smart_mode and manual_enabled_tools:
+                from apps.sysai.models import AIToolConfig
+                disabled_tool_names = set(AIToolConfig.objects.filter(is_enabled=False).values_list('name', flat=True))
+                all_tool_names = list(tool_registry._tools.keys())
+                agent.enabled_tools = [
+                    t for t in manual_enabled_tools
+                    if t in all_tool_names and t not in disabled_tool_names
+                ]
+                logger.info(f'[Agent重用] 手动指定工具模式: smart_mode=False, 加载{len(agent.enabled_tools)}个工具')
 
             return agent
 
@@ -211,30 +234,37 @@ def _get_or_create_agent(session_id, model, config=None, user_input='', agent_id
                     ]
                     logger.info(f'[Agent新建] 智能模式(最小): 无匹配Toolset, 仅加载{len(agent_config["enabled_tools"])}个基础工具')
         else:
-            from apps.sysai.agent.intent_router import resolve_tools
-            resolved_tools, system_prompt_override = resolve_tools(
-                user_input=resolve_input,
-                agent_id=agent_id,
-                smart_mode=False,
-                ai_model=ai_model,
-            )
-            if resolved_tools is not None:
-                before_filter = len(resolved_tools)
+            if 'enabled_tools' in agent_config:
                 agent_config['enabled_tools'] = [
-                    t for t in resolved_tools
+                    t for t in agent_config['enabled_tools']
                     if t in all_tool_names and t not in disabled_tool_names
                 ]
-                filtered_out = [t for t in resolved_tools if t in disabled_tool_names]
-                if filtered_out:
-                    logger.warning(f'[Agent新建] 被disabled_tool_names过滤的工具: {filtered_out}')
-                logger.info(f'[Agent新建] 关键词匹配模式: 解析{before_filter}个, 过滤{len(filtered_out)}个, 最终{len(agent_config["enabled_tools"])}个')
+                logger.info(f'[Agent新建] 手动模式(无工具选择): smart_mode=False, enabled_tools={agent_config["enabled_tools"]}, 最终{len(agent_config["enabled_tools"])}个工具')
             else:
-                agent_config['enabled_tools'] = [
-                    t for t in all_tool_names if t not in disabled_tool_names
-                ]
-                logger.info(f'[Agent新建] 关键词匹配返回None, 全量模式: {len(agent_config["enabled_tools"])}个工具')
-            if system_prompt_override:
-                agent_config['system_prompt'] = system_prompt_override
+                from apps.sysai.agent.intent_router import resolve_tools
+                resolved_tools, system_prompt_override = resolve_tools(
+                    user_input=resolve_input,
+                    agent_id=agent_id,
+                    smart_mode=False,
+                    ai_model=ai_model,
+                )
+                if resolved_tools is not None:
+                    before_filter = len(resolved_tools)
+                    agent_config['enabled_tools'] = [
+                        t for t in resolved_tools
+                        if t in all_tool_names and t not in disabled_tool_names
+                    ]
+                    filtered_out = [t for t in resolved_tools if t in disabled_tool_names]
+                    if filtered_out:
+                        logger.warning(f'[Agent新建] 被disabled_tool_names过滤的工具: {filtered_out}')
+                    logger.info(f'[Agent新建] 关键词匹配模式: 解析{before_filter}个, 过滤{len(filtered_out)}个, 最终{len(agent_config["enabled_tools"])}个')
+                else:
+                    agent_config['enabled_tools'] = [
+                        t for t in all_tool_names if t not in disabled_tool_names
+                    ]
+                    logger.info(f'[Agent新建] 关键词匹配返回None, 全量模式: {len(agent_config["enabled_tools"])}个工具')
+                if system_prompt_override:
+                    agent_config['system_prompt'] = system_prompt_override
 
         agent = Agent(
             session_id=str(session_id),
@@ -621,7 +651,8 @@ class AIChatStreamView(CustomAPIView):
             agent_config['smart_mode'] = True
             agent_config['web_search'] = True
         else:
-            if enabled_tools:
+            agent_config['smart_mode'] = False
+            if enabled_tools is not None:
                 agent_config['enabled_tools'] = enabled_tools
             if web_search:
                 agent_config['web_search'] = True
@@ -1158,11 +1189,11 @@ class AIChatStreamView(CustomAPIView):
 
                     self._record_usage(session, model, total_usage, content=full_content, user_message=message)
 
-                    need_generate_title = is_new_session
+                    need_generate_title = is_new_session and len(message) > 30
                     if not need_generate_title and session:
                         msg_count_before = AIChatMessage.objects.filter(session=session, role='user').count()
-                        default_title = message[:30] + ('...' if len(message) > 30 else '')
-                        if msg_count_before <= 1 and session.title == default_title:
+                        default_title = message[:30]
+                        if msg_count_before <= 1 and len(message) > 30 and session.title == default_title:
                             need_generate_title = True
 
                     if need_generate_title:
@@ -1601,6 +1632,7 @@ class AIChatConfirmView(CustomAPIView):
         session_id = req_data.get('session_id')
         confirm_id = req_data.get('confirm_id')
         approved = req_data.get('approved', False)
+        remember = req_data.get('remember', False)
 
         if not session_id or not confirm_id:
             return ErrorResponse(msg='缺少必要参数')
@@ -1611,7 +1643,7 @@ class AIChatConfirmView(CustomAPIView):
         if not agent:
             return ErrorResponse(msg='会话不存在或已结束')
 
-        agent.confirm_tool(confirm_id, bool(approved))
+        agent.confirm_tool(confirm_id, bool(approved), remember=bool(remember))
         status_text = '已确认执行' if approved else '已拒绝执行'
         return DetailResponse(msg=status_text)
 
@@ -2207,53 +2239,6 @@ class AIMCPStatusView(CustomAPIView):
                 return ErrorResponse(msg='不支持的操作')
         except Exception as e:
             return ErrorResponse(msg=f'MCP操作失败: {e}')
-
-
-class AISkillEvolutionView(CustomAPIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        try:
-            from apps.sysai.agent.skill_evolution import skill_evolution
-            summary = skill_evolution.get_stats_summary()
-            return DetailResponse(data=summary)
-        except Exception as e:
-            return ErrorResponse(msg=f'获取技能沉淀统计失败: {e}')
-
-    def post(self, request):
-        req_data = get_parameter_dic(request)
-        action = req_data.get('action', '')
-
-        try:
-            from apps.sysai.agent.skill_evolution import skill_evolution
-
-            if action == 'evolve':
-                tool_name = req_data.get('tool_name', '')
-                skill_name = req_data.get('skill_name', '')
-                description = req_data.get('description', '')
-                system_prompt = req_data.get('system_prompt', '')
-                toolsets = req_data.get('toolsets', [])
-                tools = req_data.get('tools', [])
-
-                if not tool_name or not skill_name:
-                    return ErrorResponse(msg='缺少tool_name或skill_name')
-
-                success = skill_evolution.evolve_to_skill(
-                    tool_name=tool_name,
-                    skill_name=skill_name,
-                    description=description,
-                    system_prompt=system_prompt,
-                    toolsets=toolsets,
-                    tools=tools,
-                )
-                if success:
-                    return SuccessResponse(msg=f'技能 [{skill_name}] 沉淀成功')
-                else:
-                    return ErrorResponse(msg='技能沉淀失败')
-            else:
-                return ErrorResponse(msg='不支持的操作')
-        except Exception as e:
-            return ErrorResponse(msg=f'技能沉淀操作失败: {e}')
 
 
 class AIToolsetInfoView(CustomAPIView):

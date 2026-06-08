@@ -142,8 +142,8 @@ class system:
         return isok,msg
     
     @classmethod
-    def DelFirewallRule(cls,param):
-        isok = myos.DelFirewallRule(param=param)
+    def DelFirewallRule(cls,param,is_reload=True):
+        isok = myos.DelFirewallRule(param=param,is_reload=is_reload)
         return isok
     
     @classmethod

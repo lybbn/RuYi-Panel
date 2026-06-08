@@ -186,9 +186,9 @@ def Install_Mysql(type=2,version={},is_windows=True,call_back=None):
             WriteFile(mysql_error_log_file_path,"")
             WriteFile(mysql_slow_file_path,"")
             
-        init_res = Initialize_Mysql(is_windows=is_windows)
+        init_res, init_err = Initialize_Mysql(is_windows=is_windows)
         if not init_res:
-            raise Exception("[error]初始化mysql错误!!!")
+            raise Exception(f"[error]初始化mysql错误: {init_err}")
         time.sleep(0.1)
         if is_windows:
             #安装服务
@@ -410,6 +410,7 @@ def Initialize_Mysql(is_windows=True):
     """
     @name 初始化mysql
     @author lybbn<2024-08-20>
+    @return (success: bool, error_msg: str)
     """
     soft_paths = get_mysql_path_info()
     install_path = soft_paths['install_path']
@@ -417,14 +418,32 @@ def Initialize_Mysql(is_windows=True):
     mysqld =soft_paths['windows_abspath_mysqld_path'] if is_windows else soft_paths['linux_mysqld_path']
     if not os.path.exists(data_path):
         os.makedirs(data_path)
-    if not is_windows:
-        command_str = f"{mysqld} --initialize-insecure --basedir={install_path} --datadir={data_path} --user=mysql"
-        RunCommandReturnCode(f"chown -R mysql:mysql {soft_paths['log_abspath_path']}")
-        code = RunCommandReturnCode(command_str,cwd=install_path,timeout=120)
-    else:
-        command_str = [mysqld,"--initialize-insecure",f"--basedir={install_path}",f"--datadir={data_path}"]
-        code = RunCommandReturnCode(command_str,cwd=install_path)
-    return True if code == 0 else False
+    try:
+        if not is_windows:
+            conf_path = soft_paths['linux_conf_path']
+            command_str = f"{mysqld} --defaults-file={conf_path} --initialize-insecure --basedir={install_path} --datadir={data_path} --user=mysql"
+            RunCommandReturnCode(f"chown -R mysql:mysql {soft_paths['log_abspath_path']}")
+            sub = subprocess.Popen(command_str, shell=True, cwd=install_path, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            try:
+                _, stderr_bytes = sub.communicate(timeout=120)
+            except subprocess.TimeoutExpired:
+                sub.kill()
+                sub.wait()
+                return False, 'mysql初始化超时(超过120秒)'
+            code = sub.returncode
+            stderr_output = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
+        else:
+            command_str = [mysqld,"--initialize-insecure",f"--basedir={install_path}",f"--datadir={data_path}"]
+            sub = subprocess.Popen(command_str, cwd=install_path, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            _, stderr_bytes = sub.communicate()
+            code = sub.returncode
+            stderr_output = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ''
+        if code == 0:
+            return True, ''
+        error_detail = stderr_output.strip()[:2000] if stderr_output else f'退出码: {code}'
+        return False, error_detail
+    except Exception as e:
+        return False, str(e)
 
 def Drop_Test_Databases(is_windows=True):
     if is_mysql_running(is_windows=is_windows):
@@ -531,6 +550,96 @@ def RY_SAVE_MYSQL_CONF(conf="",is_windows=True):
     conf_path = soft_paths['windows_abspath_conf_path'] if is_windows else soft_paths['linux_conf_path']
     WriteFile(conf_path,content=conf)
     return True
+
+def RY_GET_MYSQL_INFO(is_windows=True):
+    conf = RY_GET_MYSQL_CONF(is_windows=is_windows)
+    port = 3306
+    datadir = ""
+    port_rep = r"port\s*=\s*([0-9]+)"
+    port_match = re.search(port_rep, conf)
+    if port_match:
+        try:
+            port = int(port_match.group(1))
+        except (ValueError, IndexError):
+            pass
+    datadir_rep = r"datadir\s*=\s*(.+)"
+    datadir_match = re.search(datadir_rep, conf)
+    if datadir_match:
+        datadir = datadir_match.group(1).strip()
+    if not datadir:
+        soft_paths = get_mysql_path_info()
+        datadir = soft_paths['data_abspath_path'].replace("\\","/")
+    return {
+        'port': port,
+        'datadir': datadir,
+    }
+
+def RY_SET_MYSQL_PORT(port, is_windows=True):
+    if not port or int(port) < 1 or int(port) > 65535:
+        raise ValueError("端口范围必须在1-65535之间")
+    conf = RY_GET_MYSQL_CONF(is_windows=is_windows)
+    port_rep = r"port\s*=\s*[0-9]+"
+    new_conf = re.sub(port_rep, f"port={port}", conf)
+    RY_SAVE_MYSQL_CONF(conf=new_conf, is_windows=is_windows)
+    return True
+
+def RY_SET_MYSQL_DATADIR(datadir, is_windows=True):
+    if not datadir:
+        raise ValueError("数据目录不能为空")
+    if is_windows:
+        if not (len(datadir) >= 2 and datadir[1] == ':'):
+            raise ValueError("Windows数据目录必须以盘符开头，如 D:\\ruyi\\data")
+    else:
+        if datadir[0] != '/':
+            raise ValueError("数据目录必须以根目录 / 开头")
+    datadir = datadir.rstrip('/').rstrip('\\')
+    if not is_windows:
+        danger_dirs = ['/etc', '/usr', '/boot', '/proc', '/sys', '/tmp', '/root', '/lib', '/bin', '/sbin', '/run', '/lib64', '/lib32', '/srv']
+        top_dir = datadir.split('/')[1] if '/' in datadir else ''
+        if '/' + top_dir in danger_dirs:
+            raise ValueError(f"数据目录不能放在/{top_dir}目录下，可能导致数据丢失或系统异常")
+    old_info = RY_GET_MYSQL_INFO(is_windows=is_windows)
+    old_datadir = old_info['datadir'].rstrip('/').rstrip('\\')
+    if old_datadir == datadir:
+        raise ValueError("新数据目录与当前目录相同")
+    if not os.path.exists(datadir):
+        os.makedirs(datadir, exist_ok=True)
+    datadir_bak = datadir
+    if is_windows:
+        datadir = datadir.replace("/", "\\")
+        old_datadir = old_datadir.replace("/", "\\")
+    if not is_windows:
+        RunCommandReturnCode(f"chown -R mysql:mysql {datadir}")
+        RunCommandReturnCode(f"chmod -R 755 {datadir}")
+    Stop_Mysql(is_windows=is_windows)
+    time.sleep(1)
+    if is_windows:
+        import shutil
+        for item in os.listdir(old_datadir):
+            s = os.path.join(old_datadir, item)
+            d = os.path.join(datadir, item)
+            if os.path.isdir(s):
+                shutil.copytree(s, d, dirs_exist_ok=True)
+            else:
+                shutil.copy2(s, d)
+    else:
+        RunCommandReturnCode(f"cp -arf {old_datadir}/* {datadir}/")
+        RunCommandReturnCode(f"chown -R mysql:mysql {datadir}")
+        RunCommandReturnCode(f"chmod -R 755 {datadir}")
+        RunCommandReturnCode(f"rm -f {datadir}/*.pid")
+        RunCommandReturnCode(f"rm -f {datadir}/*.err")
+    conf = RY_GET_MYSQL_CONF(is_windows=is_windows)
+    old_datadir_for_rep = old_info['datadir']
+    new_datadir_for_conf = datadir_bak.replace("\\","/")
+    new_conf = re.sub(r"datadir\s*=\s*.+", f"datadir={new_datadir_for_conf}", conf)
+    RY_SAVE_MYSQL_CONF(conf=new_conf, is_windows=is_windows)
+    Start_Mysql(is_windows=is_windows)
+    if is_mysql_running(is_windows=is_windows):
+        return True
+    else:
+        RY_SAVE_MYSQL_CONF(conf=conf, is_windows=is_windows)
+        Start_Mysql(is_windows=is_windows)
+        raise ValueError("迁移失败，已回滚配置文件并重启MySQL，请检查数据目录是否正确")
 
 def RY_CHECK_MYSQL_DATANAME_EXISTS(mysql_conn, dataName):
     if not mysql_conn:

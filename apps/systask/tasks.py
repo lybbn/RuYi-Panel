@@ -320,11 +320,10 @@ def _trigger_cron_fail_alert(job_name, error_msg):
 def installTask(job_id,job_func,func_args=[]):
     """
     @name 应用商店安装任务
-    @author lybbn<2024-08-11>
+    @author lybbn<2026-05-29>
     """
-    # 创建一个 DateTrigger，设置为现在的时间
     trigger = DateTrigger(run_date=datetime.datetime.now())
-    django_job = scheduler.add_job(job_func,trigger,id=job_id,args=func_args,max_instances=1,replace_existing=True,misfire_grace_time=1,coalesce=True,executor='processpool')
+    django_job = scheduler.add_job(job_func,trigger,id=job_id,args=func_args,max_instances=1,replace_existing=True,misfire_grace_time=3600,coalesce=False)#,executor='processpool'
     return django_job
 
 def access_url(url):
@@ -392,14 +391,22 @@ def func_unzip(zip_filename,extract_path):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            _, ext = os.path.splitext(zip_filename)
-            ext = ext.lower()
-            if ext in ['.tar.gz','.tgz','.tar.bz2','.tbz']:
-                with tarfile.open(zip_filename, 'r') as tar:
+            filename_lower = os.path.basename(zip_filename).lower()
+            if filename_lower.endswith('.tar.gz') or filename_lower.endswith('.tgz'):
+                with tarfile.open(zip_filename, 'r:gz') as tar:
                     tar.extractall(extract_path)
-            elif ext == '.zip':
+            elif filename_lower.endswith('.tar.bz2') or filename_lower.endswith('.tbz'):
+                with tarfile.open(zip_filename, 'r:bz2') as tar:
+                    tar.extractall(extract_path)
+            elif filename_lower.endswith('.zip'):
                 with zipfile.ZipFile(zip_filename, 'r') as zipf:
                     zipf.extractall(extract_path)
+            elif filename_lower.endswith('.gz'):
+                with tarfile.open(zip_filename, 'r:gz') as tar:
+                    tar.extractall(extract_path)
+            elif filename_lower.endswith('.bz2'):
+                with tarfile.open(zip_filename, 'r:bz2') as tar:
+                    tar.extractall(extract_path)
             else:
                 raise ValueError("不支持的文件格式")
             return

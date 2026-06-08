@@ -19,7 +19,7 @@ import os,json,re
 from math import ceil
 from utils.customView import CustomAPIView
 from utils.pagination import CustomPagination
-from utils.common import get_parameter_dic,ast_convert,DeleteDir,DeleteFile,RunCommand,formatdatetime
+from utils.common import get_parameter_dic,ast_convert,DeleteDir,DeleteFile,RunCommand,formatdatetime,pip_install_package
 from utils.jsonResponse import ErrorResponse,DetailResponse,SuccessResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
@@ -176,6 +176,13 @@ class RYGetDockerSquareAppsManageView(CustomAPIView):
                 DeleteDir(app_path)
                 return ErrorResponse(msg=msg)
             RyDockerApps.objects.create(**reqData)
+            DB_PIP_MAP = {
+                'pgsql': 'psycopg2-binary',
+                'postgresql': 'psycopg2-binary',
+                'mongodb': 'pymongo',
+            }
+            if appname in DB_PIP_MAP:
+                pip_install_package(DB_PIP_MAP[appname])
             RuyiAddOpLog(request,msg=f"【容器】-【广场APP】=> 添加：{appname}=>{name}",module="dockermg")
             return DetailResponse(msg=msg)
         elif action == "set_status":

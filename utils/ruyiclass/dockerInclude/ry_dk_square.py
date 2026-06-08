@@ -350,6 +350,23 @@ class main:
             return self.set_discuz_conf(cont=cont)
         elif appname == "openclaw":
             return self.set_openclaw_conf(cont=cont)
+        elif appname == "redis":
+            return self.set_redis_conf(cont=cont)
+        return True,"ok"
+
+    def set_redis_conf(self,cont={}):
+        app_path = self.get_dkapp_path(cont=cont)
+        params = ast_convert(cont.get("params",{}))
+        redis_conf_path = f"{app_path}/redis.conf"
+        redis_conf_content = ReadFile(redis_conf_path)
+        if not redis_conf_content:
+            return True,"ok"
+        redis_password = params.get('redis_password','')
+        if redis_password:
+            redis_conf_content = redis_conf_content.replace("REDIS_PASSWORD_PLACEHOLDER", redis_password)
+        else:
+            redis_conf_content = redis_conf_content.replace("requirepass REDIS_PASSWORD_PLACEHOLDER", "# requirepass ")
+        WriteFile(redis_conf_path, redis_conf_content)
         return True,"ok"
 
     def set_openclaw_conf(self,cont={}):

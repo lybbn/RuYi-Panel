@@ -18,6 +18,9 @@ from apps.syswaf.views.waf_views import (
     WafAttackLogViewSet, WafUrlWhitelistViewSet, WafUrlBlacklistViewSet,
     WafUaListViewSet, WafDashboardView, WafInternalApiView
 )
+from apps.syswaf.views.report_views import (
+    WafReportViewSet, WafReportScheduleViewSet
+)
 
 router = DefaultRouter()
 router.register(r'global-config', WafGlobalConfigViewSet, basename='waf-global-config')
@@ -30,6 +33,8 @@ router.register(r'attack-logs', WafAttackLogViewSet, basename='waf-attack-log')
 router.register(r'url-whitelist', WafUrlWhitelistViewSet, basename='waf-url-whitelist')
 router.register(r'url-blacklist', WafUrlBlacklistViewSet, basename='waf-url-blacklist')
 router.register(r'ua-list', WafUaListViewSet, basename='waf-ua-list')
+router.register(r'reports', WafReportViewSet, basename='waf-report')
+router.register(r'report-schedules', WafReportScheduleViewSet, basename='waf-report-schedule')
 
 urlpatterns = [
     path('', include(router.urls)),

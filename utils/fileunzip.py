@@ -45,7 +45,7 @@ def func_unzip_secure(
             raise ValueError(f"目标不是文件: {zip_filename}")
         if os.path.realpath(zip_filename) != os.path.abspath(zip_filename):
             raise ValueError("压缩文件路径包含非法符号链接")
-        if not zip_filename.lower().endswith(('.zip', '.tar.gz', '.tgz', '.tar.bz2', '.tbz')):
+        if not zip_filename.lower().endswith(('.zip', '.tar.gz', '.tgz', '.tar.bz2', '.tbz', '.gz', '.bz2')):
             raise ValueError("不支持的压缩格式")
 
     def _safe_extract_zip():
@@ -110,8 +110,8 @@ def func_unzip_secure(
                     time.sleep(1)  # 等待1秒重试
 
         # 3. 根据类型选择解压方式
-        ext = Path(zip_filename).suffix.lower()
-        if ext == '.zip':
+        filename_lower = os.path.basename(zip_filename).lower()
+        if filename_lower.endswith('.zip'):
             _safe_extract_zip()
         else:
             _safe_extract_tar()

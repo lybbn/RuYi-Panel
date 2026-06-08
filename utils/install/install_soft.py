@@ -29,6 +29,8 @@ from utils.install.php import *
 from utils.install.supervisor import *
 from utils.install.docker import *
 from utils.install.fail2ban import *
+from utils.install.pgsql import *
+from utils.install.mongodb import *
 
 def Check_Soft_Running(name="",is_windows = True,simple_check=False,version=None):
     if name == 'nginx':
@@ -43,6 +45,10 @@ def Check_Soft_Running(name="",is_windows = True,simple_check=False,version=None
         return is_supervisor_running(is_windows=is_windows)
     elif name == 'fail2ban':
         return is_fail2ban_running()
+    elif name == 'pgsql':
+        return is_pgsql_running(is_windows=is_windows,simple_check=simple_check)
+    elif name == 'mongodb':
+        return is_mongodb_running(is_windows=is_windows,simple_check=simple_check)
     elif name == 'php':
         if version:
             return is_php_running(version=version,is_windows=is_windows,simple_check=simple_check)
@@ -89,6 +95,10 @@ def Ry_Install_Soft(type=2,name="",version={},is_windows=True,call_back=None):
         Install_Supervisor(type=type,version=version,is_windows=is_windows,call_back=call_back)
     elif name == 'fail2ban':
         Install_Fail2Ban(version=version,call_back=call_back)
+    elif name == 'pgsql':
+        Install_Pgsql(type=type,version=version,is_windows=is_windows,call_back=call_back)
+    elif name == 'mongodb':
+        Install_Mongodb(type=type,version=version,is_windows=is_windows,call_back=call_back)
     return True
 
 def Ry_Uninstall_Soft(name="",is_windows=True,version=None):
@@ -112,6 +122,10 @@ def Ry_Uninstall_Soft(name="",is_windows=True,version=None):
         Uninstall_Supervisor(is_windows=is_windows)
     elif name == 'fail2ban':
         Uninstall_Fail2Ban()
+    elif name == 'pgsql':
+        Uninstall_Pgsql(is_windows=is_windows)
+    elif name == 'mongodb':
+        Uninstall_Mongodb(is_windows=is_windows)
     return True
 
 def Ry_Start_Soft(name="",is_windows=True,version=None):
@@ -127,6 +141,10 @@ def Ry_Start_Soft(name="",is_windows=True,version=None):
         Start_Supervisor(is_windows=is_windows)
     elif name == 'fail2ban':
         Start_Fail2Ban()
+    elif name == 'pgsql':
+        Start_Pgsql(is_windows=is_windows)
+    elif name == 'mongodb':
+        Start_Mongodb(is_windows=is_windows)
     elif name == 'php':
         Start_PHP(version=version,is_windows=is_windows)
     return True
@@ -144,6 +162,10 @@ def Ry_Stop_Soft(name="",is_windows=True,version=None):
         Stop_Supervisor(is_windows=is_windows)
     elif name == 'fail2ban':
         Stop_Fail2Ban()
+    elif name == 'pgsql':
+        Stop_Pgsql(is_windows=is_windows)
+    elif name == 'mongodb':
+        Stop_Mongodb(is_windows=is_windows)
     elif name == 'php':
         Stop_PHP(version=version,is_windows=is_windows)
     return True
@@ -161,6 +183,10 @@ def Ry_Restart_Soft(name="",is_windows=True,version=None):
         Restart_Supervisor(is_windows=is_windows)
     elif name == 'fail2ban':
         Restart_Fail2Ban()
+    elif name == 'pgsql':
+        Restart_Pgsql(is_windows=is_windows)
+    elif name == 'mongodb':
+        Restart_Mongodb(is_windows=is_windows)
     elif name == 'php':
         Restart_PHP(version=version,is_windows=is_windows)
     return True
@@ -174,6 +200,8 @@ def Ry_Reload_Soft(name="",is_windows=True,version=None):
         Reload_Supervisor(is_windows=is_windows)
     elif name == 'fail2ban':
         Reload_Fail2Ban()
+    elif name == 'pgsql':
+        Reload_Pgsql(is_windows=is_windows)
     elif name == 'php':
         Reload_PHP(version=version,is_windows=is_windows)
     return True
@@ -191,6 +219,8 @@ def Ry_Get_Soft_Info_Path(name="",type="all",version=None,is_windows=True):
         allinfo = get_redis_path_info()
         if type == 'all':
             return allinfo
+        elif type == 'error':
+            return allinfo['log_file_path']
     elif name == 'mysql':
         allinfo = get_mysql_path_info()
         if type == 'all':
@@ -233,6 +263,18 @@ def Ry_Get_Soft_Info_Path(name="",type="all",version=None,is_windows=True):
             return allinfo
         elif type == 'log':
             return allinfo['log_path']
+    elif name == 'pgsql':
+        allinfo = get_pgsql_path_info()
+        if type == 'all':
+            return allinfo
+        elif type == 'error':
+            return allinfo['log_file_path']
+    elif name == 'mongodb':
+        allinfo = get_mongodb_path_info()
+        if type == 'all':
+            return allinfo
+        elif type == 'error':
+            return allinfo['log_file_path']
     return ""
 
 def Ry_Get_Soft_LoadStatus(name="",is_windows=True):
@@ -242,20 +284,32 @@ def Ry_Get_Soft_LoadStatus(name="",is_windows=True):
         return RY_GET_REDIS_LOADSTATUS(is_windows=is_windows)
     elif name == 'mysql':
         return RY_GET_MYSQL_LOADSTATUS(is_windows=is_windows)
+    elif name == 'pgsql':
+        return RY_GET_PGSQL_LOADSTATUS(is_windows=is_windows)
+    elif name == 'mongodb':
+        return RY_GET_MONGODB_LOADSTATUS(is_windows=is_windows)
     return ""
 
 def Ry_Get_Soft_Performance(name="",is_windows=True):
     if name == 'nginx':
         return RY_GET_NGINX_PERFORMANCE(is_windows=is_windows)
+    elif name == 'redis':
+        return RY_GET_REDIS_PERFORMANCE(is_windows=is_windows)
     elif name == 'mysql':
         return RY_GET_MYSQL_PERFORMANCE(is_windows=is_windows)
+    elif name == 'pgsql':
+        return RY_GET_PGSQL_PERFORMANCE(is_windows=is_windows)
     return ""
 
 def Ry_Set_Soft_Performance(name="",cont={},is_windows=True):
     if name == 'nginx':
         return RY_SET_NGINX_PERFORMANCE(cont,is_windows=is_windows)
+    elif name == 'redis':
+        return RY_SET_REDIS_PERFORMANCE(cont,is_windows=is_windows)
     elif name == 'mysql':
         return RY_SET_MYSQL_PERFORMANCE(cont,is_windows=is_windows)
+    elif name == 'pgsql':
+        return RY_SET_PGSQL_PERFORMANCE(cont,is_windows=is_windows)
     return True
 
 def Ry_Get_Soft_Conf(name="",is_windows=True,version=None):
@@ -273,6 +327,10 @@ def Ry_Get_Soft_Conf(name="",is_windows=True,version=None):
         return Read_Jail_Config()
     elif name == 'php':
         return RY_GET_PHP_CONF(version=version,is_windows=is_windows)
+    elif name == 'pgsql':
+        return RY_GET_PGSQL_CONF(is_windows=is_windows)
+    elif name == 'mongodb':
+        return RY_GET_MONGODB_CONF(is_windows=is_windows)
     return ""
 
 def Ry_Save_Soft_Conf(name="",conf="",is_windows=True,version=None):
@@ -290,6 +348,10 @@ def Ry_Save_Soft_Conf(name="",conf="",is_windows=True,version=None):
         return Write_Jail_Config(content=conf)
     elif name == 'php':
         return RY_SAVE_PHP_CONF(version=version,conf=conf,is_windows=is_windows)
+    elif name == 'pgsql':
+        return RY_SAVE_PGSQL_CONF(conf=conf,is_windows=is_windows)
+    elif name == 'mongodb':
+        return RY_SAVE_MONGODB_CONF(conf=conf,is_windows=is_windows)
     return True
 
 def Ry_Get_Soft_Port(name="",is_windows=True):
@@ -299,4 +361,8 @@ def Ry_Get_Soft_Port(name="",is_windows=True):
         return RY_GET_REDIS_PORT(is_windows=is_windows)
     elif name == 'mysql':
         return RY_GET_MYSQL_PORT(is_windows=is_windows)
+    elif name == 'pgsql':
+        return RY_GET_PGSQL_PORT(is_windows=is_windows)
+    elif name == 'mongodb':
+        return RY_GET_MONGODB_PORT()
     return ""

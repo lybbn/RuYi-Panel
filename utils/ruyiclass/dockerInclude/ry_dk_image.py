@@ -30,21 +30,82 @@ class main:
     def __init__(self,client=None):
         self.client = client
         
-    def set_tag(self,image_name,new_tag):
+    def save(self,cont):
+        """
+        导出镜像为tar文件
+        """
+        name = cont.get('name',"")
+        path = cont.get('path',"")
+        if not name:return False,"缺少镜像名称"
+        if not path:return False,"缺少导出路径"
+        try:
+            image = self.client.images.get(name)
+            tags = image.attrs.get('RepoTags', [])
+            tag_name = tags[0] if tags else name
+            tar_path = os.path.join(path, f"{tag_name.replace(':','_').replace('/','_')}.tar")
+            with open(tar_path, 'wb') as f:
+                for chunk in image.save(named=True):
+                    f.write(chunk)
+            return True, f"镜像导出成功，文件路径：{tar_path}"
+        except docker.errors.ImageNotFound:
+            return False,"镜像不存在"
+        except Exception as e:
+            return False,f"导出镜像时出现错误: {e}"
+
+    def push(self,cont):
+        """
+        推送镜像到仓库
+        """
+        name = cont.get('name',"")
+        tag = cont.get('tag',"")
+        url = cont.get('url',"")
+        is_auth = cont.get('is_auth',False)
+        username = cont.get('username',"")
+        password = cont.get('password',"")
+        if not name:return False,"缺少镜像名称"
+        if not tag:return False,"缺少推送标签"
+        try:
+            image = self.client.images.get(name)
+            push_tag = tag
+            if url and url != "docker.io":
+                push_tag = f"{url}/{tag}"
+            image.tag(push_tag)
+            auth_config = None
+            if is_auth and username:
+                auth_config = {
+                    "username": username,
+                    "password": password,
+                }
+            self.client.images.push(push_tag, auth_config=auth_config)
+            return True, f"镜像推送成功：{push_tag}"
+        except docker.errors.ImageNotFound:
+            return False,"镜像不存在"
+        except docker.errors.APIError as e:
+            if "unauthorized" in str(e).lower():
+                return False,"推送失败，认证失败，请检查仓库账号密码"
+            return False,f"推送镜像失败：{e}"
+        except Exception as e:
+            return False,f"推送镜像时出现错误: {e}"
+
+    def tag(self,cont):
         """
         给镜像设置标签
         """
+        name = cont.get('name',"")
+        new_tag = cont.get('new_tag',"")
+        if not name:return False,"缺少镜像名称"
+        if not new_tag:return False,"缺少新标签"
         try:
-            image = self.client.images.get(image_name)
-            # 设置标签
-            new_image_name = f"{image_name}:{new_tag}"
-            image.tag(new_image_name)
-            return True,"设置成功"
+            image = self.client.images.get(name)
+            image.tag(new_tag)
+            return True,"设置标签成功"
         except docker.errors.ImageNotFound:
             return False,"镜像未找到"
         except docker.errors.APIError as e:
+            if "invalid tag format" in str(e):
+                return False,"标签格式错误，如：myimage:v1.0"
             return False,f"设置标签错误: {e}"
-        
+
     def pull(self,cont={}):
         """
         拉取镜像

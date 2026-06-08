@@ -36,8 +36,12 @@ import datetime
 import json
 import base64
 import hashlib
+import hmac
 import requests
 import binascii
+import urllib3
+import certifi
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from utils.common import DeleteDir,GetLetsencryptPath,md5,WriteFile,GetLetsencryptLogPath,GetLetsencryptRootPath,ReadFile
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization,hashes
@@ -52,6 +56,19 @@ from apps.sysshop.models import RySoftShop
 from apps.system.models import Sites
 
 class letsencryptTool:
+    ACME_PROVIDERS = {
+        'letsencrypt': {
+            'directory': 'https://acme-v02.api.letsencrypt.org/directory',
+            'name': "Let's Encrypt",
+            'requires_eab': False,
+        },
+        'litessl': {
+            'directory': 'https://acme.litessl.cn/v2/DV90/directory',
+            'name': 'LiteSSL',
+            'requires_eab': True,
+        },
+    }
+    _provider = 'letsencrypt'
     _letsencrypt_directory = "https://acme-v02.api.letsencrypt.org/directory"
     _apis = {}
     _config = {}
@@ -59,14 +76,26 @@ class letsencryptTool:
     _log_path = GetLetsencryptLogPath()
     _cert_save_path = GetLetsencryptRootPath()
     _user_agent = "ruyi"
-    _ssl_verify = False
+    _ssl_verify = certifi.where()
     _alg = "RS256"
     _bits = 2048
     _kid = None
-    _is_log = True #是否需要记录日志
+    _is_log = True
+    _eab_kid = None
+    _eab_hmac_key = None
 
-    def __init__(self,is_log=True):
+    def __init__(self,provider='letsencrypt',eab_kid=None,eab_hmac_key=None,is_log=True):
+        if provider not in self.ACME_PROVIDERS:
+            raise ValueError("不支持的ACME提供商: %s" % provider)
+        self._provider = provider
+        self._letsencrypt_directory = self.ACME_PROVIDERS[provider]['directory']
+        self._eab_kid = eab_kid
+        self._eab_hmac_key = eab_hmac_key
         self._is_log = is_log
+        if provider == 'litessl':
+            self._config_file_path = GetLetsencryptPath().replace('letsencrypt.json','litessl.json')
+            self._log_path = GetLetsencryptLogPath().replace('letsencrypt.log','litessl.log')
+            self._cert_save_path = os.path.join(os.path.dirname(GetLetsencryptRootPath()),'litessl')
         self._config = self.read_config_from_file()
         
     def utc_to_time(self,utcstr):
@@ -119,7 +148,7 @@ class letsencryptTool:
                     self._apis = self._config['apis']['directory']
                     return self._apis
             # 通过网络获取
-            res = requests.get(self._letsencrypt_directory)
+            res = requests.get(self._letsencrypt_directory, verify=self._ssl_verify)
             if not res.status_code in [200, 201]:
                 result = res.json()
                 if "type" in result:
@@ -275,9 +304,11 @@ class letsencryptTool:
 
     def register_account(self,param={}):
         """
-        注册ACME账号
+        注册ACME账号（支持EAB外部账户绑定）
         """
         email = param.get("email","")
+        eab_kid = param.get("eab_kid",self._eab_kid)
+        eab_hmac_key = param.get("eab_hmac_key",self._eab_hmac_key)
         if email:
             self._config['email'] = email
         if not 'email' in self._config or not self._config['email']:
@@ -286,10 +317,30 @@ class letsencryptTool:
             "termsOfServiceAgreed": True,
             "contact": ["mailto:{0}".format(self._config['email'])],
         }
+        if self.ACME_PROVIDERS[self._provider]['requires_eab']:
+            if not eab_kid or not eab_hmac_key:
+                raise ValueError("当前提供商需要EAB凭证(kid和hmacKey)，请先在FreeSSL平台获取")
+            eab_kid = str(eab_kid)
+            eab_hmac_key = str(eab_hmac_key)
+            protected_eab = {
+                "alg": "HS256",
+                "kid": eab_kid,
+                "url": self._apis['newAccount'],
+            }
+            protected_eab64 = self._safe_base64(json.dumps(protected_eab).encode('utf8'))
+            hmac_key = base64.urlsafe_b64decode(eab_hmac_key + '=' * (4 - len(eab_hmac_key) % 4))
+            eab_signature = hmac.new(hmac_key, protected_eab64.encode('utf8'), hashlib.sha256).digest()
+            payload["externalAccountBinding"] = {
+                "protected": protected_eab64,
+                "payload": self._safe_base64(json.dumps(payload).encode('utf8')),
+                "signature": self._safe_base64(eab_signature),
+            }
+            self._config['eab_kid'] = eab_kid
+            self._config['eab_hmac_key'] = eab_hmac_key
         res = self.do_requests(url=self._apis['newAccount'], payload=payload)
         if res.status_code not in [201, 200, 409]:
             raise Exception("注册ACME账号失败: {}".format(res.json()))
-        kid = res.headers["Location"]#标识账户密钥（key）的唯一标识符，可以用来在后续的证书申请和管理过程中对账户进行身份验证和操作
+        kid = res.headers["Location"]
         if not 'kid' in self._config['account'] or not self._config['account']['kid'] == kid:
             self._config['account']['kid'] = kid
         self.save_to_config_file()
@@ -329,6 +380,7 @@ class letsencryptTool:
         resjson['site_name'] = site_info['name']
         resjson['site_id'] = site_info['id']
         resjson['site_path'] = site_info['path']
+        resjson['provider'] = self._provider
         if not is_renew:
             resjson['deploy'] = False #是否已部署
             resjson['over'] = False #申请进度是否完成
@@ -556,7 +608,7 @@ class letsencryptTool:
         下载证书
         """
         certificate_url = self._config['orders'][order_no].get('certificate_url',"")
-        res = requests.get(certificate_url)
+        res = requests.get(certificate_url, verify=self._ssl_verify)
         if res.status_code not in [200, 201]:
             raise Exception("下载证书失败: {}".format(res.json()))
         certificate_content = res.content
@@ -672,18 +724,12 @@ class letsencryptTool:
             self.save_to_config_file()
             WebClient.reload_service(webserver=webServer)
             self.write_log(f"----- 部署成功！")
+            self._save_order_log(order_no, ssl_config)
         else:
-            #失败删除订单
             if order_no:
+                self._save_order_log(order_no, ssl_config)
                 ssl_config['orders'][order_no]['deploy'] = False
-                ssl_config['orders'][order_no]['over'] = False
-                orders = ssl_config['orders']
-                keys_to_delete = []
-                for key,value in orders.items():
-                    if order_no == key:
-                        keys_to_delete.append(key)
-                for key in keys_to_delete:
-                    del ssl_config['orders'][key]
+                ssl_config['orders'][order_no]['over'] = True
                 self._config = ssl_config
                 self.save_to_config_file()
             
@@ -728,7 +774,8 @@ class letsencryptTool:
             expire_days = ssl_info['expire_days']
             organization_name = ssl_info['certinfo'].get("organization_name","")
             if not is_enable_https:raise Exception(f"检测到【{site_name}】站点未开启HTTPS，跳过续签")
-            if not organization_name == "Let's Encrypt":raise Exception(f"当前【{site_name}】站点证书类型为：{organization_name}，非Let's Encrypt，跳过续签")
+            provider_name = self.ACME_PROVIDERS[self._provider]['name']
+            if organization_name not in ["Let's Encrypt","LiteSSL"]:raise Exception(f"当前【{site_name}】站点证书类型为：{organization_name}，非{provider_name}，跳过续签")
             if is_force_https:
                 self.write_log(f"检测到【{site_name}】站点开启了强制HTTPS，暂时关闭该功能")
                 WebClient.set_site_ssl_forcehttps(webserver=webServer,siteName=site_name,sitePath=site_path,cont={'status':False})
@@ -762,6 +809,9 @@ class letsencryptTool:
             self.save_to_config_file()
         except Exception as e:
             self.write_log(str(e),is_error=True)
+            self._save_order_log(order_no)
+            self._config['orders'][order_no]['renew_status'] = "failed"
+            self.save_to_config_file()
             #恢复
             if is_force_https:
                 WebClient.set_site_ssl_forcehttps(webserver=webServer,siteName=site_name,sitePath=site_path,cont={'status':True})
@@ -782,3 +832,24 @@ class letsencryptTool:
             DeleteDir(acme_path)
             return True
         return False
+
+    def _save_order_log(self, order_no, ssl_config=None):
+        import shutil
+        if not order_no:
+            return
+        if ssl_config is None:
+            ssl_config = self._config
+        if order_no not in ssl_config.get('orders', {}):
+            return
+        order_info = ssl_config['orders'][order_no]
+        save_path = order_info.get('save_path', '')
+        if not save_path or not os.path.exists(save_path):
+            return
+        if not os.path.exists(self._log_path):
+            return
+        log_filename = 'renew.log' if order_info.get('renew_status') == 'pending' else 'apply.log'
+        order_log_path = os.path.join(save_path, log_filename)
+        try:
+            shutil.copy2(self._log_path, order_log_path)
+        except Exception:
+            pass

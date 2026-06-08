@@ -73,7 +73,7 @@ class RyDockerRepoViewSet(CustomModelViewSet):
         is_simple = get_parameter_dic(request).get("is_simple","")
         if page is not None:
             if is_simple:
-                serializer = RyDockerRepoSimpleSerializer(page, many=True, request=request)
+                serializer = RyDockerRepoSimpleSerializer(page, many=True, context={'request': request})
             else:
                 serializer = self.get_serializer(page, many=True, request=request)
             tmp_data = serializer.data

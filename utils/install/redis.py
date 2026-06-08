@@ -215,7 +215,7 @@ def is_redis_running(is_windows=True,simple_check=False):
     c_content = ReadFile(conf_path)
     if not c_content:
         return False
-    port = int(re.findall(r'\n\s*port\s+(\d+)', c_content)[0])
+    port = int(re.findall(r'(?:^|\n)\s*port\s+(\d+)', c_content)[0])
     if simple_check:
         if is_service_running(port):
             return True
@@ -295,19 +295,16 @@ def Stop_Redis(is_windows=True):
     @name 停止redis
     @author lybbn<2024-08-18>
     """
-    # soft_paths = get_redis_path_info()
-    # if is_windows:
-    #     cli_path = soft_paths['windows_abspath_cli_exe_path']
-    # else:
-    #     cli_path = soft_paths['linux_abspath_cli_path']
     try:
         if is_redis_running(is_windows=is_windows):
-            # code = RunCommandReturnCode([cli_path,"shutdown"],cwd=soft_paths['install_path'])
-            # return True if code == 0 else False
             db_conn = Redis_Connect()
+            if not db_conn:
+                RedisClient.close_all_clients()
+                db_conn = Redis_Connect()
             if not db_conn:
                 raise ValueError("连接失败")
             db_conn.shutdown()
+            RedisClient.close_all_clients()
             return True
         return True
     except subprocess.CalledProcessError as e:
@@ -319,7 +316,7 @@ def Restart_Redis(is_windows=True):
     @author lybbn<2024-08-18>
     """
     Stop_Redis(is_windows=is_windows)
-    time.sleep(0.1)
+    time.sleep(1)
     Start_Redis(is_windows=is_windows)
 
 def RY_GET_REDIS_CONF(is_windows=True):
@@ -344,7 +341,7 @@ def RY_GET_REDIS_CONF_OPTIONS(is_windows=True):
     get_keys = ["bind", "port", "timeout", "maxclients", "databases", "requirepass", "maxmemory"]
     for k in get_keys:
         val = ""
-        rep = r"\n%s\s+(.+)" % k
+        rep = r"(?:^|\n)%s\s+(.+)" % k
         re_res = re.search(rep, conf)
         if not re_res:
             if k == "maxmemory":
@@ -387,8 +384,8 @@ def RY_GET_REDIS_LOADSTATUS(is_windows=True):
             c_content = ReadFile(conf_path)
             if not c_content:
                 raise ValueError("redis未安装")
-            port = int(re.findall(r'\n\s*port\s+(\d+)', c_content)[0])
-            password = re.findall(r'\n\s*requirepass\s+(.+)', c_content)
+            port = int(re.findall(r'(?:^|\n)\s*port\s+(\d+)', c_content)[0])
+            password = re.findall(r'(?:^|\n)\s*requirepass\s+(.+)', c_content)
             if password:
                 password = password[0]
             else:
@@ -431,6 +428,269 @@ def RY_GET_REDIS_LOADSTATUS(is_windows=True):
             raise ValueError("redis连接失败")
     else:
         raise ValueError("redis未运行")
+
+def RY_GET_REDIS_PERFORMANCE(is_windows=True):
+    soft_paths = get_redis_path_info()
+    conf_path = soft_paths['abspath_conf_path']
+    conf = ReadFile(conf_path)
+    if not conf:
+        raise ValueError("redis未安装")
+    
+    # 读取默认配置文件作为备选
+    default_conf = ""
+    if is_windows:
+        install_path = soft_paths['install_abspath_path']
+        exam_conf_path = os.path.join(install_path, "redis.windows.conf")
+    else:
+        exam_conf_path = conf_path
+    default_conf = ReadFile(exam_conf_path)
+    
+    parameters = {
+        "bind": r"^bind[ \t]+(.+)$",
+        "port": r"^port[ \t]+(\d+)$",
+        "timeout": r"^timeout[ \t]+(\d+)$",
+        "maxclients": r"^maxclients[ \t]+(\d+)$",
+        "databases": r"^databases[ \t]+(\d+)$",
+        "requirepass": r"^requirepass[ \t]*(.*)$",
+        "maxmemory": r"^maxmemory[ \t]+(\d+)$",
+        "protected-mode": r"^protected-mode[ \t]+(\w+)$"
+    }
+    
+    # Redis 默认值
+    default_values = {
+        "bind": "127.0.0.1",
+        "port": 6379,
+        "timeout": 0,
+        "maxclients": 10000,
+        "databases": 16,
+        "requirepass": "",
+        "maxmemory": 0,
+        "protected-mode": "yes"
+    }
+    
+    results = {}
+    for param, pattern in parameters.items():
+        value = None
+        # 优先从当前配置文件读取
+        match = re.search(pattern, conf, re.MULTILINE)
+        if match:
+            value = match.group(1).strip()
+        # 如果当前配置没有，尝试从默认配置文件读取
+        elif default_conf and default_conf != conf:
+            match_default = re.search(pattern, default_conf, re.MULTILINE)
+            if match_default:
+                value = match_default.group(1).strip()
+        
+        # 处理值
+        if value is not None and value:
+            if param == "maxmemory":
+                results[param] = int(value) / 1024 / 1024
+            elif param in ["port", "timeout", "maxclients", "databases"]:
+                results[param] = int(value)
+            else:
+                results[param] = value
+        else:
+            # 使用 Redis 默认值
+            results[param] = default_values[param]
+    
+    return results
+
+def RY_SET_REDIS_PERFORMANCE(cont, is_windows=True):
+    soft_paths = get_redis_path_info()
+    conf_path = soft_paths['abspath_conf_path']
+    conf = RY_GET_REDIS_CONF(is_windows=is_windows)
+    if not conf:
+        raise ValueError("redis未安装")
+    
+    parameters = {
+        "bind": r"^bind[ \t]+.+$",
+        "port": r"^port[ \t]+\d+$",
+        "timeout": r"^timeout[ \t]+\d+$",
+        "maxclients": r"^maxclients[ \t]+\d+$",
+        "databases": r"^databases[ \t]+\d+$",
+        "requirepass": r"^requirepass.*$",
+        "maxmemory": r"^maxmemory[ \t]+\d+$",
+        "protected-mode": r"^protected-mode[ \t]+\w+$"
+    }
+    
+    for param, pattern in parameters.items():
+        if param in cont:
+            value = str(cont[param])
+            if param == "maxmemory":
+                value = str(int(float(value) * 1024 * 1024))
+            elif param in ["port", "timeout", "maxclients", "databases"]:
+                if not re.search(r"^\d+$", value):
+                    raise ValueError(f"{param}参数值错误")
+            
+            if param == "requirepass":
+                if value:
+                    new_line = f"{param} {value}"
+                else:
+                    new_line = ""
+            elif param == "maxmemory":
+                if int(float(value)) > 0:
+                    new_line = f"{param} {value}"
+                else:
+                    new_line = ""
+            else:
+                new_line = f"{param} {value}"
+            
+            if re.search(pattern, conf, re.MULTILINE):
+                if new_line:
+                    conf = re.sub(pattern, new_line, conf, flags=re.MULTILINE)
+                else:
+                    conf = re.sub(pattern + r'\n?', '', conf, flags=re.MULTILINE)
+            elif new_line:
+                conf = conf.rstrip() + f"\n{new_line}\n"
+    
+    WriteFile(conf_path, conf)
+    return True
+
+def RY_GET_REDIS_DEFAULT_CONF(exam_conf_path=None, is_windows=True):
+    """
+    读取Redis默认配置文件内容
+    """
+    if exam_conf_path and os.path.exists(exam_conf_path):
+        return ReadFile(exam_conf_path)
+    soft_paths = get_redis_path_info()
+    conf_path = soft_paths['abspath_conf_path']
+    install_path = soft_paths['install_abspath_path']
+    if is_windows:
+        default_path = os.path.join(install_path, "redis.windows.conf")
+    else:
+        default_path = conf_path
+    if os.path.exists(default_path):
+        return ReadFile(default_path)
+    return ""
+
+def RY_GET_REDIS_PERSISTENCE(is_windows=True):
+    conf = RY_GET_REDIS_CONF(is_windows=is_windows)
+    if not conf:
+        raise ValueError("redis未安装")
+    
+    result = {
+        "persistence_type": "rdb",
+        "save": "",
+        "appendonly": "no",
+        "appendfsync": "everysec",
+        "dir": ""
+    }
+    
+    if re.search(r'^appendonly\s+yes', conf, re.MULTILINE):
+        result["persistence_type"] = "aof"
+    
+    save_match = re.findall(r'^save\s+(\d+)\s+(\d+)', conf, re.MULTILINE)
+    if save_match:
+        result["save"] = " ".join([f"{s[0]} {s[1]}" for s in save_match])
+    else:
+        default_conf = RY_GET_REDIS_DEFAULT_CONF(exam_conf_path=None)
+        if default_conf:
+            save_match = re.findall(r'^save\s+(\d+)\s+(\d+)', default_conf, re.MULTILINE)
+            if save_match:
+                result["save"] = " ".join([f"{s[0]} {s[1]}" for s in save_match])
+    
+    appendfsync_match = re.search(r'^appendfsync\s+(.+)$', conf, re.MULTILINE)
+    if appendfsync_match:
+        result["appendfsync"] = appendfsync_match.group(1).strip()
+    
+    dir_match = re.search(r'^dir\s+(.+)$', conf, re.MULTILINE)
+    if dir_match:
+        result["dir"] = dir_match.group(1).strip()
+    
+    return result
+
+def RY_SET_REDIS_PERSISTENCE(cont, is_windows=True):
+    soft_paths = get_redis_path_info()
+    conf_path = soft_paths['abspath_conf_path']
+    conf = RY_GET_REDIS_CONF(is_windows=is_windows)
+    if not conf:
+        raise ValueError("redis未安装")
+    
+    persistence_type = cont.get("persistence_type", "rdb")
+    save = cont.get("save", "")
+    appendfsync = cont.get("appendfsync", "everysec")
+    appendonly = cont.get("appendonly", "")
+    dir_path = cont.get("dir", "")
+    
+    if persistence_type == "dir":
+        if not dir_path:
+            raise ValueError("持久化目录不能为空")
+        if not os.path.isdir(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+        if not is_windows:
+            try:
+                import pwd
+                redis_user = "redis"
+                try:
+                    pwd.getpwnam(redis_user)
+                except KeyError:
+                    redis_user = "www"
+                import shutil
+                shutil.chown(dir_path, user=redis_user, group=redis_user)
+            except Exception:
+                pass
+        if re.search(r'^dir\s+', conf, re.MULTILINE):
+            conf = re.sub(r'^dir\s+.+', f'dir {dir_path}', conf, flags=re.MULTILINE)
+        else:
+            conf += f"\ndir {dir_path}\n"
+        WriteFile(conf_path, conf)
+        return True
+    
+    if persistence_type == "aof":
+        aof_value = appendonly if appendonly in ["yes", "no"] else "yes"
+        if re.search(r'^appendonly\s+', conf, re.MULTILINE):
+            conf = re.sub(r'^appendonly\s+\w+', f'appendonly {aof_value}', conf, flags=re.MULTILINE)
+        else:
+            conf += f"\nappendonly {aof_value}\n"
+        
+        if aof_value == "yes":
+            if re.search(r'^appendfsync\s+', conf, re.MULTILINE):
+                conf = re.sub(r'^appendfsync\s+\w+', f'appendfsync {appendfsync}', conf, flags=re.MULTILINE)
+            else:
+                conf += f"appendfsync {appendfsync}\n"
+        
+        WriteFile(conf_path, conf)
+        return True
+    
+    if persistence_type in ["rdb", "all"]:
+        save_lines = re.findall(r'^save\s+\d+\s+\d+', conf, re.MULTILINE)
+        for line in save_lines:
+            conf = conf.replace(line, "", 1)
+        conf = re.sub(r'\n{3,}', '\n\n', conf)
+        
+        if save.strip():
+            save_entries = save.strip().split()
+            if len(save_entries) % 2 != 0:
+                save_entries = save_entries[:-1]
+            if save_entries:
+                save_config = ""
+                for i in range(0, len(save_entries), 2):
+                    save_config += f"save {save_entries[i]} {save_entries[i+1]}\n"
+            
+            first_save_pos = conf.find('\nsave ')
+            if first_save_pos == -1:
+                first_save_pos = conf.find('\n# save')
+            if first_save_pos == -1:
+                first_save_pos = conf.find('\nbind')
+            
+            if first_save_pos != -1:
+                conf = conf[:first_save_pos] + "\n" + save_config + conf[first_save_pos:]
+            else:
+                conf = save_config + "\n" + conf
+    
+    if persistence_type == "all":
+        if re.search(r'^appendonly\s+', conf, re.MULTILINE):
+            conf = re.sub(r'^appendonly\s+\w+', 'appendonly yes', conf, flags=re.MULTILINE)
+        else:
+            conf += "\nappendonly yes\n"
+        
+        if re.search(r'^appendfsync\s+', conf, re.MULTILINE):
+            conf = re.sub(r'^appendfsync\s+\w+', f'appendfsync {appendfsync}', conf, flags=re.MULTILINE)
+        else:
+            conf += f"appendfsync {appendfsync}\n"
+    
+    WriteFile(conf_path, conf)
+    return True
 
 def RY_SET_DEFAULT_REDIS_CONFIG(is_windows=True):
     soft_paths = get_redis_path_info()

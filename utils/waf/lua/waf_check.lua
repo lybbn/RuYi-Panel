@@ -66,6 +66,14 @@ local function build_raw_request()
         end
     end
     
+    -- 添加请求体（POST/PUT/PATCH）
+    if method == "POST" or method == "PUT" or method == "PATCH" then
+        local body = waf_utils.get_request_body()
+        if body and body ~= "" then
+            raw = raw .. "\r\n" .. body
+        end
+    end
+    
     return raw
 end
 
@@ -130,35 +138,42 @@ function _M.handle_block(reason, attack_info, site_id, host)
     attack_info.site_id = site_id
     
     local waf_cc = require("waf_cc")
-    waf_cc.record_violation(ip)
-    
     local cc_config = waf_init.get_cc_config(site_id, host)
     
-    -- 错误计数：每次拦截都增加错误计数
-    if cc_config and cc_config.error_limit and cc_config.error_limit.enabled then
-        local window = cc_config.error_limit.period or 60
-        waf_cc.increment_error_count(ip, window)
-    end
+    -- 如果是因为"已封锁"状态被拦截，不重复计数
+    local is_already_blocked = (attack_info.cc_module == "blocked")
     
-    -- CC 攻击自动拉黑逻辑
-    -- 根据触发攻击的子模块的 blockTime 决定是否拉黑
-    -- blockTime = 0: 不拉黑
-    -- blockTime > 0: 拉黑，时长为 blockTime 秒
-    if attack_info.attack_type == "cc_attack" and cc_config then
-        local block_time = 0
+    if not is_already_blocked then
+        -- 记录违规，使用配置的容忍度统计周期
+        local tolerance_period = cc_config and cc_config.tolerance and cc_config.tolerance.period
+        waf_cc.record_violation(ip, tolerance_period)
         
-        -- 判断是哪个子模块触发的攻击
-        if attack_info.cc_module == "frequency" and cc_config.frequency then
-            block_time = cc_config.frequency.blockTime or 0
-        elseif attack_info.cc_module == "error_limit" and cc_config.error_limit then
-            block_time = cc_config.error_limit.blockTime or 0
-        elseif attack_info.cc_module == "tolerance" and cc_config.tolerance then
-            block_time = cc_config.tolerance.blockTime or 0
+        -- 错误计数：每次拦截都增加错误计数
+        if cc_config and cc_config.error_limit and cc_config.error_limit.enabled then
+            local window = cc_config.error_limit.period or 60
+            waf_cc.increment_error_count(ip, window)
         end
         
-        -- blockTime > 0 时执行自动拉黑
-        if block_time > 0 then
-            waf_cc.add_ip_to_blacklist(ip, block_time, reason)
+        -- CC 攻击自动拉黑逻辑
+        -- 根据触发攻击的子模块的 blockTime 决定是否拉黑
+        -- blockTime = 0: 不拉黑
+        -- blockTime > 0: 拉黑，时长为 blockTime 秒
+        if attack_info.attack_type == "cc_attack" and cc_config then
+            local block_time = 0
+            
+            -- 判断是哪个子模块触发的攻击
+            if attack_info.cc_module == "frequency" and cc_config.frequency then
+                block_time = cc_config.frequency.blockTime or 0
+            elseif attack_info.cc_module == "error_limit" and cc_config.error_limit then
+                block_time = cc_config.error_limit.blockTime or 0
+            elseif attack_info.cc_module == "tolerance" and cc_config.tolerance then
+                block_time = cc_config.tolerance.blockTime or 0
+            end
+            
+            -- blockTime > 0 时执行自动拉黑
+            if block_time > 0 then
+                waf_cc.add_ip_to_blacklist(ip, block_time, reason)
+            end
         end
     end
     
@@ -335,11 +350,70 @@ function _M.check_attack_rules(site_id, host)
     local ua = waf_utils.get_user_agent()
     local method = waf_utils.get_request_method()
     
+    -- 异常评分阈值（参考 OWASP CRS 默认值 5）
+    local ANOMALY_THRESHOLD = 5
+    
+    -- 严重度分数映射（参考 OWASP CRS）
+    local severity_scores = {
+        critical = 5,
+        high = 4,
+        medium = 3,
+        low = 1
+    }
+    
+    -- 位置权重：URL 参数权重最高，Header 权重降低
+    local target_weights = {
+        url = 1.0,
+        post = 1.0,
+        cookie = 0.8,
+        header = 0.5
+    }
+    
     local function check_mode_enabled(rule_type)
         if not rule_config[rule_type] then
             return false
         end
         return rule_config[rule_type].mode ~= 0
+    end
+    
+    local function get_severity_score(severity)
+        return severity_scores[severity] or severity_scores.medium
+    end
+    
+    local function get_target_weight(target)
+        return target_weights[target] or 1.0
+    end
+    
+    -- 收集所有命中规则和累计分数
+    local total_score = 0
+    local matched_info = nil
+    local highest_score = 0
+    
+    local function add_match(attack_type, attack_name, target, rule)
+        local base_score = get_severity_score(rule.severity)
+        local weight = get_target_weight(target)
+        local score = base_score * weight
+        total_score = total_score + score
+        
+        -- 记录最高分的匹配（作为主要拦截原因）
+        if score > highest_score then
+            highest_score = score
+            matched_info = {
+                type = attack_type,
+                reason = attack_name .. "(" .. target .. "): " .. rule.name,
+                rule_id = rule.rule_id,
+                rule_name = rule.name,
+                matched_pattern = rule.pattern,
+                severity = rule.severity,
+                score = score
+            }
+        end
+        
+        -- critical/high 级别直接拦截（单条分数已达阈值）
+        if score >= ANOMALY_THRESHOLD then
+            return true
+        end
+        return false
     end
     
     local function check_rule_category(content, target, category_code, attack_type, attack_name)
@@ -349,14 +423,10 @@ function _M.check_attack_rules(site_id, host)
         
         local blocked, rule = waf_rules.check_rules_by_category(content, target, category_code)
         if blocked and rule then
-            return true, {
-                type = attack_type,
-                reason = attack_name .. "(" .. target .. "): " .. rule.name,
-                rule_id = rule.rule_id,
-                rule_name = rule.name,
-                matched_pattern = rule.pattern,
-                severity = rule.severity
-            }
+            local immediate = add_match(attack_type, attack_name, target, rule)
+            if immediate then
+                return true, matched_info
+            end
         end
         return false, nil
     end
@@ -380,6 +450,7 @@ function _M.check_attack_rules(site_id, host)
         {code = "bot", attack_type = "bot", attack_name = "Bot检测", check_key = "bot"},
     }
     
+    -- URL 参数检测
     for _, cat in ipairs(categories) do
         if check_mode_enabled(cat.check_key) then
             local target = "url"
@@ -398,20 +469,64 @@ function _M.check_attack_rules(site_id, host)
         end
     end
     
+    -- POST/PUT/PATCH Body 检测
     if (method == "POST" or method == "PUT" or method == "PATCH") then
         local body = waf_utils.get_request_body()
         if body and body ~= "" then
-            for _, cat in ipairs(categories) do
-                if check_mode_enabled(cat.check_key) and cat.code ~= "scan" and cat.code ~= "bot" and cat.code ~= "file" then
-                    local blocked, info = check_rule_category(body, "post", cat.code, cat.attack_type, cat.attack_name)
-                    if blocked then
-                        return true, info
+            local content_type = ngx_var.content_type or ""
+            local is_json = string.find(string.lower(content_type), "application/json") ~= nil
+            
+            if is_json then
+                -- JSON 请求：使用智能解析，跳过长文本字段，使用置信度评分
+                local json_blocked, json_rule, json_score = waf_rules.check_json_body_rules_public(body, "post", rule_config, check_mode_enabled)
+                if json_blocked and json_rule then
+                    local attack_type = "command_injection"
+                    local attack_name = "命令注入检测"
+                    local category = json_rule.category or "cmd"
+                    local category_map = {
+                        sql = {type = "sql_injection", name = "SQL注入检测"},
+                        xss = {type = "xss", name = "XSS检测"},
+                        cmd = {type = "command_injection", name = "命令注入检测"},
+                        path = {type = "path_traversal", name = "路径遍历检测"},
+                    }
+                    if category_map[category] then
+                        attack_type = category_map[category].type
+                        attack_name = category_map[category].name
+                    end
+                    return true, {
+                        type = attack_type,
+                        reason = attack_name .. "(post): " .. json_rule.name,
+                        rule_id = json_rule.rule_id,
+                        rule_name = json_rule.name,
+                        matched_pattern = json_rule.pattern,
+                        severity = json_rule.severity
+                    }
+                elseif json_blocked == nil then
+                    -- JSON 解析失败，回退到原始 body 检测
+                    for _, cat in ipairs(categories) do
+                        if check_mode_enabled(cat.check_key) and cat.code ~= "scan" and cat.code ~= "bot" and cat.code ~= "file" then
+                            local blocked, info = check_rule_category(body, "post", cat.code, cat.attack_type, cat.attack_name)
+                            if blocked then
+                                return true, info
+                            end
+                        end
+                    end
+                end
+            else
+                -- 非 JSON 请求：使用异常评分检测
+                for _, cat in ipairs(categories) do
+                    if check_mode_enabled(cat.check_key) and cat.code ~= "scan" and cat.code ~= "bot" and cat.code ~= "file" then
+                        local blocked, info = check_rule_category(body, "post", cat.code, cat.attack_type, cat.attack_name)
+                        if blocked then
+                            return true, info
+                        end
                     end
                 end
             end
         end
     end
     
+    -- Cookie 检测
     if cookies ~= "" then
         for _, cat in ipairs(categories) do
             if check_mode_enabled(cat.check_key) and (cat.code == "sql" or cat.code == "xss") then
@@ -421,6 +536,12 @@ function _M.check_attack_rules(site_id, host)
                 end
             end
         end
+    end
+    
+    -- 异常评分判定：累计分数超过阈值则拦截
+    if total_score >= ANOMALY_THRESHOLD and matched_info then
+        matched_info.reason = matched_info.reason .. " [异常评分:" .. string.format("%.1f", total_score) .. "/" .. ANOMALY_THRESHOLD .. "]"
+        return true, matched_info
     end
     
     return false, nil

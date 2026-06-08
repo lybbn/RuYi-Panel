@@ -95,6 +95,7 @@ def resolve_tools(
             logger.info(f'意图路由(AI): 闲聊, 仅加载{len(tool_names)}个基础工具')
             return tool_names, None
 
+    from apps.sysai.agent.toolsets import _is_panel_general_question
     ts_names = match_toolsets_by_keywords(user_input)
     if ts_names:
         tool_names = resolve_tools_by_toolsets(ts_names)
@@ -109,6 +110,13 @@ def resolve_tools(
             logger.info(f'意图路由: 检测到crontab意图, 移除Todo工具, 保留crontab工具')
 
         logger.info(f'意图路由(关键词): 匹配Toolset {ts_names}, 加载{len(tool_names)}个工具')
+        return tool_names, None
+
+    # 检测通用面板问题（如意面板如何升级、面板怎么使用等）
+    if _is_panel_general_question(user_input):
+        tool_names = get_minimal_tools()
+        tool_names.extend(t for t in DOC_TOOLS if t not in tool_names)
+        logger.info(f'意图路由: 检测到通用面板问题, 加载文档工具, 共{len(tool_names)}个工具')
         return tool_names, None
 
     tool_names = get_minimal_tools()

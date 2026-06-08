@@ -481,7 +481,7 @@ class MonitorDataCollector:
     def _collect_disk_io(cls, now):
         """
         采集磁盘IO数据
-        参考宝塔面板：使用差值计算获取每秒速率
+        使用差值计算获取每秒速率
         """
         try:
             config = MonitorConfig.objects.first()
@@ -591,7 +591,7 @@ class MonitorDataCollector:
     def _collect_network(cls, now):
         """
         采集网络数据
-        参考宝塔面板：使用差值计算获取每秒速率，支持多网卡
+        使用差值计算获取每秒速率，支持多网卡
         """
         try:
             config = MonitorConfig.objects.first()
@@ -735,7 +735,7 @@ class MonitorDataCollector:
     
     @classmethod
     def _get_top_processes(cls, sort_by='cpu', limit=5):
-        """获取占用资源最高的进程（参考宝塔：直接读/proc减少对象创建）"""
+        """获取占用资源最高的进程（直接读/proc减少对象创建）"""
         processes = []
         try:
             my_pid = os.getpid()
@@ -771,7 +771,7 @@ class MonitorDataCollector:
     
     @classmethod
     def _auto_clean(cls, config, now):
-        """自动清理过期数据（参考宝塔：每小时检查一次，每周VACUUM一次）"""
+        """自动清理过期数据（每小时检查一次，每周VACUUM一次）"""
         try:
             if cls._last_clean_time and (now - cls._last_clean_time).total_seconds() < 3600:
                 return

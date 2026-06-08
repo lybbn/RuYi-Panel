@@ -29,7 +29,7 @@ from utils.security.files import get_filedir_attribute,batch_operate,get_filenam
 from utils.security.files import get_recycle_config,set_recycle_config,is_recycle_enabled,move_to_recycle,list_recycle_items,restore_recycle_item,delete_recycle_item,clear_recycle_items,batch_recycle_move,batch_recycle_restore,batch_recycle_delete
 from utils.security.no_delete_list import check_in_black_list
 import platform
-from django.http import FileResponse,StreamingHttpResponse
+from django.http import FileResponse,StreamingHttpResponse,HttpResponse
 from django.utils.encoding import escape_uri_path
 import mimetypes
 from utils.streamingmedia_response import stream_video
@@ -315,27 +315,23 @@ class RYFileManageView(CustomAPIView):
                 detected_encoding = detect_file_encoding(path)
                 if detected_encoding:
                     encoding = detected_encoding
-                    with open(path, 'r', encoding=detected_encoding) as file:
-                        content=file.read()
-            except:
+                with open(path, 'r', encoding=encoding, errors='replace') as file:
+                    content = file.read()
+            except PermissionError:
+                return ErrorResponse(msg="文件被占用，暂无法打开")
+            except OSError:
+                return ErrorResponse(msg="操作系统错误，暂无法打开")
+            except Exception:
                 try:
-                    with open(path, 'r', encoding="utf-8", errors='ignore') as file:
+                    with open(path, 'r', encoding="GBK", errors='replace') as file:
                         content = file.read()
-                except PermissionError as e:
+                    encoding = "GBK"
+                except PermissionError:
                     return ErrorResponse(msg="文件被占用，暂无法打开")
-                except OSError as e:
+                except OSError:
                     return ErrorResponse(msg="操作系统错误，暂无法打开")
-                except:
-                    try:
-                        with open(path, 'r', encoding="GBK", errors='ignore') as file:
-                            content = file.read()
-                        encoding = "GBK"
-                    except PermissionError as e:
-                        return ErrorResponse(msg="文件被占用，暂无法打开")
-                    except OSError as e:
-                        return ErrorResponse(msg="操作系统错误，暂无法打开")
-                    except Exception as e:
-                        return ErrorResponse(msg="文件编码不兼容")
+                except Exception:
+                    return ErrorResponse(msg="文件编码不兼容")
             data = {
                 'st_mtime':str(int(os.stat(path).st_mtime)),
                 'content':content,
@@ -384,7 +380,7 @@ class RYFileManageView(CustomAPIView):
 class RYGetFileDownloadView(CustomAPIView):
     """
     get:
-    根据文件token进行文件下载
+    根据文件token进行文件下载（支持断点续传）
     """
     permission_classes = []
     authentication_classes = []
@@ -403,19 +399,83 @@ class RYGetFileDownloadView(CustomAPIView):
             return ErrorResponse(msg="文件不存在")
         if not os.path.isfile(filename):
             return ErrorResponse(msg="参数错误")
+        
         file_size = os.path.getsize(filename)
         content_type, encoding = mimetypes.guess_type(filename)
         content_type = content_type or 'application/octet-stream'
-        response = StreamingHttpResponse(open(filename, 'rb'), content_type=content_type)
-        response['Content-Disposition'] = f'attachment;filename="{escape_uri_path(os.path.basename(filename))}"'
-        response['Content-Length'] = file_size
+        basename = escape_uri_path(os.path.basename(filename))
+        
+        # 生成ETag（基于文件修改时间+大小）
+        file_stat = os.stat(filename)
+        etag_value = '"%s-%s"' % (file_stat.st_mtime_ns, file_stat.st_size)
+        
+        # 检查 If-None-Match（文件未修改则返回304，浏览器缓存验证）
+        if_none_match = request.META.get('HTTP_IF_NONE_MATCH', '')
+        if if_none_match and if_none_match == etag_value:
+            response = HttpResponse(status=304)
+            response['ETag'] = etag_value
+            return response
+        
+        # 检查 If-Match（条件请求验证）
+        if_match = request.META.get('HTTP_IF_MATCH', '')
+        if if_match and if_match != '*' and if_match != etag_value:
+            return HttpResponse(status=412)
+        
+        # 处理 Range 请求（断点续传）
+        range_header = request.META.get('HTTP_RANGE', '').strip()
+        range_match = re.match(r'bytes\s*=\s*(\d+)\s*-\s*(\d*)', range_header, re.I)
+        
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            
+            # 边界检查
+            if start >= file_size:
+                response = HttpResponse(status=416)
+                response['Content-Range'] = f'bytes */{file_size}'
+                return response
+            
+            end = min(end, file_size - 1)
+            content_length = end - start + 1
+            
+            # 使用 FileResponse + 分块迭代器，chunk_size=256KB提升大文件下载稳定性
+            _file = open(filename, 'rb')
+            _file.seek(start)
+            
+            def range_iterator(f, length, chunk_size=262144):
+                remaining = length
+                while remaining > 0:
+                    read_size = min(chunk_size, remaining)
+                    data = f.read(read_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+                f.close()
+            
+            response = FileResponse(
+                range_iterator(_file, content_length),
+                status=206,
+                content_type=content_type
+            )
+            response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+            response['Content-Length'] = content_length
+        else:
+            # 普通下载（无 Range 请求），FileResponse自动流式输出
+            response = FileResponse(open(filename, 'rb'), content_type=content_type)
+            response['Content-Length'] = file_size
+        
+        response['Accept-Ranges'] = 'bytes'
+        response['Content-Disposition'] = f'attachment;filename="{basename}"'
+        response['ETag'] = etag_value
+        response['Cache-Control'] = 'no-cache'
         RuyiAddOpLog(request,msg="【下载文件】%s"%(filename),module="filemg")
         return response
 
 class RYFileDownloadView(CustomAPIView):
     """
     post:
-    文件下载
+    文件下载（支持断点续传）
     """
     permission_classes = [IsAuthenticated]
     
@@ -428,12 +488,68 @@ class RYFileDownloadView(CustomAPIView):
             return ErrorResponse(msg="文件不存在")
         if not os.path.isfile(filename):
             return ErrorResponse(msg="参数错误")
+        
         file_size = os.path.getsize(filename)
-        response = FileResponse(open(filename, 'rb'))
-        response['content_type'] = "application/octet-stream"
-        response['Content-Disposition'] = f'attachment;filename="{escape_uri_path(os.path.basename(filename))}"'
-        # response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        response['Content-Length'] = file_size  # 设置文件大小
+        content_type, encoding = mimetypes.guess_type(filename)
+        content_type = content_type or 'application/octet-stream'
+        basename = escape_uri_path(os.path.basename(filename))
+        
+        # 生成ETag
+        file_stat = os.stat(filename)
+        etag_value = '"%s-%s"' % (file_stat.st_mtime_ns, file_stat.st_size)
+        
+        # 检查 If-None-Match
+        if_none_match = request.META.get('HTTP_IF_NONE_MATCH', '')
+        if if_none_match and if_none_match == etag_value:
+            response = HttpResponse(status=304)
+            response['ETag'] = etag_value
+            return response
+        
+        # 处理 Range 请求（断点续传）
+        range_header = request.META.get('HTTP_RANGE', '').strip()
+        range_match = re.match(r'bytes\s*=\s*(\d+)\s*-\s*(\d*)', range_header, re.I)
+        
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+            
+            if start >= file_size:
+                response = HttpResponse(status=416)
+                response['Content-Range'] = f'bytes */{file_size}'
+                return response
+            
+            end = min(end, file_size - 1)
+            content_length = end - start + 1
+            
+            _file = open(filename, 'rb')
+            _file.seek(start)
+            
+            def range_iterator(f, length, chunk_size=262144):
+                remaining = length
+                while remaining > 0:
+                    read_size = min(chunk_size, remaining)
+                    data = f.read(read_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+                f.close()
+            
+            response = FileResponse(
+                range_iterator(_file, content_length),
+                status=206,
+                content_type=content_type
+            )
+            response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+            response['Content-Length'] = content_length
+        else:
+            response = FileResponse(open(filename, 'rb'), content_type=content_type)
+            response['Content-Length'] = file_size
+        
+        response['Accept-Ranges'] = 'bytes'
+        response['Content-Disposition'] = f'attachment;filename="{basename}"'
+        response['ETag'] = etag_value
+        response['Cache-Control'] = 'no-cache'
         RuyiAddOpLog(request,msg="【下载文件】%s"%(filename),module="filemg")
         return response
 

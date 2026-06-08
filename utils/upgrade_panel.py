@@ -7,11 +7,11 @@
 # +-------------------------------------------------------------------
 # | QQ: 1042594286
 # +-------------------------------------------------------------------
-# | Date: 2025-01-26
+# | Date: 2026-06-02
 # +-------------------------------------------------------------------
 
 # ------------------------------
-# 更新面板 v1.0.0
+# 更新面板 v1.0.1
 # ------------------------------
 
 import os
@@ -23,11 +23,33 @@ from utils.common import ProgramRootPath,GetTmpPath,GetLogsPath,GetPanelPath,Get
 import zipfile
 import time
 import shutil
+import re
+
+def compare_versions(version1, version2):
+    """
+    @name 比较两个版本号
+    @param version1 版本号1
+    @param version2 版本号2
+    @return 1: version1 > version2, 0: version1 == version2, -1: version1 < version2
+    """
+    def normalize(v):
+        return [int(x) for x in re.sub(r'(\.0+)*$', '', v).split('.')]
+    
+    v1 = normalize(version1.strip())
+    v2 = normalize(version2.strip())
+    
+    if v1 > v2:
+        return 1
+    elif v1 < v2:
+        return -1
+    else:
+        return 0
 
 ruyi_panel_path = GetPanelPath()
 ruyi_install_parent_path = GetInstallPath()
 tmp_save_file = GetTmpPath()+'/ruyi.zip'
 tmp_new_panel_dir = GetTmpPath()+"/ruyi"
+tmp_offline_dir = GetTmpPath()+"/offline_upgrade"
 bak_panel_dir = ruyi_install_parent_path+f'/ruyi_bak_{int(time.time())}'
 tmp_updatelog_file = GetLogsPath()+'/ruyi_updatepanel.log'
 web_pack_xd_path = "/web/dist/static"
@@ -441,10 +463,11 @@ def rollback_copy_dir_files(f_list,old_web_list,src_dir,dst_dir):
 
     return False
 
-def update_ruyi_panel():
+def _do_update_panel(zip_file_path, is_offline=False):
     """
-    @name 更新面板
-    @author lybbn
+    @name 面板升级核心逻辑（在线/离线共用）
+    @param zip_file_path 升级zip包路径
+    @param is_offline 是否离线升级
     """
     start_time = time.time()
     start_time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -458,10 +481,12 @@ def update_ruyi_panel():
             return False,"本地开发模式"
     
     try:
+        upgrade_mode = "离线升级" if is_offline else "在线升级"
         print_log(f'{"="*70}')
-        print_log(f'🚀 面板升级开始时间: {start_time_str}')
+        print_log(f'🚀 面板{upgrade_mode}开始时间: {start_time_str}')
         print_log(f'💻 操作系统: {current_os.upper()}')
         print_log(f'📂 面板路径: {ruyi_panel_path}')
+        print_log(f'📦 升级模式: {upgrade_mode}')
         try:
             from ruyi.settings import RUYI_SYSVERSION_FILE
             current_version = ReadFile(RUYI_SYSVERSION_FILE)
@@ -470,22 +495,65 @@ def update_ruyi_panel():
             print_log(f'⏱️ 当前版本: 未知')
         print_log(f'{"="*70}\n')
         clear_update_tmp_files()
-        base_url = "http://download.lybbn.cn/ruyi/install"
-        if current_os == "windows":
-            up_url = '/windows/ruyi.zip'
+        
+        if is_offline:
+            print_log(f'📂 使用离线升级包: {zip_file_path}')
+            if not os.path.exists(zip_file_path):
+                print_log(f'❌ 离线升级包不存在: {zip_file_path}')
+                print_log('ruyi_failed_flag')
+                return False,"离线升级包不存在"
+            shutil.copyfile(zip_file_path, tmp_save_file)
+            print_log(f'✅ 离线升级包已复制到临时目录')
         else:
-            up_url = "/linux/ruyi.zip"
-        download_url = base_url+up_url
-        print_log('正在下载面板文件【ruyi.zip】...')
-        dl_ok,err = download_url_file(download_url,save_path=tmp_save_file)
-        if dl_ok and os.path.exists(tmp_save_file):
+            base_url = "http://download.lybbn.cn/ruyi/install"
+            if current_os == "windows":
+                up_url = '/windows/ruyi.zip'
+            else:
+                up_url = "/linux/ruyi.zip"
+            download_url = base_url+up_url
+            print_log('正在下载面板文件【ruyi.zip】...')
+            dl_ok,err = download_url_file(download_url,save_path=tmp_save_file)
+            if not dl_ok or not os.path.exists(tmp_save_file):
+                err = err if err else "下载失败"
+                print_log(f'❌ 下载失败: {err}')
+                print_log('ruyi_failed_flag')
+                clear_update_tmp_files()
+                _log_upgrade_failed(start_time, err)
+                return False,err
+        
+        if os.path.exists(tmp_save_file):
             print_log('正在解压面板文件【ruyi.zip】...')
             if func_unzip(zip_filename=tmp_save_file,extract_path=tmp_new_panel_dir):
                 file_list = []
                 new_s_dir = tmp_new_panel_dir+"/ruyi"
                 get_file_list(tmp_new_panel_dir,file_list,new_s_dir)
                 
+                if not file_list:
+                    err = "解压后未找到面板文件，请检查升级包结构是否正确"
+                    print_log(f'❌ {err}')
+                    print_log('ruyi_failed_flag')
+                    clear_update_tmp_files()
+                    _log_upgrade_failed(start_time, err)
+                    return False, err
+                
                 print_log(f'📂 解压完成！共 {len(file_list)} 个文件')
+                
+                new_version_file = os.path.join(new_s_dir, 'sysVersion.ry')
+                if os.path.exists(new_version_file):
+                    new_version = ReadFile(new_version_file).strip()
+                    if current_version and new_version:
+                        version_cmp = compare_versions(new_version, current_version)
+                        if version_cmp < 0:
+                            err = f"版本校验失败：升级包版本({new_version})不能低于当前版本({current_version})，不允许降级"
+                            print_log(f'❌ {err}')
+                            print_log('ruyi_failed_flag')
+                            clear_update_tmp_files()
+                            _log_upgrade_failed(start_time, err)
+                            return False, err
+                        if version_cmp == 0:
+                            print_log(f'⚠️ 同版本覆盖安装：{current_version} → {new_version}')
+                        else:
+                            print_log(f'✅ 版本校验通过：{current_version} → {new_version}')
                 
                 old_web_static_list = []
                 get_file_list(web_pack_path,old_web_static_list,ruyi_panel_path)
@@ -530,19 +598,29 @@ def update_ruyi_panel():
                         print_log('ruyi_failed_flag')
                     else:
                         clear_update_tmp_files()
+                        DeleteDir(tmp_offline_dir)
                         
                         end_time = time.time()
                         end_time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         cost_time = round(end_time - start_time, 2)
                         
                         print_log(f'\n{"="*70}')
-                        print_log(f'✅ 面板升级结束时间: {end_time_str}')
+                        print_log(f'✅ 面板{upgrade_mode}结束时间: {end_time_str}')
                         print_log(f'⏱️ 总耗时: {cost_time}秒 ({round(cost_time/60, 2)}分钟)')
                         print_log(f'{"="*70}\n')
                         
                         last_update_op()
                         
                         print_log('ruyi_successful_flag')
+                        print_log('\n🔄 升级成功，3秒后自动重启面板...')
+                        time.sleep(3)
+                        try:
+                            from utils.server.system import system
+                            system.RestartRuyi()
+                            print_log('✅ 面板重启命令已执行')
+                        except Exception as restart_err:
+                            print_log(f'⚠️ 自动重启失败: {str(restart_err)}，请手动重启面板')
+                        
                         return True,err
                 else:
                     err="备份失败"
@@ -551,22 +629,12 @@ def update_ruyi_panel():
                 err="解压失败"
                 print_log('ruyi_failed_flag')
         else:
-            err = err if err else "下载失败"
-            print_log(f'❌ 下载失败: {err}')
+            err = "升级包文件不存在"
+            print_log(f'❌ {err}')
             print_log('ruyi_failed_flag')
         
         clear_update_tmp_files()
-        
-        end_time = time.time()
-        end_time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        cost_time = round(end_time - start_time, 2)
-        
-        print_log(f'\n{"="*70}')
-        print_log(f'❌ 面板升级结束时间: {end_time_str}')
-        print_log(f'⏱️ 总耗时: {cost_time}秒 ({round(cost_time/60, 2)}分钟)')
-        print_log(f'❌ 失败原因: {err}')
-        print_log(f'{"="*70}\n')
-        print_log('ruyi_failed_flag')
+        _log_upgrade_failed(start_time, "升级失败")
         
         return False,err
     except Exception as e:
@@ -574,6 +642,32 @@ def update_ruyi_panel():
         print_log(f'❌ 详细堆栈:\n{traceback.format_exc()}')
         print_log('ruyi_failed_flag')
         return False, str(e)
+
+def _log_upgrade_failed(start_time, err):
+    end_time = time.time()
+    end_time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cost_time = round(end_time - start_time, 2)
+    print_log(f'\n{"="*70}')
+    print_log(f'❌ 面板升级结束时间: {end_time_str}')
+    print_log(f'⏱️ 总耗时: {cost_time}秒 ({round(cost_time/60, 2)}分钟)')
+    print_log(f'❌ 失败原因: {err}')
+    print_log(f'{"="*70}\n')
+    print_log('ruyi_failed_flag')
+
+def update_ruyi_panel():
+    """
+    @name 在线更新面板
+    @author lybbn
+    """
+    return _do_update_panel(zip_file_path="", is_offline=False)
+
+def update_ruyi_panel_offline(zip_file_path):
+    """
+    @name 离线更新面板
+    @param zip_file_path 离线升级包路径
+    @author lybbn
+    """
+    return _do_update_panel(zip_file_path=zip_file_path, is_offline=True)
 
 if __name__ == '__main__':
     update_ruyi_panel()

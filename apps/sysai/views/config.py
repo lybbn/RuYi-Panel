@@ -277,44 +277,4 @@ class AIChatExportView(CustomAPIView):
         return SuccessResponse(data=export_data)
 
 
-class AICuratorView(CustomAPIView):
-    permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        from apps.sysai.agent.curator import skill_curator
-        try:
-            status = skill_curator.get_curator_status()
-            return DetailResponse(data=status)
-        except Exception as e:
-            logger.error(f'获取curator状态失败: {e}', exc_info=True)
-            return ErrorResponse(msg=f'获取状态失败: {str(e)}')
-
-    def post(self, request):
-        from apps.sysai.agent.curator import skill_curator
-        req_data = get_parameter_dic(request)
-        action = req_data.get('action', 'maintenance')
-
-        try:
-            if action == 'maintenance':
-                dry_run = req_data.get('dry_run', False)
-                result = skill_curator.run_maintenance(dry_run=dry_run)
-                return DetailResponse(data=result, msg='维护完成')
-            elif action == 'prune':
-                dry_run = req_data.get('dry_run', False)
-                pruned = skill_curator.prune_stale_skills(dry_run=dry_run)
-                return DetailResponse(data={'pruned': pruned}, msg=f'清理{len(pruned)}个技能')
-            elif action == 'evolve':
-                evolved = skill_curator.auto_evolve()
-                return DetailResponse(data={'evolved': evolved}, msg=f'进化{len(evolved)}个技能')
-            elif action == 'validate':
-                from apps.sysai.agent.curator import skill_curator
-                skill_name = req_data.get('skill_name', '')
-                if not skill_name:
-                    return ErrorResponse(msg='缺少技能名称')
-                result = skill_curator.validate_skill(skill_name)
-                return DetailResponse(data=result)
-            else:
-                return ErrorResponse(msg=f'未知操作: {action}')
-        except Exception as e:
-            logger.error(f'curator操作失败: {e}', exc_info=True)
-            return ErrorResponse(msg=f'操作失败: {str(e)}')

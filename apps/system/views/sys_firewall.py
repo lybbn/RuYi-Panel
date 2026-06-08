@@ -17,6 +17,7 @@
 # ------------------------------
 
 import re
+import json
 from rest_framework.views import APIView
 from utils.customView import CustomAPIView
 from utils.jsonResponse import SuccessResponse,ErrorResponse,DetailResponse
@@ -118,6 +119,53 @@ class RYSysFirewallView(CustomAPIView):
                 return DetailResponse(msg="删除成功")
             else:
                 return ErrorResponse(msg="删除失败")
+        elif action == "batch_del_rule":
+            rules_str = reqData.get("rules","")
+            if not rules_str:
+                return ErrorResponse(msg="参数错误")
+            try:
+                rules = json.loads(rules_str)
+            except:
+                return ErrorResponse(msg="参数格式错误")
+            if not isinstance(rules, list) or len(rules) == 0:
+                return ErrorResponse(msg="参数错误")
+            success_count = 0
+            fail_count = 0
+            need_reload = False
+            for rule in rules:
+                if is_windows:
+                    name = rule.get("name","")
+                    if not name:
+                        fail_count += 1
+                        continue
+                    protocol = rule.get("protocol","")
+                    localport = rule.get("localport","")
+                    isok = system.DelFirewallRule(param={'name':name,'protocol':protocol,'localport':localport})
+                else:
+                    handle = rule.get("handle","")
+                    if not handle:
+                        fail_count += 1
+                        continue
+                    protocol = rule.get("protocol","")
+                    localport = rule.get("port","")
+                    address = rule.get("address","")
+                    isok = system.DelFirewallRule(param={'address':address,'protocol':protocol,'localport':localport,'handle':handle},is_reload=False)
+                    if isok:
+                        need_reload = True
+                if isok:
+                    success_count += 1
+                else:
+                    fail_count += 1
+            if not is_windows and need_reload:
+                from utils.server.linux import ReloadFirewall
+                ReloadFirewall()
+            RuyiAddOpLog(request,msg=f"【安全】-【系统防火墙】- 批量删除规则 => 共{len(rules)}条，成功{success_count}条，失败{fail_count}条",module="safe")
+            if fail_count == 0:
+                return DetailResponse(msg=f"批量删除成功，共删除{success_count}条规则")
+            elif success_count == 0:
+                return ErrorResponse(msg=f"批量删除失败，共{fail_count}条规则删除失败")
+            else:
+                return DetailResponse(msg=f"批量删除完成，成功{success_count}条，失败{fail_count}条")
         elif action == "add_rule":
             if is_windows:
                 name = reqData.get("name","")

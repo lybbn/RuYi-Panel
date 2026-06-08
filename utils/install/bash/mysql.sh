@@ -19,13 +19,27 @@ install_type=$3
 mysql_version_2=""
 
 cpu_core=$(cat /proc/cpuinfo|grep processor|wc -l)
-IsCentos7=$(cat /etc/redhat-release | grep ' 7.' | grep -iE 'centos')
-IsCentos8=$(cat /etc/redhat-release | grep ' 8.' | grep -iE 'centos|Red Hat')
-IsCentosStream8=$(cat /etc/redhat-release |grep -i "Centos Stream"|grep 8)
-IsCentos9=$(cat /etc/redhat-release | grep ' 9.' | grep -iE 'centos|Red Hat')
-IsCentosStream9=$(cat /etc/redhat-release |grep -i "Centos Stream"|grep 9)
-IsAliYunOS=$(cat /etc/redhat-release |grep "Alibaba Cloud Linux release")
+IsCentos7=""
+IsCentos8=""
+IsCentosStream8=""
+IsCentos9=""
+IsCentosStream9=""
+IsAliYunOS=""
+IsDebian=0
 ARCH=$(uname -m)
+
+if [ -f /etc/redhat-release ]; then
+    IsCentos7=$(cat /etc/redhat-release | grep ' 7.' | grep -iE 'centos')
+    IsCentos8=$(cat /etc/redhat-release | grep ' 8.' | grep -iE 'centos|Red Hat')
+    IsCentosStream8=$(cat /etc/redhat-release |grep -i "Centos Stream"|grep 8)
+    IsCentos9=$(cat /etc/redhat-release | grep ' 9.' | grep -iE 'centos|Red Hat')
+    IsCentosStream9=$(cat /etc/redhat-release |grep -i "Centos Stream"|grep 9)
+    IsAliYunOS=$(cat /etc/redhat-release |grep "Alibaba Cloud Linux release")
+fi
+
+if [ -f /etc/debian_version ] || grep -qi 'debian\|ubuntu' /etc/os-release 2>/dev/null; then
+    IsDebian=1
+fi
 
 if [ -z "${cpu_core}" ]; then
     cpu_core="1"
@@ -290,6 +304,11 @@ Install_MySQL_Binary() {
     fi
     chown -R mysql:mysql /ruyi/server/data
     chgrp -R mysql /ruyi/server/mysql/.
+    rm -f /ruyi/server/mysql/my.cnf
+    rm -rf /ruyi/server/mysql/my.cnf.d
+    rm -rf /etc/mysql
+    rm -f /etc/my.cnf
+    rm -rf /etc/my.cnf.d
     Service_Add
 }
 

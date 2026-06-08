@@ -287,6 +287,7 @@ class WafConfigSync:
                     'severity': rule.severity,
                     'pattern': rule.pattern,
                     'targets': rule.get_targets() if hasattr(rule, 'get_targets') else [],
+                    'exclude_urls': rule.get_exclude_urls() if hasattr(rule, 'get_exclude_urls') else [],
                     'description': rule.description,
                     'enabled': rule.enabled,
                     'is_builtin': rule.is_builtin,
@@ -306,6 +307,15 @@ class WafConfigSync:
         同步IP黑白名单
         """
         try:
+            # 将已过期的临时封禁IP标记为禁用（保留记录便于审计排查）
+            from django.utils import timezone
+            expired_count = WafIpList.objects.filter(
+                list_type='temp',
+                expire_at__isnull=False,
+                expire_at__lt=timezone.now(),
+                enabled=True
+            ).update(enabled=False)
+            
             global_whitelist = WafIpList.objects.filter(
                 list_type='whitelist', 
                 enabled=True, 
@@ -313,7 +323,7 @@ class WafConfigSync:
             ).exclude(remark='__GLOBAL_SWITCH__')
             
             global_blacklist = WafIpList.objects.filter(
-                list_type='blacklist', 
+                list_type__in=['blacklist', 'temp'], 
                 enabled=True, 
                 site_id__isnull=True
             ).exclude(remark='__GLOBAL_SWITCH__')
@@ -324,7 +334,7 @@ class WafConfigSync:
             ).exclude(site_id__isnull=True).exclude(remark='__GLOBAL_SWITCH__')
             
             site_blacklist = WafIpList.objects.filter(
-                list_type='blacklist', 
+                list_type__in=['blacklist', 'temp'], 
                 enabled=True
             ).exclude(site_id__isnull=True).exclude(remark='__GLOBAL_SWITCH__')
             

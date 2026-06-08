@@ -14,7 +14,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         print(f"正在同步models到【数据库】")
-        call_command('makemigrations')
+        call_command('makemigrations', interactive=False)
         call_command('migrate', database='default')
         call_command('migrate', database='logs')
         call_command('migrate', database='tasks')
@@ -26,4 +26,5 @@ class Command(BaseCommand):
         call_command('migrate', database='waf')
         call_command('migrate', database='waf_logs')
         call_command('migrate', database='ai')
+        call_command('migrate', database='node')
         print("同步models到数据库完成！")

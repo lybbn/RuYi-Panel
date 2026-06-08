@@ -1,0 +1,21 @@
+services:
+  RUYI_DKAPP:
+    image: adminer:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    environment:
+      ADMINER_DEFAULT_SERVER: ${ADMINER_DEFAULT_SERVER}
+    ports:
+      - ${HOST_IP}:${ADMINER_PORT}:8080
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

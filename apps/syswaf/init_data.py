@@ -116,6 +116,8 @@ def get_default_rules():
         for rule in rules:
             if isinstance(rule.get('targets'), list):
                 rule['targets'] = json.dumps(rule['targets'])
+            if isinstance(rule.get('exclude_urls'), list):
+                rule['exclude_urls'] = json.dumps(rule['exclude_urls'])
         return rules
     
     logger.error("加载本地规则失败，waf_rules.json文件可能不存在或损坏")
@@ -211,6 +213,8 @@ def init_waf_data(force=False):
             for rule in rules_data:
                 if isinstance(rule.get('targets'), list):
                     rule['targets'] = json.dumps(rule['targets'])
+                if isinstance(rule.get('exclude_urls'), list):
+                    rule['exclude_urls'] = json.dumps(rule['exclude_urls'])
         else:
             # 使用本地默认规则
             if force:
@@ -224,7 +228,7 @@ def init_waf_data(force=False):
                 return (0, 0, False, False, False)
         
         for cat_data in categories_data:
-            _, created = WafRuleCategory.objects.get_or_create(
+            _, created = WafRuleCategory.objects.update_or_create(
                 code=cat_data['code'],
                 defaults=cat_data
             )
@@ -232,7 +236,9 @@ def init_waf_data(force=False):
                 categories_created += 1
         
         for rule_data in rules_data:
-            _, created = WafRule.objects.get_or_create(
+            # 内置规则使用 update_or_create，确保升级时 pattern 等字段也能更新
+            # 用户自定义的内置规则（is_builtin=True）也会被更新，保持与官方规则一致
+            _, created = WafRule.objects.update_or_create(
                 rule_id=rule_data['rule_id'],
                 defaults=rule_data
             )

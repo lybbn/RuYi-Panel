@@ -158,12 +158,6 @@ class SkillManage:
 
         result = skill_manager.import_skill_from_content(name, content, description)
         if result.get('status'):
-            try:
-                from apps.sysai.agent.skill_evolution import skill_evolution
-                skill_evolution.record_skill_created(name, trigger_keywords)
-            except Exception:
-                pass
-
             logger.info(f'技能 [{name}] 创建成功')
             return self._success(f'技能 [{name}] 创建成功。下次遇到类似任务时，系统会自动激活此技能。')
         return self._error(f'技能创建失败: {result.get("msg", "未知错误")}')
@@ -206,12 +200,6 @@ class SkillManage:
         except Exception as e:
             return self._error(f'写入技能文件失败: {e}')
 
-        try:
-            from apps.sysai.agent.skill_evolution import skill_evolution
-            skill_evolution.record_skill_refined(name, 'patch')
-        except Exception:
-            pass
-
         logger.info(f'技能 [{name}] patch修改成功')
         return self._success(f'技能 [{name}] 已更新（patch模式）')
 
@@ -230,12 +218,6 @@ class SkillManage:
 
         result = skill_manager.import_skill_from_content(name, content)
         if result.get('status'):
-            try:
-                from apps.sysai.agent.skill_evolution import skill_evolution
-                skill_evolution.record_skill_refined(name, 'edit')
-            except Exception:
-                pass
-
             logger.info(f'技能 [{name}] edit修改成功')
             return self._success(f'技能 [{name}] 已完整更新（edit模式）')
         return self._error(f'技能更新失败: {result.get("msg", "未知错误")}')

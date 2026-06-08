@@ -19,8 +19,8 @@ class Command(BaseCommand):
         parser.add_argument(
             'action', 
             type=str, 
-            choices=['set_safepath','set_secretkey','set_port','set_username','get_version','get_panelinfo'], 
-            help='选择要执行的操作：set_safepath、set_secretkey、set_port、set_username、get_version、get_panelinfo'
+            choices=['set_safepath','set_secretkey','set_port','set_username','get_version','get_panelinfo','disable_otp'], 
+            help='选择要执行的操作：set_safepath、set_secretkey、set_port、set_username、get_version、get_panelinfo、disable_otp'
         )
         
         parser.add_argument('-d','--data',help='参数')
@@ -39,6 +39,8 @@ class Command(BaseCommand):
             self.setPanelUsername(options)
         elif action == 'get_panelinfo':
             self.getSysInfo()
+        elif action == 'disable_otp':
+            self.disableOtp()
         else:
             self.stdout.write(self.style.ERROR('无效的命令'))
     
@@ -155,3 +157,11 @@ class Command(BaseCommand):
             return
         WriteFile(settings.RUYI_PORT_FILE,port)
         print("已设置面板访问端口：%s，需重启如意面板生效！！！"%str(port))
+
+    def disableOtp(self):
+        from utils.security.otp import disable_otp, is_otp_enabled
+        if not is_otp_enabled():
+            print("OTP两步验证未启用，无需关闭")
+            return
+        disable_otp()
+        print("已关闭OTP两步验证，登录时将不再需要动态口令")

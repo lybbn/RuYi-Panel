@@ -121,6 +121,15 @@ class CustomModelViewSet(ModelViewSet):
             return action_serializer_class
         return super().get_serializer_class()
 
+    def get_serializer(self, *args, **kwargs):
+        request = kwargs.pop('request', None)
+        if request is not None:
+            context = kwargs.get('context', {})
+            if 'request' not in context:
+                context['request'] = request
+                kwargs['context'] = context
+        return super().get_serializer(*args, **kwargs)
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data, request=request)
         serializer.is_valid(raise_exception=True)
@@ -164,7 +173,7 @@ class CustomModelViewSet(ModelViewSet):
                 'attribute on the view correctly.' %
                 (self.__class__.__name__, lookup_url_kwarg)
         )
-        filter_kwargs = {f"{self.lookup_field}__in": self.kwargs[lookup_url_kwarg].split(',')}
+        filter_kwargs = {f"{self.lookup_field}__in": str(self.kwargs[lookup_url_kwarg]).split(',')}
         obj = queryset.filter(**filter_kwargs)
         self.check_object_permissions(self.request, obj)
         return obj

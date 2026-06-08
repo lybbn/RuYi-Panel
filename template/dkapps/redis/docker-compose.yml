@@ -1,0 +1,23 @@
+services:
+  RUYI_DKAPP:
+    image: redis:${VERSION}
+    deploy:
+      resources:
+        limits:
+          cpus: ${CPU}
+          memory: ${MEM}
+    restart: always
+    command: redis-server /usr/local/etc/redis/redis.conf
+    ports:
+      - ${HOST_IP}:${REDIS_PORT}:6379
+    volumes:
+      - ${APP_PATH}/data:/data
+      - ${APP_PATH}/redis.conf:/usr/local/etc/redis/redis.conf
+    labels:
+      createdBy: "ruyi_apps"
+    networks:
+      - ruyi-network
+
+networks:
+  ruyi-network:
+    external: true

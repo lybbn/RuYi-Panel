@@ -52,6 +52,9 @@ def register_all_alert_tasks():
         # 注册面板登录检测（5分钟）
         _register_panel_login_check_task()
         
+        # 注册WAF攻击尖峰检测（5分钟）
+        _register_waf_attack_check_task()
+        
         logger.info("所有告警检查任务注册完成")
     except Exception as e:
         logger.error(f"注册告警检查任务失败: {e}")
@@ -779,3 +782,72 @@ def check_single_website(task_id):
         remove_website_check_task(task_id)
     except Exception as e:
         logger.error(f"检查网站失败 [{task_id}]: {e}")
+
+
+ALERT_WAF_CHECK_JOB_ID = 'alert_waf_attack_check'
+
+
+def _register_waf_attack_check_task():
+    """注册WAF攻击尖峰检测任务"""
+    try:
+        existing_job = scheduler.get_job(ALERT_WAF_CHECK_JOB_ID)
+        if existing_job:
+            logger.info(f"WAF攻击检测任务已存在")
+            return
+
+        scheduler.add_job(
+            func=check_waf_attack,
+            trigger=IntervalTrigger(minutes=5),
+            id=ALERT_WAF_CHECK_JOB_ID,
+            name='WAF攻击尖峰检测',
+            replace_existing=True,
+            misfire_grace_time=300
+        )
+        logger.info(f"WAF攻击检测任务注册成功")
+    except Exception as e:
+        logger.error(f"注册WAF攻击检测任务失败: {e}")
+
+
+def check_waf_attack():
+    """
+    检查WAF攻击尖峰
+    逻辑：每5分钟检查一次，统计5分钟内达到最低告警级别的攻击数量，
+    超过阈值（默认10次）则通过sysalert发送通知
+    """
+    try:
+        from apps.syswaf.models import WafGlobalConfig, WafAttackLog
+
+        global_config = WafGlobalConfig.get_instance()
+        if not global_config.alert_enabled:
+            return
+
+        # 确定严重级别过滤
+        severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
+        min_severity = global_config.alert_min_severity or 'high'
+        min_order = severity_order.get(min_severity, 1)
+        severity_levels = [k for k, v in severity_order.items() if v <= min_order]
+
+        # 统计最近5分钟的攻击数量
+        time_threshold = timezone.now() - timedelta(minutes=5)
+        attack_count = WafAttackLog.objects.filter(
+            create_at__gte=time_threshold,
+            severity__in=severity_levels
+        ).count()
+
+        # 阈值：5分钟内达到10次攻击即触发
+        threshold = 10
+
+        from .models import AlertTask
+        task = AlertTask.objects.filter(task_type='waf_attack', is_enabled=True).first()
+
+        if attack_count >= threshold:
+            if not task:
+                return  # 没有配置告警任务，不发送
+            content = f"检测到WAF攻击尖峰：最近5分钟内共 {attack_count} 次攻击（级别≥{dict(WafGlobalConfig.SEVERITY_CHOICES).get(min_severity, min_severity)}），请及时查看"
+            _trigger_alert(task, content)
+        elif task and task.is_alerting:
+            content = f"WAF攻击已趋于平缓，最近5分钟内 {attack_count} 次攻击"
+            _trigger_recovery(task, content)
+
+    except Exception as e:
+        logger.error(f"WAF攻击检测失败: {e}")

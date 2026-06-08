@@ -66,6 +66,8 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
             if self.get_compose_log_task:self.get_compose_log_task.cancel()
         if hasattr(self, 'get_update_log_task'):
             if self.get_update_log_task:self.get_update_log_task.cancel()
+        if hasattr(self, 'container_upgrade_task'):
+            if self.container_upgrade_task:self.container_upgrade_task.cancel()
 
     @classmethod
     async def decode_json(cls, text_data):
@@ -80,6 +82,8 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
             if action == 'docker_pull':
                 # await self.docker_pull(data) #耗时任务堵塞
                 self.docker_pull_task = asyncio.create_task(self.docker_pull(data))
+            elif action == 'container_upgrade':
+                self.container_upgrade_task = asyncio.create_task(self.container_upgrade(data))
             elif action == 'runcmd':
                 cmd=data.get('cmd','')
                 self.rum_cmd_task = asyncio.create_task(self.run_command(cmd))
@@ -128,7 +132,26 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
             else:
                 await self.send_message(action='error',message="")
         except Exception as e:
-            await self.send_message(action='error',message=str(e))
+            await self.send_message(action='error',message="")
+
+    async def container_upgrade(self, cont):
+        try:
+            from utils.ruyiclass.dockerInclude.ry_dk_container import main as dk_container
+            if not cont: cont = {}
+            cont.update({'_ws': self})
+            self._main_loop = asyncio.get_event_loop()
+            client = DockerClient()
+            if not client.client:
+                await self.send_message(action='error', message="Docker连接失败，请检查Docker服务是否启动")
+                return
+            container_client = dk_container(client=client.client)
+            isok, msg = await asyncio.to_thread(container_client.upgrade_ws, cont)
+            if isok:
+                await self.send_message(action='success', message=msg)
+            else:
+                await self.send_message(action='error', message=msg)
+        except Exception as e:
+            await self.send_message(action='error', message=str(e))
 
     async def get_compose_log(self, cont):
         try:
@@ -190,12 +213,26 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
         realtime = cont.get("realtime", True)
         timeout = 60 * 15
         start_time = time.time()
+        stale_threshold = 10
 
-        while not await asyncio.to_thread(os.path.exists, filepath):
+        # 等待日志文件出现且为近期文件
+        while True:
             if time.time() - start_time >= 30:
                 await self.send_message(action='error', message="⏳ 等待日志文件超时，可能升级进程未启动")
                 return
-            await asyncio.sleep(0.2)
+
+            if await asyncio.to_thread(os.path.exists, filepath):
+                mtime = await asyncio.to_thread(os.path.getmtime, filepath)
+                age = time.time() - mtime
+                if age <= stale_threshold:
+                    break
+                try:
+                    content = await asyncio.to_thread(system.GetFileLastNumsLines, filepath, 50)
+                    if success_flag not in content and failed_flag not in content:
+                        break
+                except:
+                    pass
+            await asyncio.sleep(0.3)
 
         if not realtime:
             data = await asyncio.to_thread(system.GetFileLastNumsLines, filepath, lines)
@@ -203,34 +240,49 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
             return
 
         def _read_initial_lines(fp, max_lines):
-            with open(fp, 'r', encoding='utf-8') as f:
-                all_lines = f.readlines()
-                total = len(all_lines)
-                start_idx = max(0, total - max_lines)
+            """高效读取文件最后N行，使用 deque 避免全量加载"""
+            from collections import deque
+            with open(fp, 'rb') as f:
+                last_lines = deque(maxlen=max_lines)
+                byte_offset = 0
+                for line in f:
+                    last_lines.append(line)
+                    byte_offset += len(line)
+                # byte_offset 此时为文件末尾
+                # 计算起始偏移：减去保留行的总字节数
+                start_offset = byte_offset
+                for line in last_lines:
+                    start_offset -= len(line)
                 result = []
-                for i in range(start_idx, total):
-                    result.append(all_lines[i])
-                return result, f.tell()
+                for line in last_lines:
+                    try:
+                        result.append(line.decode('utf-8', errors='replace'))
+                    except Exception:
+                        result.append(line.decode('latin-1'))
+                return result, start_offset
 
-        def _read_new_lines(fp, offset):
+        def _read_new_lines(fp, byte_offset):
+            """从指定字节偏移读取新增完整行，返回行列表和新偏移"""
             new_lines = []
-            new_offset = offset
-            with open(fp, 'r', encoding='utf-8') as f:
-                f.seek(offset)
+            new_offset = byte_offset
+            with open(fp, 'rb') as f:
+                f.seek(byte_offset)
                 while True:
-                    line = f.readline()
-                    if not line:
+                    line_bytes = f.readline()
+                    if not line_bytes:
                         break
-                    if not line.endswith('\n'):
-                        # 读到不完整的行，回退 offset，等下次再读
-                        new_offset = f.tell() - len(line.encode('utf-8'))
+                    if not line_bytes.endswith(b'\n'):
+                        # 不完整的行，不更新偏移，等下次再读
                         break
-                    new_lines.append(line)
-                # 无论是否读到新行，都更新 offset 为当前文件位置
+                    try:
+                        new_lines.append(line_bytes.decode('utf-8', errors='replace'))
+                    except Exception:
+                        new_lines.append(line_bytes.decode('latin-1'))
                 new_offset = f.tell()
             return new_lines, new_offset
 
         last_offset = 0
+        stale_read_count = 0  # 连续读到不完整行的次数
         try:
             initial_lines, last_offset = await asyncio.to_thread(_read_initial_lines, filepath, lines)
             for line in initial_lines:
@@ -245,15 +297,29 @@ class WSTaskConsumer(AsyncWebsocketConsumer):
                     await self.send_message(action='error', message="⚠️ 更新操作超时（15分钟），请检查后台进程或查看日志文件")
                     break
 
+                # 检查文件是否被截断/轮转
                 current_size = await asyncio.to_thread(os.path.getsize, filepath)
+                if current_size < last_offset:
+                    # 文件被截断，重新读取全部内容
+                    last_offset = 0
 
                 if current_size > last_offset:
-                    new_lines, last_offset = await asyncio.to_thread(_read_new_lines, filepath, last_offset)
-                    for line in new_lines:
-                        await self.send_message(message=line)
-                        if success_flag in line or failed_flag in line:
-                            await self.close()
-                            return
+                    new_lines, new_offset = await asyncio.to_thread(_read_new_lines, filepath, last_offset)
+                    if new_lines:
+                        stale_read_count = 0
+                        last_offset = new_offset
+                        for line in new_lines:
+                            await self.send_message(message=line)
+                            if success_flag in line or failed_flag in line:
+                                await self.close()
+                                return
+                    else:
+                        # 读到了数据但没有完整行（不完整行），累加计数
+                        stale_read_count += 1
+                        if stale_read_count > 100:
+                            # 超过30秒（100*0.3s）仍为不完整行，强制跳过
+                            last_offset = new_offset
+                            stale_read_count = 0
 
                 await asyncio.sleep(0.3)
 

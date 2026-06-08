@@ -21,9 +21,11 @@ class CustomAPIView(APIView):
         return super().dispatch(request, *args, **kwargs)
     
     def check_security_path_authed(self, request):
-        # 检查 安全入口
+        # 检查 安全入口（API Key 请求无需安全入口校验，由认证层处理）
         if settings.RUYI_SECURITY_PATH != '/ry' and not request.session.get(security_path_authed_key,False):
-            return ResponseNginx404(state=404)
+            api_key = request.META.get('HTTP_RY_API_KEY') or request.GET.get('api_key')
+            if not api_key:
+                return ResponseNginx404(state=404)
         return None
     
 def check_security_path_authed(view_func):

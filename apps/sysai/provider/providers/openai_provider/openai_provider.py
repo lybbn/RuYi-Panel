@@ -67,8 +67,9 @@ class OpenAIModel(BaseLLMModel):
                     item['tool_call_id'] = msg['tool_call_id']
                 if msg.get('name'):
                     item['name'] = msg['name']
-                if msg.get('reasoning_content'):
-                    item['reasoning_content'] = msg['reasoning_content']
+                # reasoning_content 是模型扩展字段（如DeepSeek思考过程），
+                # 不属于OpenAI API标准，发送给不支持该字段的模型会导致400错误，
+                # 因此不将其放入API请求体
             else:
                 item = {'role': msg.role, 'content': msg.content}
                 if msg.tool_calls:
@@ -77,8 +78,6 @@ class OpenAIModel(BaseLLMModel):
                     item['tool_call_id'] = msg.tool_call_id
                 if msg.name:
                     item['name'] = msg.name
-                if getattr(msg, 'reasoning_content', None):
-                    item['reasoning_content'] = msg.reasoning_content
             result.append(item)
         return result
 

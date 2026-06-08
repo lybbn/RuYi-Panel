@@ -215,15 +215,4 @@ class AISkillDeleteView(CustomAPIView):
         return ErrorResponse(msg=result.get('msg', '删除失败'))
 
 
-class AISkillEvolutionHistoryView(CustomAPIView):
-    permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        try:
-            from apps.sysai.agent.skill_evolution import skill_evolution
-            limit = int(request.query_params.get('limit', 50))
-            history = skill_evolution.get_session_history(limit=limit)
-            return SuccessResponse(data=history, total=len(history))
-        except Exception as e:
-            logger.error(f'获取技能进化历史失败: {e}')
-            return ErrorResponse(msg='获取技能进化历史失败')

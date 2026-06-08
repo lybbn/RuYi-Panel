@@ -937,13 +937,26 @@ class RYSSLManageView(CustomAPIView):
                 renew_status =orderinfo.get("renew_status","") if orderinfo else ""
                 if renew_status == "success":
                     done = True
+                elif renew_status == "failed":
+                    done = True
+                    error = True
                 else:
                     done = False
             log_path = GetLetsencryptLogPath()
+            use_order_log = False
+            if orderinfo and orderinfo.get("over", False):
+                save_path = orderinfo.get("save_path", "")
+                if save_path:
+                    log_filename = 'renew.log' if is_renew else 'apply.log'
+                    order_log_path = os.path.join(save_path, log_filename)
+                    if os.path.exists(order_log_path):
+                        log_path = order_log_path
+                        use_order_log = True
             data = system.GetFileLastNumsLines(log_path,2000)
-            if (isinstance(data,bytes) and b"x"*20 in data) or (isinstance(data,str) and "x"*20 in data):
-                done = True
-                error = True
+            if not use_order_log:
+                if (isinstance(data,bytes) and b"x"*20 in data) or (isinstance(data,str) and "x"*20 in data):
+                    done = True
+                    error = True
             return DetailResponse(data={'data':data,'done': done,'error':error},msg="success")
         return ErrorResponse(msg="类型错误")
             

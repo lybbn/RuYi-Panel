@@ -38,6 +38,7 @@ from utils.sslPem import getCertInfo,getDefaultRuyiSSLPem,forceCreateRuyiSSLPem
 from django.http import FileResponse
 from django.utils.encoding import escape_uri_path
 from utils.upgrade_panel import update_ruyi_panel
+from utils.security.otp import get_otp_config, generate_otp_secret, get_otp_qrcode_base64, save_otp_config, verify_otp_code, is_otp_enabled, disable_otp
 from utils_pro.RyProLoader import load_ryprofunc_extension as proFuncLoader
 from apps.sysdocker.models import RyDockerApps
 from utils.install.install_soft import Ry_Get_Soft_Port
@@ -127,7 +128,11 @@ class RYSysconfigManageView(CustomAPIView):
                 data['api_ip_whitelist'] = api_config.get('api_ip_whitelist', [])
             except:
                 pass
-                
+
+        otp_config = get_otp_config()
+        data['otp_enable'] = otp_config.get('otp_enable', False)
+        data['otp_secret'] = '******' if otp_config.get('otp_secret', '') else ''
+
         return DetailResponse(data=data)
 
     def post(self, request):
@@ -305,6 +310,47 @@ class RYSysconfigManageView(CustomAPIView):
                 return DetailResponse(msg="设置成功")
             except Exception as e:
                 return ErrorResponse(msg=f"保存失败: {str(e)}")
+        elif action == "get_otp_info":
+            otp_config = get_otp_config()
+            data = {
+                'otp_enable': otp_config.get('otp_enable', False),
+                'has_secret': bool(otp_config.get('otp_secret', '')),
+            }
+            return DetailResponse(data=data)
+        elif action == "generate_otp_secret":
+            secret = generate_otp_secret()
+            if not secret:
+                return ErrorResponse(msg="生成OTP密钥失败，请确认pyotp已安装")
+            u_ins = Users.objects.filter(is_superuser=True, is_staff=True).first()
+            username = u_ins.username if u_ins else "admin"
+            qr_base64 = get_otp_qrcode_base64(secret, username)
+            if not qr_base64:
+                return ErrorResponse(msg="生成二维码失败，请确认qrcode已安装")
+            data = {
+                'secret': secret,
+                'qrcode': qr_base64,
+            }
+            return DetailResponse(data=data)
+        elif action == "enable_otp":
+            secret = reqData.get('secret', '')
+            otp_code = reqData.get('otp_code', '')
+            if not secret:
+                return ErrorResponse(msg="OTP密钥不能为空")
+            if not otp_code:
+                return ErrorResponse(msg="请输入动态口令验证码")
+            if not verify_otp_code(secret, otp_code):
+                return ErrorResponse(msg="动态口令验证失败，请重新输入")
+            config = {
+                'otp_enable': True,
+                'otp_secret': secret,
+            }
+            save_otp_config(config)
+            RuyiAddOpLog(request, msg="【面板设置】-【动态口令OTP】启用OTP两步验证", module="panelst")
+            return DetailResponse(msg="OTP两步验证已启用")
+        elif action == "disable_otp":
+            disable_otp()
+            RuyiAddOpLog(request, msg="【面板设置】-【动态口令OTP】禁用OTP两步验证", module="panelst")
+            return DetailResponse(msg="OTP两步验证已禁用")
         return ErrorResponse(msg="参数错误")
     
 class RYGetInterfacesView(CustomAPIView):
@@ -395,6 +441,99 @@ class RYUpdateSysManageView(CustomAPIView):
             except Exception as e:
                 import traceback
                 return ErrorResponse(msg=f"启动升级任务失败: {str(e)}\n{traceback.format_exc()}")
+        elif action == "offline_upload":
+            try:
+                upload_file = request.FILES.get('file', None)
+                if not upload_file:
+                    return ErrorResponse(msg="请选择升级包文件")
+                filename = upload_file.name
+                if not filename.lower().endswith('.zip'):
+                    return ErrorResponse(msg="升级包只支持zip格式")
+                max_size = 100 * 1024 * 1024
+                if upload_file.size > max_size:
+                    return ErrorResponse(msg="升级包文件大小不能超过100MB")
+                from utils.common import GetTmpPath
+                offline_dir = os.path.join(GetTmpPath(), 'offline_upgrade')
+                if not os.path.exists(offline_dir):
+                    os.makedirs(offline_dir)
+                old_files = [f for f in os.listdir(offline_dir) if f.endswith('.zip')]
+                for of in old_files:
+                    os.remove(os.path.join(offline_dir, of))
+                save_path = os.path.join(offline_dir, 'ruyi_offline_upgrade.zip')
+                with open(save_path, 'wb') as f:
+                    for chunk in upload_file.chunks():
+                        f.write(chunk)
+                from utils.upgrade_panel import get_file_hash
+                file_hash = get_file_hash(save_path)
+                file_size = os.path.getsize(save_path)
+                file_size_mb = round(file_size / (1024 * 1024), 2)
+                RuyiAddOpLog(request, msg=f"【面板设置】=> 上传离线升级包: {filename} ({file_size_mb}MB)", module="panelst")
+                return DetailResponse(data={
+                    'filename': filename,
+                    'size': file_size_mb,
+                    'hash': file_hash,
+                }, msg="上传成功")
+            except Exception as e:
+                import traceback
+                return ErrorResponse(msg=f"上传失败: {str(e)}")
+        elif action == "offline_update":
+            try:
+                from utils.common import GetTmpPath, GetLogsPath, DeleteFile
+                from utils.upgrade_panel import update_ruyi_panel_offline
+                import multiprocessing
+                
+                offline_dir = os.path.join(GetTmpPath(), 'offline_upgrade')
+                zip_path = os.path.join(offline_dir, 'ruyi_offline_upgrade.zip')
+                if not os.path.exists(zip_path):
+                    return ErrorResponse(msg="请先上传离线升级包")
+                
+                log_file = os.path.join(GetLogsPath(), 'ruyi_updatepanel.log')
+                DeleteFile(log_file, empty_tips=False)
+                
+                log_dir = os.path.dirname(log_file)
+                if not os.path.exists(log_dir):
+                    os.makedirs(log_dir)
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    f.write(f"[启动] 离线升级任务已触发，正在启动进程...\n")
+                    f.flush()
+                    os.fsync(f.fileno())
+                
+                process = multiprocessing.Process(
+                    target=update_ruyi_panel_offline,
+                    args=(zip_path,),
+                    daemon=True
+                )
+                process.start()
+                
+                RuyiAddOpLog(request, msg="【面板设置】=> 离线升级面板", module="panelst")
+                return DetailResponse(msg="已启动离线升级任务，请查看日志")
+            except Exception as e:
+                import traceback
+                return ErrorResponse(msg=f"启动离线升级任务失败: {str(e)}\n{traceback.format_exc()}")
+        elif action == "offline_check":
+            try:
+                from utils.common import GetTmpPath
+                offline_dir = os.path.join(GetTmpPath(), 'offline_upgrade')
+                zip_path = os.path.join(offline_dir, 'ruyi_offline_upgrade.zip')
+                if os.path.exists(zip_path):
+                    from utils.upgrade_panel import get_file_hash
+                    file_size = os.path.getsize(zip_path)
+                    file_size_mb = round(file_size / (1024 * 1024), 2)
+                    file_hash = get_file_hash(zip_path)
+                    mtime = os.path.getmtime(zip_path)
+                    import datetime
+                    upload_time = datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+                    return DetailResponse(data={
+                        'exists': True,
+                        'filename': 'ruyi_offline_upgrade.zip',
+                        'size': file_size_mb,
+                        'hash': file_hash,
+                        'upload_time': upload_time,
+                    })
+                else:
+                    return DetailResponse(data={'exists': False})
+            except Exception as e:
+                return ErrorResponse(msg=f"检查离线升级包失败: {str(e)}")
         return ErrorResponse(msg="类型错误")
     
 class RYGetSysLocalAndAppsServiceView(CustomAPIView):

@@ -15,10 +15,10 @@ from utils.serializers import CustomModelSerializer
 from apps.syswaf.models import (
     WafGlobalConfig, WafSiteConfig, WafRuleCategory, WafRule,
     WafIpGroup, WafIpList, WafAttackLog, WafUrlWhitelist,
-    WafUrlBlacklist, WafUaList
+    WafUrlBlacklist, WafUaList,
+    WafReport, WafReportSchedule
 )
 import json
-from apps.syswaf.models import WafIpList, WafUrlWhitelist, WafUrlBlacklist, WafUaList
 
 
 class WafGlobalConfigSerializer(CustomModelSerializer):
@@ -203,6 +203,7 @@ class WafRuleSerializer(CustomModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     category_code = serializers.CharField(source='category.code', read_only=True)
     targets_list = serializers.SerializerMethodField()
+    exclude_urls_list = serializers.SerializerMethodField()
     
     class Meta:
         model = WafRule
@@ -210,10 +211,14 @@ class WafRuleSerializer(CustomModelSerializer):
     
     def get_targets_list(self, obj):
         return obj.get_targets()
+    
+    def get_exclude_urls_list(self, obj):
+        return obj.get_exclude_urls()
 
 
 class WafRuleCreateUpdateSerializer(CustomModelSerializer):
     targets = serializers.ListField(required=False, default=list)
+    exclude_urls = serializers.ListField(required=False, default=list)
     category = serializers.CharField(write_only=True, required=False)
     
     class Meta:
@@ -288,10 +293,18 @@ class WafIpListSerializer(CustomModelSerializer):
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     ip_version_display = serializers.CharField(source='get_ip_version_display', read_only=True)
     group_name = serializers.CharField(source='group.name', read_only=True)
-    
+    is_expired = serializers.SerializerMethodField()
+
     class Meta:
         model = WafIpList
         fields = '__all__'
+
+    def get_is_expired(self, obj):
+        """临时封禁IP是否已过期"""
+        if obj.list_type == 'temp' and obj.expire_at:
+            from django.utils import timezone
+            return obj.expire_at < timezone.now()
+        return False
 
 
 class WafIpListCreateUpdateSerializer(CustomModelSerializer):
@@ -400,3 +413,45 @@ class WafDashboardStatsSerializer(serializers.Serializer):
     top_ips = serializers.ListField()
     top_urls = serializers.ListField()
     trend_data = serializers.ListField()
+
+
+
+class WafReportSerializer(CustomModelSerializer):
+    report_type_display = serializers.CharField(source='get_report_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    top_ips_list = serializers.SerializerMethodField()
+    attack_types_list = serializers.SerializerMethodField()
+    severity_breakdown_list = serializers.SerializerMethodField()
+    trend_data_list = serializers.SerializerMethodField()
+    period = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WafReport
+        fields = '__all__'
+
+    def get_top_ips_list(self, obj):
+        return obj.get_json_field('top_ips')
+
+    def get_attack_types_list(self, obj):
+        return obj.get_json_field('attack_types')
+
+    def get_severity_breakdown_list(self, obj):
+        return obj.get_json_field('severity_breakdown')
+
+    def get_trend_data_list(self, obj):
+        return obj.get_json_field('trend_data')
+
+    def get_period(self, obj):
+        return f"{obj.date_start} ~ {obj.date_end}"
+
+
+class WafReportScheduleSerializer(CustomModelSerializer):
+    notify_channels_list = serializers.SerializerMethodField()
+    report_type_display = serializers.CharField(source='get_report_type_display', read_only=True)
+
+    class Meta:
+        model = WafReportSchedule
+        fields = '__all__'
+
+    def get_notify_channels_list(self, obj):
+        return obj.get_notify_channels()

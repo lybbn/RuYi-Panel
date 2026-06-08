@@ -83,6 +83,7 @@ class Command(BaseCommand):
         call_command('migrate', database='waf')
         call_command('migrate', database='waf_logs')
         call_command('migrate', database='ai')
+        call_command('migrate', database='node')
         print("正在初始化数据...")
         try:
             if not username:username = "ry"+GetRandomSet(6)

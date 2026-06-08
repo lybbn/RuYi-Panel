@@ -26,18 +26,38 @@ from rest_framework.permissions import IsAuthenticated
 from utils.common import get_parameter_dic,GetSoftList,current_os,GetLogsPath,ast_convert
 from utils.install.install_soft import Ry_Get_Soft_Performance,Ry_Set_Soft_Performance,Ry_Uninstall_Soft,Check_Soft_Installed,Ry_Restart_Soft,Ry_Stop_Soft,Ry_Reload_Soft,Ry_Get_Soft_Info_Path,Ry_Get_Soft_LoadStatus,Ry_Get_Soft_Conf,Ry_Save_Soft_Conf
 from utils.install.php import RY_GET_PHP_INFO,RY_GET_PHP_FPM_CONF,RY_SAVE_PHP_FPM_CONF,RY_GET_PHP_EXTENSIONS,get_php_path_info,RY_GET_PHP_CONFIG_PARAMS,RY_SAVE_PHP_CONFIG_PARAMS,RY_GET_PHP_DISABLED_FUNCTIONS,RY_SAVE_PHP_DISABLED_FUNCTIONS,RY_GET_PHP_DANGEROUS_FUNCTIONS,RY_GET_PHP_FPM_POOL_PARAMS,RY_SAVE_PHP_FPM_POOL_PARAMS,RY_GET_PHP_FPM_PRESETS,RY_VALIDATE_PHP_CONFIG,RY_CLEAR_PHP_OPCACHE,RY_GET_PHP_SLOWLOG,RY_CLEAR_PHP_ERROR_LOG,RY_CLEAR_PHP_SLOWLOG,RY_GET_PHP_EXTENSION_LIST,RY_TOGGLE_PHP_EXTENSION,RY_GET_PHPINFO,RY_GET_PECL_EXTENSIONS,RY_INSTALL_PECL_EXTENSION,RY_UNINSTALL_PECL_EXTENSION,RY_GET_PHP_FPM_STATUS
+from utils.install.mysql import RY_GET_MYSQL_INFO,RY_SET_MYSQL_PORT,RY_SET_MYSQL_DATADIR
+from utils.install.pgsql import RY_GET_PGSQL_INFO,RY_SET_PGSQL_PORT,RY_GET_PGSQL_EXTENSIONS,RY_INSTALL_PGSQL_EXTENSION,RY_UNINSTALL_PGSQL_EXTENSION
+from utils.install.mongodb import RY_GET_MONGODB_INFO,RY_SET_MONGODB_PORT
 from apps.systask.models import SysTaskCenter
 import datetime
 from utils.server.system import system
 from django.db import transaction
 from apps.sysshop.models import RySoftShop
-from utils.install.redis import Redis_Connect,RY_GET_REDIS_CONF_OPTIONS
+from utils.install.redis import Redis_Connect,RY_GET_REDIS_CONF_OPTIONS,RY_GET_REDIS_PERSISTENCE,RY_SET_REDIS_PERSISTENCE
 from concurrent.futures import ThreadPoolExecutor
 from apps.syslogs.logutil import RuyiAddOpLog
 from utils.customView import CustomAPIView
 from apps.system.views.common import executeNextTask
-from apps.system.models import Databases
+from apps.system.models import Databases, RemoteRedis
 from apps.systask.scheduler import scheduler
+
+def _get_redis_conn_by_sid(sid, db=0):
+    if sid and int(sid) > 0:
+        remote = RemoteRedis.objects.filter(id=int(sid)).first()
+        if not remote:
+            return None, "远程Redis服务器不存在"
+        db_conn = Redis_Connect(
+            db_host=remote.db_host,
+            db_port=int(remote.db_port),
+            db_password=remote.db_password or "",
+            db=db,
+            local=False,
+        )
+        if not db_conn:
+            return None, "远程Redis连接失败"
+        return db_conn, None
+    return None, "local"
 
 def soft_install_callback(job_id="",version={},ok=True):
     try:
@@ -256,6 +276,12 @@ class RYSoftShopManageView(CustomAPIView):
             if soft['name'] == "mysql":
                 if Databases.objects.filter(db_type=0).exists():
                     return ErrorResponse(msg="当前已有数据库，请先删除再卸载！！！")
+            if soft['name'] == "pgsql":
+                if Databases.objects.filter(db_type=3).exists():
+                    return ErrorResponse(msg="当前已有数据库，请先删除再卸载！！！")
+            if soft['name'] == "mongodb":
+                if Databases.objects.filter(db_type=2).exists():
+                    return ErrorResponse(msg="当前已有MongoDB数据库，请先删除再卸载！！！")
             if soft['name'] in ["python","go","php","nodejs"]:#允许多个版本存在
                 version_post = reqData.get("version",None)#如果提供了版本（c_version），就卸载指定，没提供取第一个
                 version = version_post if version_post else soft["versions"][0]['c_version']
@@ -319,7 +345,7 @@ class RYSoftShopManageView(CustomAPIView):
                 return ErrorResponse(msg="软件未安装")
             soft_version = reqData.get("version",None) if soft['name'] in ['python','go','php','nodejs'] else None
             error_log_path = Ry_Get_Soft_Info_Path(name=soft['name'],type="error",is_windows=is_windows,version=soft_version)
-            num = 2000
+            num = 3000
             data = system.GetFileLastNumsLines(error_log_path,num)
             return DetailResponse(data=data,msg="success")
         elif action == "get_access_log":
@@ -327,7 +353,7 @@ class RYSoftShopManageView(CustomAPIView):
             if not soft_ins:
                 return ErrorResponse(msg="软件未安装")
             access_log_path = Ry_Get_Soft_Info_Path(name=soft['name'],type="access",is_windows=is_windows)
-            num = 2000
+            num = 3000
             data = system.GetFileLastNumsLines(access_log_path,num)
             return DetailResponse(data=data,msg="success")
         elif action == "get_slow_log":
@@ -335,7 +361,7 @@ class RYSoftShopManageView(CustomAPIView):
             if not soft_ins:
                 return ErrorResponse(msg="软件未安装")
             slow_log_path = Ry_Get_Soft_Info_Path(name=soft['name'],type="slow",is_windows=is_windows)
-            num = 2000
+            num = 3000
             data = system.GetFileLastNumsLines(slow_log_path,num)
             return DetailResponse(data=data,msg="success")
         elif action == "get_loadstatus":
@@ -348,8 +374,19 @@ class RYSoftShopManageView(CustomAPIView):
             cont = ast_convert(reqData.get("cont",{}))
             data = Ry_Set_Soft_Performance(name=soft['name'],cont=cont,is_windows=is_windows)
             RuyiAddOpLog(request,msg="【软件商店】-【调整性能】=>"+soft['name'],module="softmg")
-            Ry_Reload_Soft(name=soft['name'],is_windows=is_windows)
-            return DetailResponse(msg="设置成功")
+            return DetailResponse(msg="保存成功")
+        elif action == "get_persistence":
+            if soft['name'] != 'redis':
+                return ErrorResponse(msg="仅支持Redis")
+            data = RY_GET_REDIS_PERSISTENCE(is_windows=is_windows)
+            return DetailResponse(data=data,msg="success")
+        elif action == "set_persistence":
+            if soft['name'] != 'redis':
+                return ErrorResponse(msg="仅支持Redis")
+            cont = ast_convert(reqData.get("cont",{}))
+            data = RY_SET_REDIS_PERSISTENCE(cont=cont,is_windows=is_windows)
+            RuyiAddOpLog(request,msg="【软件商店】-【持久化配置】=>redis",module="softmg")
+            return DetailResponse(msg="保存成功")
         elif action == "get_conf":
             soft_version = reqData.get("version",None) if soft['name'] in ['python','go','php','nodejs'] else None
             data = Ry_Get_Soft_Conf(name=soft['name'],is_windows=is_windows,version=soft_version)
@@ -363,6 +400,128 @@ class RYSoftShopManageView(CustomAPIView):
             RuyiAddOpLog(request,msg="【软件商店】-【修改配置】=>"+soft['name'],module="softmg")
             Ry_Reload_Soft(name=soft['name'],is_windows=is_windows,version=soft_version)
             return DetailResponse(data=data,msg="保存成功")
+        elif action == "get_mysql_info":
+            if soft['name'] != 'mysql':
+                return ErrorResponse(msg="仅支持MySQL")
+            try:
+                data = RY_GET_MYSQL_INFO(is_windows=is_windows)
+                return DetailResponse(data=data,msg="success")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
+        elif action == "set_mysql_port":
+            if soft['name'] != 'mysql':
+                return ErrorResponse(msg="仅支持MySQL")
+            port = reqData.get("port","")
+            if not port:
+                return ErrorResponse(msg="端口不能为空")
+            try:
+                RY_SET_MYSQL_PORT(port=port,is_windows=is_windows)
+                RuyiAddOpLog(request,msg=f"【软件商店】-【修改MySQL端口】=>{port}",module="softmg")
+                Ry_Restart_Soft(name='mysql',is_windows=is_windows)
+                return DetailResponse(msg="端口修改成功，MySQL正在重启")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
+        elif action == "set_mysql_datadir":
+            if soft['name'] != 'mysql':
+                return ErrorResponse(msg="仅支持MySQL")
+            datadir = reqData.get("datadir","")
+            if not datadir:
+                return ErrorResponse(msg="数据目录不能为空")
+            try:
+                RY_SET_MYSQL_DATADIR(datadir=datadir,is_windows=is_windows)
+                RuyiAddOpLog(request,msg=f"【软件商店】-【迁移MySQL数据目录】=>{datadir}",module="softmg")
+                return DetailResponse(msg="数据目录迁移成功")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
+        elif action == "get_pgsql_info":
+            if soft['name'] != 'pgsql':
+                return ErrorResponse(msg="仅支持PostgreSQL")
+            try:
+                data = RY_GET_PGSQL_INFO(is_windows=is_windows)
+                return DetailResponse(data=data,msg="success")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
+        elif action == "set_pgsql_port":
+            if soft['name'] != 'pgsql':
+                return ErrorResponse(msg="仅支持PostgreSQL")
+            port = reqData.get("port","")
+            if not port:
+                return ErrorResponse(msg="端口不能为空")
+            try:
+                RY_SET_PGSQL_PORT(port=port,is_windows=is_windows)
+                RuyiAddOpLog(request,msg=f"【软件商店】-【修改PostgreSQL端口】=>{port}",module="softmg")
+                Ry_Restart_Soft(name='pgsql',is_windows=is_windows)
+                return DetailResponse(msg="端口修改成功，PostgreSQL正在重启")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
+        elif action == "get_pgsql_extensions":
+            if soft['name'] != 'pgsql':
+                return ErrorResponse(msg="仅支持PostgreSQL")
+            try:
+                from utils.common import pip_install_package
+                pip_install_package('psycopg2-binary')
+            except Exception:
+                pass
+            try:
+                data = RY_GET_PGSQL_EXTENSIONS(is_windows=is_windows)
+                return DetailResponse(data=data, msg="success")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
+        elif action == "install_pgsql_extension":
+            if soft['name'] != 'pgsql':
+                return ErrorResponse(msg="仅支持PostgreSQL")
+            ext_name = reqData.get("ext_name", "")
+            if not ext_name:
+                return ErrorResponse(msg="扩展名称不能为空")
+            try:
+                from utils.common import pip_install_package
+                pip_install_package('psycopg2-binary')
+            except Exception:
+                pass
+            try:
+                RY_INSTALL_PGSQL_EXTENSION(ext_name=ext_name, is_windows=is_windows)
+                RuyiAddOpLog(request, msg=f"【软件商店】-【安装PostgreSQL扩展】=>{ext_name}", module="softmg")
+                return DetailResponse(msg=f"扩展 {ext_name} 安装成功")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
+        elif action == "uninstall_pgsql_extension":
+            if soft['name'] != 'pgsql':
+                return ErrorResponse(msg="仅支持PostgreSQL")
+            ext_name = reqData.get("ext_name", "")
+            if not ext_name:
+                return ErrorResponse(msg="扩展名称不能为空")
+            try:
+                from utils.common import pip_install_package
+                pip_install_package('psycopg2-binary')
+            except Exception:
+                pass
+            try:
+                RY_UNINSTALL_PGSQL_EXTENSION(ext_name=ext_name, is_windows=is_windows)
+                RuyiAddOpLog(request, msg=f"【软件商店】-【卸载PostgreSQL扩展】=>{ext_name}", module="softmg")
+                return DetailResponse(msg=f"扩展 {ext_name} 卸载成功")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
+        elif action == "get_mongodb_info":
+            if soft['name'] != 'mongodb':
+                return ErrorResponse(msg="仅支持MongoDB")
+            try:
+                data = RY_GET_MONGODB_INFO(is_windows=is_windows)
+                return DetailResponse(data=data,msg="success")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
+        elif action == "set_mongodb_port":
+            if soft['name'] != 'mongodb':
+                return ErrorResponse(msg="仅支持MongoDB")
+            port = reqData.get("port","")
+            if not port:
+                return ErrorResponse(msg="端口不能为空")
+            try:
+                RY_SET_MONGODB_PORT(port=port,is_windows=is_windows)
+                RuyiAddOpLog(request,msg=f"【软件商店】-【修改MongoDB端口】=>{port}",module="softmg")
+                Ry_Restart_Soft(name='mongodb',is_windows=is_windows)
+                return DetailResponse(msg="端口修改成功，MongoDB正在重启")
+            except Exception as e:
+                return ErrorResponse(msg=str(e))
         elif action == "get_php_info":
             if soft['name'] != 'php':
                 return ErrorResponse(msg="仅支持PHP")
@@ -691,6 +850,49 @@ class RYSoftInfoManageView(CustomAPIView):
             }
             return DetailResponse(data=data)
         elif action == "get_redis_dblist":
+            sid = reqData.get("sid", 0)
+            if sid and int(sid) > 0:
+                remote = RemoteRedis.objects.filter(id=int(sid)).first()
+                if not remote:
+                    return DetailResponse(data=[])
+                db_conn = Redis_Connect(
+                    db_host=remote.db_host,
+                    db_port=int(remote.db_port),
+                    db_password=remote.db_password or "",
+                    db=0,
+                    local=False,
+                )
+                if not db_conn:
+                    return DetailResponse(data=[])
+                try:
+                    redis_info = db_conn.info()
+                    db_nums = 16
+                    if 'db0' in redis_info:
+                        for key in redis_info:
+                            if key.startswith('db'):
+                                db_idx = int(key[2:])
+                                if db_idx + 1 > db_nums:
+                                    db_nums = db_idx + 1
+                    data = []
+                    for i in range(0, db_nums):
+                        tmp = {}
+                        tmp['id'] = i
+                        tmp['name'] = 'DB{}'.format(i)
+                        try:
+                            r_conn = Redis_Connect(
+                                db_host=remote.db_host,
+                                db_port=int(remote.db_port),
+                                db_password=remote.db_password or "",
+                                db=i,
+                                local=False,
+                            )
+                            tmp['keynum'] = r_conn.dbsize() if r_conn else 0
+                        except:
+                            tmp['keynum'] = 0
+                        data.append(tmp)
+                except:
+                    data = []
+                return DetailResponse(data=data)
             conf_options = RY_GET_REDIS_CONF_OPTIONS()
             if not conf_options:return DetailResponse(data=[])
             db_nums = int(conf_options.get('databases',16))
@@ -709,8 +911,50 @@ class RYSoftInfoManageView(CustomAPIView):
                 preload = False
             return DetailResponse(data=data)
         elif action == "redis_flashdb":
+            sid = reqData.get("sid", 0)
             ids = ast_convert(reqData.get("ids",[]))
             msg_db=""
+            if sid and int(sid) > 0:
+                remote = RemoteRedis.objects.filter(id=int(sid)).first()
+                if not remote:
+                    return ErrorResponse(msg="远程Redis服务器不存在")
+                db_conn_0 = Redis_Connect(
+                    db_host=remote.db_host,
+                    db_port=int(remote.db_port),
+                    db_password=remote.db_password or "",
+                    db=0,
+                    local=False,
+                )
+                if not db_conn_0:
+                    return ErrorResponse(msg="远程Redis连接失败")
+                if not ids:
+                    msg_db = "所有数据库"
+                    try:
+                        redis_info = db_conn_0.info()
+                        db_nums = 16
+                        if 'db0' in redis_info:
+                            for key in redis_info:
+                                if key.startswith('db'):
+                                    db_idx = int(key[2:])
+                                    if db_idx + 1 > db_nums:
+                                        db_nums = db_idx + 1
+                        ids = list(range(0, db_nums))
+                    except:
+                        ids = list(range(0, 16))
+                else:
+                    msg_db = ','.join(str(x) for x in ids)
+                for x in ids:
+                    db_conn = Redis_Connect(
+                        db_host=remote.db_host,
+                        db_port=int(remote.db_port),
+                        db_password=remote.db_password or "",
+                        db=int(x),
+                        local=False,
+                    )
+                    if db_conn:
+                        db_conn.flushdb()
+                RuyiAddOpLog(request,msg="远程redis数据库->清空数据库："+msg_db,module="dbmg")
+                return DetailResponse(msg="操作成功")
             if not ids:
                 msg_db="所有数据库"
                 ids = []
@@ -732,10 +976,15 @@ class RYSoftInfoManageView(CustomAPIView):
             key = ast_convert(reqData.get("key",""))
             value = ast_convert(reqData.get("value",""))
             db = int(reqData.get("db",0))
+            sid = reqData.get("sid", 0)
             exptime = reqData.get("exptime", None)
             if not key or not value:
                 return ErrorResponse(msg="缺少参数")
-            db_conn = Redis_Connect(db=db)
+            db_conn, conn_err = _get_redis_conn_by_sid(sid, db)
+            if conn_err == "local":
+                db_conn = Redis_Connect(db=db)
+            elif conn_err:
+                return ErrorResponse(msg=conn_err)
             if not db_conn:
                 return ErrorResponse(msg="redis连接错误")
             if exptime is not None and exptime:
@@ -748,9 +997,14 @@ class RYSoftInfoManageView(CustomAPIView):
         elif action == "redis_del_val":
             key = ast_convert(reqData.get("key",""))
             db = int(reqData.get("db",0))
+            sid = reqData.get("sid", 0)
             if not key:
                 return ErrorResponse(msg="缺少参数")
-            db_conn = Redis_Connect(db=db)
+            db_conn, conn_err = _get_redis_conn_by_sid(sid, db)
+            if conn_err == "local":
+                db_conn = Redis_Connect(db=db)
+            elif conn_err:
+                return ErrorResponse(msg=conn_err)
             if not db_conn:
                 return ErrorResponse(msg="redis连接错误")
             db_conn.delete(key)
@@ -763,7 +1017,12 @@ class RYSoftInfoManageView(CustomAPIView):
             else:
                 search = "*"
             db_inx = int(reqData.get("db",0))
-            db_conn = Redis_Connect(db=db_inx)
+            sid = reqData.get("sid", 0)
+            db_conn, conn_err = _get_redis_conn_by_sid(sid, db_inx)
+            if conn_err == "local":
+                db_conn = Redis_Connect(db=db_inx)
+            elif conn_err:
+                return DetailResponse(data=[])
             if not db_conn:
                 return DetailResponse(data=[])
             total_nums = 0
