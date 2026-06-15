@@ -364,6 +364,13 @@ class NginxClient:
         #删除扩展配置目录
         DeleteDir(self.extensionBasePath)
         
+        #删除负载均衡关联记录（跨数据库需要手动删除）
+        try:
+            from apps.sysnode.models import LoadBalanceSite
+            LoadBalanceSite.objects.filter(site_id=id).delete()
+        except Exception:
+            pass
+        
         #删除站点、域名列表
         SiteDomains.objects.filter(site_id=id).delete()
         site_ins.delete()

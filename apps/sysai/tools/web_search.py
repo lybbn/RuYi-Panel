@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 def _get_search_api_config():
     try:
         from apps.sysai.models import AIModel
-        config_obj = AIModel.objects_all.filter(name='__sys_config__').first()
-        if config_obj and config_obj.extra_params:
+        config_obj = AIModel.get_sys_config()
+        if config_obj.extra_params:
             extra = config_obj.extra_params
             return {
                 'provider': extra.get('web_search_provider', ''),

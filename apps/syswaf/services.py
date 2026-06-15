@@ -8,11 +8,14 @@
 import os
 import json
 import shutil
+import time
+import logging
 from django.conf import settings
+from utils.common import current_os
 from apps.syswaf.models import (
     WafGlobalConfig, WafSiteConfig, WafRule, 
     WafIpList, WafUrlWhitelist, WafUrlBlacklist, WafUaList,
-    WafRuleCategory, WafIpGroup
+    WafRuleCategory, WafIpGroup, WafAttackLog
 )
 
 
@@ -739,3 +742,349 @@ def get_waf_status():
             'status': 'off',
             'status_display': '关闭',
         }
+
+
+WAF_LOG_SYNC_JOB_ID = 'waf_log_sync'
+
+
+def manage_waf_log_sync_job():
+    """
+    根据WAF状态动态启停日志同步定时任务。
+    此函数是幂等的，可被信号、视图、启动流程多处调用。
+    """
+    try:
+        from apps.systask.scheduler import scheduler
+        from apscheduler.triggers.interval import IntervalTrigger
+        
+        config = WafGlobalConfig.get_instance()
+        waf_enabled = config.waf_status in ('observe', 'protect')
+        
+        existing = scheduler.get_job(WAF_LOG_SYNC_JOB_ID)
+        
+        if waf_enabled and not existing:
+            syncer = WafLogSync()
+            scheduler.add_job(
+                syncer.sync,
+                trigger=IntervalTrigger(seconds=3),
+                id=WAF_LOG_SYNC_JOB_ID,
+                max_instances=1,
+                replace_existing=True,
+                misfire_grace_time=30,
+                coalesce=True,
+            )
+            logging.getLogger('syswaf').info("WAF日志同步任务已启动")
+        elif not waf_enabled and existing:
+            scheduler.remove_job(WAF_LOG_SYNC_JOB_ID)
+            logging.getLogger('syswaf').info("WAF日志同步任务已停止")
+    except Exception as e:
+        logging.getLogger('syswaf').error(f"WAF日志同步任务管理失败: {e}")
+
+
+class WafLogSync:
+    """
+    WAF 日志同步服务
+    从 data/waf/logs/ 目录读取 JSONL 日志文件，批量写入 SQLite 数据库。
+
+    特性：
+    - 断点续传：通过 _checkpoint.json 记录每个文件的已处理行数
+    - 批量写入：使用 bulk_create 批量插入，默认每批 200 条
+    - 可重试：失败不丢失进度，下次同步会重试
+    - 自动清理：处理完成的文件移动到 _processed/ 目录
+    """
+    
+    BATCH_SIZE = 200
+    CHECKPOINT_FILE = '_checkpoint.json'
+    PROCESSED_DIR = '_processed'
+    LOGS_DIR_NAME = 'logs'
+    
+    def __init__(self):
+        from django.conf import settings
+        self.logs_dir = os.path.join(settings.RUYI_WAF_DATA_PATH, self.LOGS_DIR_NAME)
+        self.checkpoint_file = os.path.join(self.logs_dir, self.CHECKPOINT_FILE)
+        self.processed_dir = os.path.join(self.logs_dir, self.PROCESSED_DIR)
+        self._logger = logging.getLogger('syswaf')
+        self._last_dir_mtime = 0      # 目录最后修改时间缓存
+        self._idle_skip_count = 0     # 连续空闲跳过次数
+        self._idle_skip_max = 10      # 最多连续跳过10次（约30秒）后强制扫描
+    
+    def _dir_changed(self):
+        """检查日志目录是否有新文件产生（mtime短路）"""
+        if not os.path.exists(self.logs_dir):
+            return True
+        try:
+            current_mtime = os.path.getmtime(self.logs_dir)
+            if current_mtime != self._last_dir_mtime:
+                self._last_dir_mtime = current_mtime
+                return True
+        except OSError:
+            return True
+        return False
+    
+    def _ensure_dirs(self):
+        """确保日志目录和已处理目录存在，Linux下权限777确保www/nginx用户可写"""
+        for d in [self.logs_dir, self.processed_dir]:
+            if not os.path.exists(d):
+                os.makedirs(d, exist_ok=True)
+            # Linux下设置777，Windows下无此机制跳过
+            if not current_os == 'windows':
+                try:
+                    os.chmod(d, 0o777)
+                except OSError:
+                    pass
+    
+    def _load_checkpoint(self):
+        """加载断点记录"""
+        if os.path.exists(self.checkpoint_file):
+            try:
+                with open(self.checkpoint_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {}
+        return {}
+    
+    def _save_checkpoint(self, checkpoint):
+        """保存断点记录"""
+        self._ensure_dirs()
+        try:
+            with open(self.checkpoint_file, 'w', encoding='utf-8') as f:
+                json.dump(checkpoint, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            self._logger.warning(f"WAF日志断点保存失败: {e}")
+    
+    def _get_pending_files(self, checkpoint):
+        """获取待处理的 JSONL 文件列表（按文件名排序以确保顺序处理）"""
+        if not os.path.exists(self.logs_dir):
+            return []
+        
+        files = []
+        for filename in os.listdir(self.logs_dir):
+            if filename.startswith('waf_log_') and filename.endswith('.jsonl'):
+                filepath = os.path.join(self.logs_dir, filename)
+                files.append((filename, filepath))
+        
+        files.sort(key=lambda x: x[0])
+        return files
+    
+    def _read_log_entries(self, filepath, start_line=0):
+        """从 JSONL 文件读取日志条目，支持从指定行开始"""
+        entries = []
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f, start=1):
+                    if line_num <= start_line:
+                        continue
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        entries.append(entry)
+                    except json.JSONDecodeError:
+                        self._logger.warning(f"WAF日志JSON解析失败: {filepath} 第{line_num}行")
+                        continue
+        except IOError as e:
+            self._logger.error(f"WAF日志文件读取失败: {filepath}: {e}")
+        return entries
+    
+    def _build_attack_log_objects(self, entries):
+        """将日志条目转换为 WafAttackLog 模型对象列表，含GeoIP查询"""
+        objects = []
+        
+        for log_data in entries:
+            try:
+                src_ip = str(log_data.get('src_ip', ''))[:45]
+                src_location = str(log_data.get('src_location', ''))[:200]
+                src_country = ''
+                src_province = ''
+                src_city = ''
+                src_latitude = None
+                src_longitude = None
+                
+                if not src_location and src_ip:
+                    try:
+                        from utils.common import is_private_ip
+                        from utils.ip_util import GeoIP2Lookup
+                        
+                        if is_private_ip(src_ip):
+                            src_location = "局域网IP"
+                        else:
+                            geo_data = GeoIP2Lookup.lookup(src_ip)
+                            src_location = geo_data.get('location', '') or ''
+                            src_country = geo_data.get('country', '') or ''
+                            src_province = geo_data.get('province', '') or ''
+                            src_city = geo_data.get('city', '') or ''
+                            src_latitude = geo_data.get('latitude')
+                            src_longitude = geo_data.get('longitude')
+                    except Exception as e:
+                        self._logger.warning(f"WAF日志IP定位失败 {src_ip}: {e}")
+                
+                obj = WafAttackLog(
+                    site_id=log_data.get('site_id'),
+                    rule_id=str(log_data.get('rule_id', ''))[:50] or None,
+                    attack_type=str(log_data.get('attack_type', 'unknown'))[:50],
+                    severity=str(log_data.get('severity', 'medium'))[:20],
+                    src_ip=src_ip,
+                    src_location=str(src_location)[:200],
+                    src_country=src_country[:50],
+                    src_province=src_province[:50],
+                    src_city=src_city[:50],
+                    src_latitude=src_latitude,
+                    src_longitude=src_longitude,
+                    dst_domain=str(log_data.get('dst_host', ''))[:255],
+                    dst_url=str(log_data.get('dst_url', ''))[:2000],
+                    request_method=str(log_data.get('request_method', 'GET'))[:10],
+                    request_data=str(log_data.get('raw_request', ''))[:65535],
+                    matched_pattern=str(log_data.get('matched_pattern', '') or log_data.get('rule_name', ''))[:255],
+                    action_taken=str(log_data.get('action_taken', 'log'))[:20],
+                    user_agent=str(log_data.get('user_agent', ''))[:500],
+                    headers=str(log_data.get('headers', '{}'))[:65535],
+                    request_id=str(log_data.get('request_id', ''))[:100],
+                )
+                objects.append(obj)
+            except Exception as e:
+                self._logger.error(f"WAF日志对象构建失败: {e}")
+                continue
+        
+        return objects
+    
+    def _is_waf_enabled(self):
+        """检查WAF是否处于启用状态"""
+        try:
+            config = WafGlobalConfig.get_instance()
+            return config.waf_status in ('observe', 'protect')
+        except Exception:
+            return False
+    
+    def sync(self):
+        """
+        执行一次日志同步（自适应轮询）
+        返回: (success: bool, processed: int, msg: str)
+        
+        设计思路：
+        - 3s间隔，类似 Filebeat 在 Windows 上的轮询频率
+        - 目录 mtime 短路：目录未变化时跳过 os.listdir()
+        - 空闲退避：连续空闲时跳过扫描以降低开销
+        - SQLite 友好：有数据时才 bulk_create，不频繁空写
+        """
+        # 轻量守卫：避免任务被移除时有正在执行的实例继续处理
+        if not self._is_waf_enabled():
+            return True, 0, "WAF已关闭，跳过同步"
+        
+        self._ensure_dirs()
+        checkpoint = self._load_checkpoint()
+        
+        # 定期清理过期文件（每小时执行一次）
+        if not hasattr(self, '_last_cleanup') or time.time() - self._last_cleanup > 3600:
+            self._cleanup_old_logs()
+            self._last_cleanup = time.time()
+        
+        # 自适应短路：目录mtime未变化 + 无待处理断点 → 跳过目录扫描
+        if not self._dir_changed() and not checkpoint:
+            self._idle_skip_count += 1
+            if self._idle_skip_count < self._idle_skip_max:
+                return True, 0, "目录无变化，跳过扫描"
+            # 达到最大跳过次数，强制扫描一次（兜底）
+            self._idle_skip_count = 0
+        
+        pending_files = self._get_pending_files(checkpoint)
+        if not pending_files:
+            self._idle_skip_count = 0
+            return True, 0, "无待处理的日志文件"
+        
+        self._idle_skip_count = 0
+        total_processed = 0
+        
+        for filename, filepath in pending_files:
+            try:
+                start_line = checkpoint.get(filename, 0)
+                
+                entries = self._read_log_entries(filepath, start_line)
+                if not entries:
+                    # 空文件直接标记完成
+                    checkpoint[filename] = 0
+                    self._save_checkpoint(checkpoint)
+                    dest_path = os.path.join(self.processed_dir, filename)
+                    shutil.move(filepath, dest_path)
+                    if filename in checkpoint:
+                        del checkpoint[filename]
+                    self._save_checkpoint(checkpoint)
+                    continue
+                
+                # 构建模型对象
+                batch_objs = []
+                processed_lines = start_line
+                
+                for i, entry in enumerate(entries):
+                    try:
+                        entry_list = self._build_attack_log_objects([entry])
+                        if entry_list:
+                            batch_objs.append(entry_list[0])
+                    except Exception:
+                        continue
+                    
+                    processed_lines += 1
+                    
+                    if len(batch_objs) >= self.BATCH_SIZE:
+                        WafAttackLog.objects.bulk_create(batch_objs, batch_size=self.BATCH_SIZE)
+                        total_processed += len(batch_objs)
+                        checkpoint[filename] = processed_lines
+                        self._save_checkpoint(checkpoint)
+                        batch_objs = []
+                
+                # 写入剩余批次
+                if batch_objs:
+                    WafAttackLog.objects.bulk_create(batch_objs, batch_size=self.BATCH_SIZE)
+                    total_processed += len(batch_objs)
+                
+                # 文件处理完成，移动到已处理目录
+                checkpoint[filename] = processed_lines
+                self._save_checkpoint(checkpoint)
+                
+                dest_path = os.path.join(self.processed_dir, filename)
+                shutil.move(filepath, dest_path)
+                if filename in checkpoint:
+                    del checkpoint[filename]
+                self._save_checkpoint(checkpoint)
+                
+                self._logger.info(f"WAF日志同步完成: {filename}, 共{processed_lines}条")
+                
+            except Exception as e:
+                self._logger.error(f"WAF日志同步失败 {filename}: {e}")
+                return False, total_processed, f"处理 {filename} 时出错: {e}"
+        
+        return True, total_processed, f"同步完成，共{total_processed}条日志"
+    
+    def sync_all(self):
+        """
+        循环同步直到没有待处理文件
+        返回: (success: bool, total: int, msg: str)
+        """
+        total = 0
+        while True:
+            ok, count, msg = self.sync()
+            if not ok:
+                return False, total, msg
+            if count == 0:
+                break
+            total += count
+        
+        return True, total, f"全部同步完成，共{total}条日志"
+    
+    def _cleanup_old_logs(self):
+        """清理超过7天的已处理日志文件"""
+        try:
+            if not os.path.exists(self.processed_dir):
+                return
+            cutoff = time.time() - 7 * 86400
+            for fname in os.listdir(self.processed_dir):
+                if not fname.endswith('.jsonl'):
+                    continue
+                fpath = os.path.join(self.processed_dir, fname)
+                try:
+                    if os.path.getmtime(fpath) < cutoff:
+                        os.remove(fpath)
+                except Exception:
+                    pass
+        except Exception as e:
+            if self._logger:
+                self._logger.warning(f"清理过期日志文件失败: {e}")

@@ -48,14 +48,14 @@ class Command(BaseCommand):
             f'正在{"强制重建" if force else "增量更新"}WAF规则...'
         ))
 
-        categories, rules, config, ip_group, from_remote = init_waf_data(force=force)
+        categories, rules, config, ip_group, from_remote, rules_updated = init_waf_data(force=force)
 
         source = '远程' if from_remote else '本地'
         self.stdout.write(self.style.SUCCESS(
-            f'规则更新完成（来源: {source}）: 新增分类 {categories} 个, 新增规则 {rules} 条'
+            f'规则更新完成（来源: {source}）: 新增分类 {categories} 个, 新增规则 {rules} 条, 更新规则 {rules_updated} 条'
         ))
 
-        if do_sync and (categories > 0 or rules > 0):
+        if do_sync and (categories > 0 or rules > 0 or rules_updated > 0):
             self.stdout.write('正在同步配置到Nginx...')
             try:
                 from apps.syswaf.services import WafConfigSync
@@ -75,4 +75,4 @@ class Command(BaseCommand):
         elif not do_sync:
             self.stdout.write(self.style.WARNING('已跳过Nginx同步（--no-sync）'))
         else:
-            self.stdout.write(self.style.SUCCESS('无新增规则，无需同步'))
+            self.stdout.write(self.style.SUCCESS('无新增或更新规则，无需同步'))

@@ -99,21 +99,21 @@ TOOLSETS: Dict[str, Dict[str, Any]] = {
     },
     'file': {
         'name': '文件操作',
-        'description': '文件写入和搜索',
-        'trigger_keywords': ['写文件', '修改文件', '保存文件', '搜索文件', '配置文件修改'],
+        'description': '文件写入和搜索（写入文件内容必须使用write_file工具，禁止用execute_command执行cat/echo/tee等命令）',
+        'trigger_keywords': ['写文件', '修改文件', '保存文件', '搜索文件', '配置文件修改', '写入文件', '创建文件', '生成文件'],
         'tools': ['write_file', 'search_files'],
     },
     'panel_shop': {
         'name': '应用商店',
         'description': '如意面板应用商店管理',
-        'trigger_keywords': ['应用', '安装软件', '已安装', '软件商店', '软件列表', '卸载软件', '更新软件'],
+        'trigger_keywords': ['应用商店', '安装软件', '已安装', '软件商店', '软件列表', '卸载软件', '更新软件', '应用市场'],
         'tools': ['panel_shop_list', 'panel_shop_install',
                   'panel_shop_manage', 'panel_shop_task_status'],
     },
     'panel_docker': {
         'name': 'Docker广场',
         'description': '如意面板Docker广场应用管理',
-        'trigger_keywords': ['容器广场', 'docker广场', 'docker应用', '一键安装', 'docker模板', 'docker部署', '应用市场', '容器应用', '部署应用', '安装应用', '部署wordpress', '部署mysql', '部署nextcloud', '部署gitlab'],
+        'trigger_keywords': ['容器广场', 'docker广场', 'docker应用', '一键安装', 'docker模板', 'docker部署', '容器应用', '容器市场', 'docker市场', '部署wordpress', '部署mysql', '部署nextcloud', '部署gitlab', 'wordpress应用', '我的应用', '查看应用', '已部署应用'],
         'tools': ['panel_docker_square_list', 'panel_docker_square_catalog',
                   'panel_docker_square_install', 'panel_docker_square_manage'],
     },
@@ -150,6 +150,24 @@ TOOLSETS: Dict[str, Dict[str, Any]] = {
                   'alert_delete', 'alert_test', 'notify_channel_list',
                   'notify_channel_test'],
     },
+    'panel_deploy': {
+        'name': '智能部署',
+        'description': '一句话部署应用，支持Docker广场应用、Git仓库、本地代码、压缩包四种部署方式',
+        'trigger_keywords': ['帮我部署', '部署wordpress', '部署nextcloud', '部署gitlab', '部署mysql', '部署redis', '部署应用', '一键部署', '安装应用', '部署项目', '部署网站', '部署django', '部署flask', '部署fastapi', '部署express', '部署nextjs', '部署vue', '部署react', '部署go项目', '部署php项目', 'git项目部署', '部署git', '部署github', '部署gitee'],
+        'tools': ['TodoWrite', 'TodoRead',
+                  'panel_environment_probe', 'panel_detect_project',
+                  'panel_find_free_port', 'panel_deploy_verify',
+                  'panel_deploy_finalize',
+                  'panel_docker_square_list', 'panel_docker_square_catalog',
+                  'panel_docker_square_install', 'panel_docker_square_manage',
+                  'panel_shop_list', 'panel_shop_install', 'panel_shop_task_status',
+                  'panel_site_list', 'panel_site_create',
+                  'panel_deploy_project', 'panel_site_ssl', 'panel_site_proxy',
+                  'panel_database_list', 'panel_database_create', 'panel_database_root_pass',
+                  'docker_container_logs', 'docker_list_containers',
+                  'get_service_status', 'get_service_logs',
+                  'panel_diagnose_install', 'panel_diagnose_service'],
+    },
     'waf': {
         'name': 'WAF防护',
         'description': 'Web应用防火墙管理，包括防护状态、攻击日志、IP黑白名单、防护规则、URL黑白名单、站点WAF配置',
@@ -179,8 +197,8 @@ TOOLSET_PROFILES = {
     },
     'panel': {
         'name': '面板模式',
-        'description': '核心+所有面板工具+定时任务',
-        'toolsets': ['panel_shop', 'panel_docker', 'panel_website', 'panel_database', 'crontab'],
+        'description': '核心+所有面板工具+智能部署+定时任务',
+        'toolsets': ['panel_shop', 'panel_docker', 'panel_website', 'panel_database', 'panel_deploy', 'crontab'],
     },
     'full': {
         'name': '全量模式',
@@ -201,7 +219,7 @@ def get_toolset_tools(toolset_name: str) -> List[str]:
     return list(ts.get('tools', []))
 
 
-_PANEL_TOOLSETS = {'panel_shop', 'panel_docker', 'panel_website', 'panel_database'}
+_PANEL_TOOLSETS = {'panel_shop', 'panel_docker', 'panel_website', 'panel_database', 'panel_deploy'}
 
 
 def get_profile_tools(profile_name: str) -> List[str]:
@@ -220,7 +238,7 @@ def get_profile_tools(profile_name: str) -> List[str]:
     return list(tools)
 
 
-_PANEL_GENERAL_KEYWORDS = ['如意面板', '面板', 'ruyi', 'panel', '如何', '怎么', '怎样', '升级', '安装', '配置', '使用', '操作', '功能']
+_PANEL_GENERAL_KEYWORDS = ['如意面板', '面板', 'ruyi', 'panel', '如何', '怎么', '怎样', '升级', '安装', '配置', '使用', '操作', '功能', '哪里', '在哪', '位置', '菜单', '导航', '入口', '页面', '路径', '找', '找不到']
 
 
 def _is_panel_general_question(user_input: str) -> bool:
@@ -240,10 +258,10 @@ def match_toolsets_by_keywords(user_input: str) -> List[str]:
                 if ts_name not in matched:
                     matched.append(ts_name)
                 break
-    # 检测通用面板问题，确保文档工具可用
+    # 检测通用面板问题（菜单导航、功能位置等），确保文档工具可用
     if not matched and _is_panel_general_question(user_input):
-        # 返回一个空列表，但后续会通过 DOC_TOOLS 机制加载文档工具
-        pass
+        # 加载文档工具，让AI可以搜索知识库回答菜单位置等问题
+        matched.append('_doc_tools')
     return matched
 
 
@@ -251,6 +269,10 @@ def resolve_tools_by_toolsets(toolset_names: List[str]) -> List[str]:
     tools = set()
     has_panel_toolset = False
     for ts_name in toolset_names:
+        # 特殊标记：仅加载文档工具
+        if ts_name == '_doc_tools':
+            tools.update(DOC_TOOLS)
+            continue
         tools.update(get_toolset_tools(ts_name))
         core_for_ts = TOOLSET_CORE_TOOLS.get(ts_name, MINIMAL_TOOLS)
         tools.update(core_for_ts)
@@ -402,7 +424,8 @@ def ai_match_toolsets(user_input: str, ai_model=None) -> Optional[Dict[str, Any]
         logger.info(f'[AI路由] 用户输入="{user_input[:50]}", AI返回="{content}", 耗时{elapsed:.1f}s')
 
         if content == 'none' or not content:
-            return {'toolsets': [], 'need_task': False, 'need_doc': False}
+            logger.info(f'[AI路由] AI返回空/none, 降级为关键词匹配')
+            return None
 
         matched_toolsets = []
         need_task = False

@@ -11,6 +11,8 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     ports:
       - ${HOST_IP}:${MYSQL_PORT}:3306
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${APP_PATH}/data/:/var/lib/mysql
       - ${APP_PATH}/my.cnf:/etc/my.cnf

@@ -1,3 +1,4 @@
+import json
 from apps.sysai.tools.base import register_tool
 from apps.system.models import Databases
 from utils.install.mysql import (
@@ -7,6 +8,111 @@ from utils.install.mysql import (
     RY_GET_MYSQL_ROOT_PASS,
 )
 from utils.security.safe_filter import is_validate_db_passwd
+
+
+def _create_database_via_docker_mysql(db_name, db_user, db_pass, format='utf8mb4', accept='localhost', accept_ips=''):
+    """当本地MySQL不可用时，尝试通过Docker容器中的MySQL创建数据库和用户"""
+    try:
+        from apps.sysdocker.models import RyDockerApps as DockerApps
+        from utils.common import RunCommand
+        from apps.sysai.tools.base import AIToolRegistry
+        import time
+
+        registry = AIToolRegistry()
+        registry.emit_progress('panel_database_create', 'tool.log', 0, '正在查找Docker MySQL容器...')
+
+        # 查找MySQL容器应用
+        mysql_apps = DockerApps.objects.filter(appname='mysql')
+        if not mysql_apps:
+            return {'error': '未找到Docker MySQL应用，请先通过Docker广场安装MySQL'}
+
+        mysql_app = mysql_apps.first()
+        mysql_name = mysql_app.name
+
+        # 获取MySQL root密码
+        mysql_params = {}
+        if mysql_app.params:
+            try:
+                mysql_params = json.loads(mysql_app.params) if isinstance(mysql_app.params, str) else mysql_app.params
+            except Exception:
+                mysql_params = {}
+
+        mysql_root_password = mysql_params.get('mysql_root_password', '')
+        if not mysql_root_password:
+            return {'error': '未找到Docker MySQL root密码'}
+
+        mysql_container = f"{mysql_name}-{mysql_name}-1"
+        registry.emit_progress('panel_database_create', 'tool.log', 0, f'找到MySQL容器: {mysql_container}，等待MySQL就绪...')
+
+        # 等待MySQL就绪（最多120秒）
+        ready = False
+        for attempt in range(24):
+            out, err, rc = RunCommand(
+                f'docker exec {mysql_container} mysql -uroot -p"{mysql_root_password}" -e "SELECT 1" 2>/dev/null',
+                timeout=10, returncode=True
+            )
+            if rc == 0:
+                ready = True
+                break
+            elapsed = (attempt + 1) * 5
+            registry.emit_progress('panel_database_create', 'tool.log', 0, f'等待MySQL就绪... ({elapsed}s/120s)')
+            time.sleep(5)
+
+        if not ready:
+            return {'error': f'Docker MySQL容器({mysql_container})未就绪，已等待120秒'}
+
+        registry.emit_progress('panel_database_create', 'tool.log', 0, 'MySQL已就绪，检查数据库是否已存在...')
+
+        # 检查数据库是否已存在
+        out, err, rc = RunCommand(
+            f'docker exec {mysql_container} mysql -uroot -p"{mysql_root_password}" -e "SHOW DATABASES" 2>/dev/null',
+            timeout=10, returncode=True
+        )
+        if db_name in (out or ''):
+            return {'error': f'Docker MySQL中已存在数据库: {db_name}'}
+
+        registry.emit_progress('panel_database_create', 'tool.log', 0, f'正在创建数据库 {db_name} 和用户 {db_user}...')
+
+        # 创建数据库和用户
+        host_clause = '%' if accept == 'all' else ('localhost' if accept == 'localhost' else accept_ips)
+        db_collate_dic = {
+            'utf8': 'utf8_general_ci',
+            'utf8mb4': 'utf8mb4_unicode_ci',
+        }
+        db_collate = db_collate_dic.get(format, 'utf8mb4_unicode_ci')
+
+        sql = (
+            f"CREATE DATABASE IF NOT EXISTS `{db_name}` DEFAULT CHARACTER SET {format} COLLATE {db_collate}; "
+            f"CREATE USER IF NOT EXISTS '{db_user}'@'{host_clause}' IDENTIFIED WITH mysql_native_password BY '{db_pass}'; "
+            f"GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'{host_clause}'; "
+            f"FLUSH PRIVILEGES;"
+        )
+        out, err, rc = RunCommand(
+            f'docker exec -i {mysql_container} mysql -uroot -p"{mysql_root_password}" <<\'EOSQL\'\n{sql}\nEOSQL',
+            timeout=15, returncode=True
+        )
+
+        # MySQL命令行密码警告可能导致rc!=0，但SQL可能已执行成功
+        if rc != 0:
+            registry.emit_progress('panel_database_create', 'tool.log', 0, '验证数据库是否创建成功...')
+            out2, err2, rc2 = RunCommand(
+                f'docker exec {mysql_container} mysql -uroot -p"{mysql_root_password}" -e "SHOW DATABASES" 2>/dev/null',
+                timeout=10, returncode=True
+            )
+            if db_name not in (out2 or ''):
+                return {'error': f'在Docker MySQL中创建数据库失败: {err}'}
+
+        registry.emit_progress('panel_database_create', 'tool.log', 0, f'数据库 {db_name} 创建成功')
+
+        return {
+            'success': True,
+            'database': db_name,
+            'user': db_user,
+            'container': mysql_container,
+            'message': f'已在Docker MySQL容器({mysql_container})中创建数据库 {db_name} 和用户 {db_user}'
+        }
+    except Exception as e:
+        return {'error': f'Docker MySQL创建数据库异常: {str(e)}'}
 
 
 @register_tool(id='panel_database_list', category='panel', name_cn='数据库列表', risk_level='low')
@@ -74,12 +180,25 @@ def panel_database_create(db_name: str, db_user: str, db_pass: str, db_type: int
         db_name: 数据库名称，只能包含字母、数字、下划线、点、横线
         db_user: 数据库用户名，不能使用root、mysql、test等保留名
         db_pass: 数据库密码
-        db_type: 数据库类型，0=MySQL、1=SqlServer、2=MongoDB、3=PgSql、4=Redis，默认0
+        db_type: 数据库类型，0=MySQL、1=SqlServer、2=MongoDB、3=PgSql、4=Redis，默认0（也支持传入字符串如"mysql"、"0"等，会自动转换）
         format: 数据库编码，utf8、utf8mb4、gbk、big5，默认utf8mb4
         accept: 访问权限，all=所有人、localhost=本地服务器、ip=指定IP，默认localhost
         accept_ips: 允许访问的IP地址，多个用逗号分隔（仅accept=ip时需要）
     """
     try:
+        # 兼容AI传入字符串类型的db_type（如"mysql"、"0"、"1"等）
+        _DB_TYPE_MAP = {
+            'mysql': 0, 'mssql': 1, 'sqlserver': 1, 'mongodb': 2, 'pgsql': 3, 'postgres': 3, 'postgresql': 3, 'redis': 4,
+        }
+        if isinstance(db_type, str):
+            if db_type.lower() in _DB_TYPE_MAP:
+                db_type = _DB_TYPE_MAP[db_type.lower()]
+            else:
+                try:
+                    db_type = int(db_type)
+                except (ValueError, TypeError):
+                    return {'error': f'不支持的数据库类型: {db_type}，可用值: 0=MySQL、1=SqlServer、2=MongoDB、3=PgSql、4=Redis，或传入字符串如"mysql"'}
+
         import re
         reg = r"^[\w\.-]+$"
         checks_list = ['root', 'mysql', 'test', 'sys', 'mysql.sys', 'mysql.session', 'mysql.infoschema']
@@ -108,7 +227,19 @@ def panel_database_create(db_name: str, db_user: str, db_pass: str, db_type: int
         if db_type == 0:
             db_conn = Mysql_Connect()
             if not db_conn:
-                return {'error': 'MySQL连接失败，请确保已安装MySQL并正在运行'}
+                # 本地MySQL连接失败，尝试通过Docker容器中的MySQL创建
+                docker_result = _create_database_via_docker_mysql(db_name, db_user, db_pass, format, accept, accept_ips)
+                if docker_result.get('success'):
+                    db_ins = Databases.objects.create(
+                        db_name=db_name, db_user=db_user, db_pass=db_pass,
+                        db_type=db_type, format=format, accept=accept,
+                        accept_ips=accept_ips, is_remote=False,
+                    )
+                    docker_result['db_id'] = db_ins.id
+                    docker_result['message'] = f'数据库 {db_name} 创建成功（通过Docker MySQL容器）'
+                    return docker_result
+                else:
+                    return {'error': f'MySQL连接失败，本地MySQL未运行且Docker MySQL创建也失败: {docker_result.get("error", "未知错误")}'}
 
             if RY_CHECK_MYSQL_DATANAME_EXISTS(db_conn, db_name):
                 return {'error': f'MySQL中已存在数据库: {db_name}'}
@@ -225,20 +356,46 @@ def panel_database_reset_pass(db_id: int, new_pass: str):
 @register_tool(id='panel_database_root_pass', category='panel', name_cn='获取数据库Root密码', risk_level='low')
 def panel_database_root_pass(db_type: str = 'mysql'):
     """获取如意面板管理的数据库Root密码。当用户需要获取数据库管理员密码时使用。
+    支持两种MySQL安装方式：应用商店安装和Docker广场安装。
 
     Args:
         db_type: 数据库类型，目前仅支持 mysql
     """
     try:
         if db_type == 'mysql':
+            # 1. 先尝试应用商店安装的MySQL
             passwd = RY_GET_MYSQL_ROOT_PASS()
             if passwd:
                 return {
                     'db_type': 'mysql',
                     'root_password': passwd,
+                    'install_method': '应用商店',
                     'note': '请妥善保管此密码，不要泄露给他人',
                 }
-            return {'error': '获取MySQL Root密码失败，可能未安装MySQL'}
+
+            # 2. 尝试Docker广场安装的MySQL
+            from apps.sysdocker.models import RyDockerApps
+            mysql_apps = RyDockerApps.objects.filter(appname='mysql')
+            for app in mysql_apps:
+                params = {}
+                if app.params:
+                    try:
+                        params = json.loads(app.params) if isinstance(app.params, str) else app.params
+                    except Exception:
+                        params = {}
+                root_pwd = params.get('mysql_root_password', '')
+                if root_pwd:
+                    return {
+                        'db_type': 'mysql',
+                        'root_password': root_pwd,
+                        'install_method': 'Docker广场',
+                        'container_name': f"{app.name}-{app.name}-1",
+                        'app_name': app.name,
+                        'app_status': app.status,
+                        'note': '请妥善保管此密码，不要泄露给他人',
+                    }
+
+            return {'error': '获取MySQL Root密码失败，未找到已安装的MySQL（应用商店和Docker广场均未检测到）'}
         return {'error': f'暂不支持获取 {db_type} 的Root密码'}
     except Exception as e:
         return {'error': f'获取密码失败: {str(e)}'}

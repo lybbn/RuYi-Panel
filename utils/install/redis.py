@@ -326,7 +326,9 @@ def RY_GET_REDIS_CONF(is_windows=True):
 
 def RY_GET_REDIS_PORT(is_windows=True):
     conf_options = RY_GET_REDIS_CONF_OPTIONS(is_windows=is_windows)
-    return conf_options['port']
+    if not conf_options:
+        return 6379
+    return conf_options.get('port', 6379)
 
 def RY_SAVE_REDIS_CONF(conf="",is_windows=True):
     soft_paths = get_redis_path_info()

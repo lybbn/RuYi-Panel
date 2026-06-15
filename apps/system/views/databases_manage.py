@@ -149,6 +149,76 @@ class DatabasesViewSet(CustomModelViewSet):
             return db_conn, None
         return None, "local"
 
+    def _get_mysql_conn_by_db(self, db_ins, db_name=""):
+        """通过 Databases 实例反查 RemoteMysql 获取连接（用于远程数据库操作）"""
+        if not db_ins.is_remote:
+            db_conn = Mysql_Connect()
+            if not db_conn:
+                return None, "本地MySQL连接失败"
+            return db_conn, None
+        remote = RemoteMysql.objects.filter(db_host=db_ins.db_host, db_port=int(db_ins.db_port)).first()
+        if not remote:
+            return None, "未找到对应的远程MySQL服务器配置"
+        db_conn = Mysql_Connect(
+            db_host=remote.db_host,
+            db_port=int(remote.db_port),
+            db_user=remote.db_user,
+            db_password=remote.db_password or "",
+            db_name=db_name,
+            local=False,
+        )
+        if not db_conn:
+            return None, "远程MySQL连接失败"
+        return db_conn, None
+
+    @action(methods=['POST'], detail=False)
+    def sync_remote_databases(self, request, *args, **kwargs):
+        """从远程MySQL服务器同步数据库列表到面板"""
+        reqData = get_parameter_dic(request)
+        sid = reqData.get("sid", 0)
+        if not sid or int(sid) <= 0:
+            return ErrorResponse(msg="请选择远程MySQL服务器")
+        remote = RemoteMysql.objects.filter(id=int(sid)).first()
+        if not remote:
+            return ErrorResponse(msg="远程MySQL服务器不存在")
+        db_conn, conn_err = self._get_mysql_conn_by_sid(sid)
+        if conn_err:
+            return ErrorResponse(msg=conn_err)
+        try:
+            result = db_conn.filter("SHOW DATABASES")
+            if not result or isinstance(result, Exception):
+                return ErrorResponse(msg="查询远程数据库列表失败")
+            db_conn.close()
+        except Exception as e:
+            return ErrorResponse(msg="查询远程数据库列表失败：%s" % str(e))
+        nameArr = ['information_schema', 'performance_schema', 'mysql', 'sys']
+        n = 0
+        for row in result:
+            db_name = row[0]
+            if db_name in nameArr:
+                continue
+            if not re.match(r"^[\w\.-]+$", db_name):
+                continue
+            if Databases.objects.filter(db_name=db_name, db_type=0, db_host=remote.db_host, db_port=remote.db_port, is_remote=True).exists():
+                continue
+            Databases.objects.create(
+                db_name=db_name,
+                db_user="",
+                db_pass="",
+                db_host=remote.db_host,
+                db_port=remote.db_port,
+                db_type=0,
+                format="utf8mb4",
+                accept="all",
+                is_remote=True,
+                remark=db_name,
+            )
+            n += 1
+        if n > 0:
+            RuyiAddOpLog(request, msg="【数据库管理】-【同步远程数据库】从 %s:%s 同步了 %s 个数据库" % (remote.db_host, remote.db_port, n), module="dbmg")
+            return DetailResponse(data={"sync_count": n}, msg="同步成功，新增 %s 个数据库" % n)
+        return DetailResponse(data={"sync_count": 0}, msg="数据库已是最新，无需同步")
+
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         ok,msg = self.check_user_inputdata(request,create_mode=True)
@@ -212,13 +282,10 @@ class DatabasesViewSet(CustomModelViewSet):
             db_port = int(sql_ins.db_port)
             format = sql_ins.format
             if db_type == 0:
-                if local:
-                    db_conn = Mysql_Connect(local=local)
-                else:
-                    db_conn = Mysql_Connect(db_host=db_host,db_port=db_port,db_user=db_user,db_password=db_pass,charset=format,local=local)
-                if not db_conn:
-                    RuyiAddOpLog(request,msg="【数据库管理】-【删除数据库】=>%s 失败：mysql连接失败"%db_name,module="dbmg",status=False)
-                    raise ValueError("mysql连接失败【%s】"%db_name)
+                db_conn, conn_err = self._get_mysql_conn_by_db(sql_ins)
+                if conn_err:
+                    RuyiAddOpLog(request,msg="【数据库管理】-【删除数据库】=>%s 失败：%s"%(db_name, conn_err),module="dbmg",status=False)
+                    raise ValueError(conn_err + "【%s】"%db_name)
             RY_DELETE_MYSQL_DATABASE(db_conn,db_info={'db_name':db_name,'db_user':db_user})
             #删除备份文件
             bk_qy = RuyiBackup.objects.filter(type = 1,fid=sql_ins.id)
@@ -270,13 +337,10 @@ class DatabasesViewSet(CustomModelViewSet):
             db_port = int(sql_ins.db_port)
             format = sql_ins.format
             if db_type == 0:
-                if local:
-                    db_conn = Mysql_Connect(local=local)
-                else:
-                    db_conn = Mysql_Connect(db_host=db_host,db_port=db_port,db_user=db_user,db_password=db_pass,charset=format,local=local)
-                if not db_conn:
-                    raise ValueError("mysql连接失败")
-                RY_RESET_MYSQL_USER_PASS(db_conn,{'db_name':db_name,'db_user':db_user,'db_pass':db_pass})
+                db_conn, conn_err = self._get_mysql_conn_by_db(sql_ins)
+                if conn_err:
+                    raise ValueError(conn_err)
+                RY_RESET_MYSQL_USER_PASS(db_conn,{'db_name':db_name,'db_user':db_user,'db_pass':passwd})
             Databases.objects.filter(id=id).update(db_pass=passwd)
             RuyiAddOpLog(request,msg="【数据库管理】-【设置数据库密码】-【%s】=> %s 成功"%(db_name,passwd),module="dbmg")
             return DetailResponse(msg="操作成功")
@@ -306,12 +370,9 @@ class DatabasesViewSet(CustomModelViewSet):
             format = sql_ins.format
             local = False if sql_ins.is_remote else True
             if db_type == 0:
-                if local:
-                    db_conn = Mysql_Connect(local=local)
-                else:
-                    db_conn = Mysql_Connect(db_host=db_host,db_port=db_port,db_user=db_user,db_password=db_pass,charset=format,local=local)
-                if not db_conn:
-                    raise ValueError("mysql连接失败")
+                db_conn, conn_err = self._get_mysql_conn_by_db(sql_ins)
+                if conn_err:
+                    raise ValueError(conn_err)
                 RY_CREATE_MYSQL_USER(db_conn,{'db_name':db_name,'db_user':db_user,'db_pass':db_pass,'accept':accept,'accept_ips':accept_ips})
             Databases.objects.filter(id=id).update(accept=accept,accept_ips=accept_ips)
             RuyiAddOpLog(request,msg="【数据库管理】-【设置数据库访问权限】-【%s】=> %s %s"%(db_name,accept,accept_ips),module="dbmg")
@@ -466,6 +527,72 @@ class MongodbDatabaseViewSet(CustomModelViewSet):
             return db_conn, None
         return None, "local"
 
+    def _get_mongodb_conn_by_db(self, db_ins):
+        """通过 Databases 实例反查 RemoteMongodb 获取连接"""
+        if not db_ins.is_remote:
+            db_conn = Mongodb_Connect(local=True)
+            if not db_conn:
+                return None, "本地MongoDB连接失败"
+            return db_conn, None
+        remote = RemoteMongodb.objects.filter(db_host=db_ins.db_host, db_port=int(db_ins.db_port)).first()
+        if not remote:
+            return None, "未找到对应的远程MongoDB服务器配置"
+        db_conn = Mongodb_Connect(
+            db_host=remote.db_host,
+            db_port=int(remote.db_port),
+            db_user=remote.db_user if remote.db_user else None,
+            db_password=remote.db_password if remote.db_password else None,
+            local=False,
+        )
+        if not db_conn:
+            return None, "远程MongoDB连接失败"
+        return db_conn, None
+
+    @action(methods=['POST'], detail=False)
+    def sync_remote_databases(self, request, *args, **kwargs):
+        """从远程MongoDB服务器同步数据库列表到面板"""
+        reqData = get_parameter_dic(request)
+        sid = reqData.get("sid", 0)
+        if not sid or int(sid) <= 0:
+            return ErrorResponse(msg="请选择远程MongoDB服务器")
+        remote = RemoteMongodb.objects.filter(id=int(sid)).first()
+        if not remote:
+            return ErrorResponse(msg="远程MongoDB服务器不存在")
+        db_conn, conn_err = self._get_mongodb_conn_by_sid(sid)
+        if conn_err:
+            return ErrorResponse(msg=conn_err)
+        try:
+            result = db_conn.list_database_names()
+            db_conn.close()
+        except Exception as e:
+            return ErrorResponse(msg="查询远程数据库列表失败：%s" % str(e))
+        nameArr = ['admin', 'config', 'local']
+        n = 0
+        for db_name in result:
+            if db_name in nameArr:
+                continue
+            if not re.match(r"^[\w\.-]+$", db_name):
+                continue
+            if Databases.objects.filter(db_name=db_name, db_type=2, db_host=remote.db_host, db_port=remote.db_port, is_remote=True).exists():
+                continue
+            Databases.objects.create(
+                db_name=db_name,
+                db_user="",
+                db_pass="",
+                db_host=remote.db_host,
+                db_port=remote.db_port,
+                db_type=2,
+                format="utf8",
+                accept="all",
+                is_remote=True,
+                remark=db_name,
+            )
+            n += 1
+        if n > 0:
+            RuyiAddOpLog(request, msg="【数据库管理】-【同步远程数据库】从 %s:%s 同步了 %s 个MongoDB数据库" % (remote.db_host, remote.db_port, n), module="dbmg")
+            return DetailResponse(data={"sync_count": n}, msg="同步成功，新增 %s 个数据库" % n)
+        return DetailResponse(data={"sync_count": 0}, msg="数据库已是最新，无需同步")
+
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         ok, msg = self.check_user_inputdata(request, create_mode=True)
@@ -516,19 +643,10 @@ class MongodbDatabaseViewSet(CustomModelViewSet):
             local = False if sql_ins.is_remote else True
             db_name = sql_ins.db_name
             db_user = sql_ins.db_user
-            if local:
-                db_conn = Mongodb_Connect(local=True)
-            else:
-                db_conn = Mongodb_Connect(
-                    db_host=sql_ins.db_host,
-                    db_port=int(sql_ins.db_port),
-                    db_user=sql_ins.db_user if sql_ins.db_user else None,
-                    db_password=sql_ins.db_pass if sql_ins.db_pass else None,
-                    local=False,
-                )
-            if not db_conn:
-                RuyiAddOpLog(request, msg="【数据库管理】-【删除MongoDB数据库】=>%s 失败：mongodb连接失败" % db_name, module="dbmg", status=False)
-                raise ValueError("mongodb连接失败【%s】" % db_name)
+            db_conn, conn_err = self._get_mongodb_conn_by_db(sql_ins)
+            if conn_err:
+                RuyiAddOpLog(request, msg="【数据库管理】-【删除MongoDB数据库】=>%s 失败：%s" % (db_name, conn_err), module="dbmg", status=False)
+                raise ValueError(conn_err + "【%s】" % db_name)
             RY_DELETE_MONGODB_DATABASE(db_conn, db_name, db_user)
             bk_qy = RuyiBackup.objects.filter(type=1, fid=sql_ins.id)
             for b in bk_qy:
@@ -580,13 +698,9 @@ class MongodbDatabaseViewSet(CustomModelViewSet):
             if local:
                 db_conn = Mongodb_Connect(local=True)
             else:
-                db_conn = Mongodb_Connect(
-                    db_host=sql_ins.db_host,
-                    db_port=int(sql_ins.db_port),
-                    db_user=sql_ins.db_user if sql_ins.db_user else None,
-                    db_password=sql_ins.db_pass if sql_ins.db_pass else None,
-                    local=False,
-                )
+                db_conn, conn_err = self._get_mongodb_conn_by_db(sql_ins)
+                if conn_err:
+                    raise ValueError(conn_err)
             if not db_conn:
                 raise ValueError("mongodb连接失败")
             RY_RESET_MONGODB_USER_PASS(db_conn, sql_ins.db_name, sql_ins.db_user, passwd)
@@ -640,6 +754,11 @@ class MongodbDatabaseViewSet(CustomModelViewSet):
                 db_user = "root"
                 db_pass = RY_GET_MONGODB_ROOT_PASS()
                 db_port = RY_GET_MONGODB_PORT()
+            else:
+                remote = RemoteMongodb.objects.filter(db_host=sql_ins.db_host, db_port=int(sql_ins.db_port)).first()
+                if remote:
+                    db_user = remote.db_user or ""
+                    db_pass = remote.db_password or ""
             isok, dst_path, dst_size = RY_BACKUP_MONGODB_DATABASE(
                 db_info={"id": id, "db_name": db_name, "db_user": db_user, "db_pass": db_pass, "db_host": db_host, "db_port": db_port},
                 is_windows=is_windows,
@@ -711,6 +830,11 @@ class MongodbDatabaseViewSet(CustomModelViewSet):
                 db_user = "root"
                 db_pass = RY_GET_MONGODB_ROOT_PASS()
                 db_port = RY_GET_MONGODB_PORT()
+            else:
+                remote = RemoteMongodb.objects.filter(db_host=sql_ins.db_host, db_port=int(sql_ins.db_port)).first()
+                if remote:
+                    db_user = remote.db_user or ""
+                    db_pass = remote.db_password or ""
             try:
                 RY_IMPORT_MONGODB_SQL(
                     db_info={"db_name": db_name, "db_user": db_user, "db_pass": db_pass, "db_host": db_host, "db_port": db_port},
@@ -1699,6 +1823,75 @@ class PgsqlDatabaseViewSet(CustomModelViewSet):
             return db_conn, None
         return None, "local"
 
+    def _get_pgsql_conn_by_db(self, db_ins):
+        """通过 Databases 实例反查 RemotePgsql 获取连接"""
+        if not db_ins.is_remote:
+            db_conn = Pgsql_Connect(local=True)
+            if not db_conn:
+                return None, "本地PgSQL连接失败"
+            return db_conn, None
+        remote = RemotePgsql.objects.filter(db_host=db_ins.db_host, db_port=int(db_ins.db_port)).first()
+        if not remote:
+            return None, "未找到对应的远程PostgreSQL服务器配置"
+        db_conn = Pgsql_Connect(
+            db_host=remote.db_host,
+            db_port=int(remote.db_port),
+            db_user=remote.db_user,
+            db_password=remote.db_password or "",
+            local=False,
+        )
+        if not db_conn:
+            return None, "远程PgSQL连接失败"
+        return db_conn, None
+
+    @action(methods=['POST'], detail=False)
+    def sync_remote_databases(self, request, *args, **kwargs):
+        """从远程PostgreSQL服务器同步数据库列表到面板"""
+        reqData = get_parameter_dic(request)
+        sid = reqData.get("sid", 0)
+        if not sid or int(sid) <= 0:
+            return ErrorResponse(msg="请选择远程PostgreSQL服务器")
+        remote = RemotePgsql.objects.filter(id=int(sid)).first()
+        if not remote:
+            return ErrorResponse(msg="远程PostgreSQL服务器不存在")
+        db_conn, conn_err = self._get_pgsql_conn_by_sid(sid)
+        if conn_err:
+            return ErrorResponse(msg=conn_err)
+        try:
+            cursor = db_conn.cursor()
+            cursor.execute("SELECT datname FROM pg_database WHERE datistemplate = false")
+            result = cursor.fetchall()
+            db_conn.close()
+        except Exception as e:
+            return ErrorResponse(msg="查询远程数据库列表失败：%s" % str(e))
+        nameArr = ['postgres']
+        n = 0
+        for row in result:
+            db_name = row[0]
+            if db_name in nameArr:
+                continue
+            if not re.match(r"^[\w\.-]+$", db_name):
+                continue
+            if Databases.objects.filter(db_name=db_name, db_type=3, db_host=remote.db_host, db_port=remote.db_port, is_remote=True).exists():
+                continue
+            Databases.objects.create(
+                db_name=db_name,
+                db_user="",
+                db_pass="",
+                db_host=remote.db_host,
+                db_port=remote.db_port,
+                db_type=3,
+                format="utf8",
+                accept="all",
+                is_remote=True,
+                remark=db_name,
+            )
+            n += 1
+        if n > 0:
+            RuyiAddOpLog(request, msg="【数据库管理】-【同步远程数据库】从 %s:%s 同步了 %s 个PgSQL数据库" % (remote.db_host, remote.db_port, n), module="dbmg")
+            return DetailResponse(data={"sync_count": n}, msg="同步成功，新增 %s 个数据库" % n)
+        return DetailResponse(data={"sync_count": 0}, msg="数据库已是最新，无需同步")
+
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         ok, msg = self.check_user_inputdata(request, create_mode=True)
@@ -1753,16 +1946,10 @@ class PgsqlDatabaseViewSet(CustomModelViewSet):
             local = False if sql_ins.is_remote else True
             db_name = sql_ins.db_name
             db_user = sql_ins.db_user
-            if local:
-                db_conn = Pgsql_Connect(local=True)
-            else:
-                db_conn = Pgsql_Connect(
-                    db_host=sql_ins.db_host,
-                    db_port=int(sql_ins.db_port),
-                    db_user=sql_ins.db_user,
-                    db_password=sql_ins.db_pass,
-                    local=False,
-                )
+            db_conn, conn_err = self._get_pgsql_conn_by_db(sql_ins)
+            if conn_err:
+                RuyiAddOpLog(request, msg="【数据库管理】-【删除PgSQL数据库】=>%s 失败：%s" % (db_name, conn_err), module="dbmg", status=False)
+                raise ValueError(conn_err + "【%s】" % db_name)
             if not db_conn:
                 RuyiAddOpLog(request, msg="【数据库管理】-【删除PgSQL数据库】=>%s 失败：pgsql连接失败" % db_name, module="dbmg", status=False)
                 raise ValueError("pgsql连接失败【%s】" % db_name)
@@ -1817,13 +2004,9 @@ class PgsqlDatabaseViewSet(CustomModelViewSet):
             if local:
                 db_conn = Pgsql_Connect(local=True)
             else:
-                db_conn = Pgsql_Connect(
-                    db_host=sql_ins.db_host,
-                    db_port=int(sql_ins.db_port),
-                    db_user=sql_ins.db_user,
-                    db_password=sql_ins.db_pass,
-                    local=False,
-                )
+                db_conn, conn_err = self._get_pgsql_conn_by_db(sql_ins)
+                if conn_err:
+                    raise ValueError(conn_err)
             if not db_conn:
                 raise ValueError("pgsql连接失败")
             RY_RESET_PGSQL_USER_PASS(db_conn, sql_ins.db_user, passwd)
@@ -1877,6 +2060,11 @@ class PgsqlDatabaseViewSet(CustomModelViewSet):
                 db_user = "postgres"
                 db_port = RY_GET_PGSQL_PORT()
                 db_pass = RY_GET_PGSQL_ROOT_PASS()
+            else:
+                remote = RemotePgsql.objects.filter(db_host=sql_ins.db_host, db_port=int(sql_ins.db_port)).first()
+                if remote:
+                    db_user = remote.db_user or ""
+                    db_pass = remote.db_password or ""
             isok, dst_path, dst_size = RY_BACKUP_PGSQL_DATABASE(
                 db_info={"id": id, "db_name": db_name, "db_user": db_user, "db_pass": db_pass, "db_host": db_host, "db_port": db_port},
                 is_windows=is_windows
@@ -1952,6 +2140,11 @@ class PgsqlDatabaseViewSet(CustomModelViewSet):
                 db_user = "postgres"
                 db_port = RY_GET_PGSQL_PORT()
                 db_pass = RY_GET_PGSQL_ROOT_PASS()
+            else:
+                remote = RemotePgsql.objects.filter(db_host=sql_ins.db_host, db_port=int(sql_ins.db_port)).first()
+                if remote:
+                    db_user = remote.db_user or ""
+                    db_pass = remote.db_password or ""
             isok, err_msg = RY_IMPORT_PGSQL_SQL(
                 db_info={"db_name": db_name, "db_user": db_user, "db_pass": db_pass, "db_host": db_host, "db_port": db_port},
                 sql_file=bk_ins.filename,

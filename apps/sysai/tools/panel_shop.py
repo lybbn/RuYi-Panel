@@ -88,9 +88,10 @@ def panel_shop_install(soft_name: str, version_id: int = 0):
 
     ⚠️重要规则：
     1. Nginx仅支持安装OpenResty版本（version字段为"openresty"的版本），不支持安装标准Nginx版本。安装Nginx时无需指定version_id，系统会自动选择OpenResty版本。
-    2. 如果之前的安装任务失败了，不要自动重新安装。应先告知用户失败原因，等用户明确表示要重试后再调用此工具。
-    3. 每次只应安装一个软件，不要在一次回复中连续调用多次panel_shop_install。
-    4. 任务提交后返回的note中会提示不要立即查询状态。安装是异步的，任务刚提交时状态为等待中，此时查询状态没有意义。应告知用户安装已提交，等用户主动询问进度时再调用panel_shop_task_status查询。
+    2. Linux下Nginx OpenResty支持两种安装方式：编译安装（支持任意版本+WAF模块）和快速安装（通过系统包管理器apt/yum，秒级完成，OpenResty自带WAF/Lua支持）。如果用户未明确指定安装方式，优先推荐快速安装（需选择版本中带有"(快速)"标记的版本）。
+    3. 如果之前的安装任务失败了，不要自动重新安装。应先告知用户失败原因，等用户明确表示要重试后再调用此工具。
+    4. 每次只应安装一个软件，不要在一次回复中连续调用多次panel_shop_install。
+    5. 任务提交后返回的note中会提示不要立即查询状态。安装是异步的，任务刚提交时状态为等待中，此时查询状态没有意义。应告知用户安装已提交，等用户主动询问进度时再调用panel_shop_task_status查询。
 
     Args:
         soft_name: 软件名称，如 nginx、mysql、redis、php、python、go 等（必须是应用商店中存在的名称）

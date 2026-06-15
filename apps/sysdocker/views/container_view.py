@@ -19,12 +19,14 @@ import os
 import psutil
 from utils.customView import CustomAPIView
 from utils.pagination import CustomPagination
-from utils.common import get_parameter_dic
+from utils.common import get_parameter_dic,DeleteDir
 from utils.jsonResponse import ErrorResponse,DetailResponse,SuccessResponse
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
 from apps.syslogs.logutil import RuyiAddOpLog
 from utils.ruyiclass.dockerClass import DockerClient, get_sha_id
+from apps.sysdocker.models import RyDockerApps
+from utils.ruyiclass.dockerInclude.ry_dk_square import main as dksquare
 
 class RYDockerLimitManageView(CustomAPIView):
     """
@@ -71,6 +73,16 @@ class RYDockerContainerManageView(CustomAPIView):
             reqData['action_type']="container"
             isok,msg = docker_client.delete(reqData)
             if not isok:return ErrorResponse(msg=msg)
+            # 同步清理容器广场的关联数据
+            try:
+                sq_ins = RyDockerApps.objects.filter(name=name).first()
+                if sq_ins:
+                    newsq = dksquare()
+                    app_path = newsq.get_dkapp_path(cont={"appname":sq_ins.appname,"name":name})
+                    sq_ins.delete()
+                    DeleteDir(app_path)
+            except Exception:
+                pass
             RuyiAddOpLog(request,msg=f"【容器】- 删除容器：{name}",module="dockermg")
             return DetailResponse(msg=msg)
         elif action == "add":

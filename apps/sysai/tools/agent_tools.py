@@ -85,6 +85,7 @@ class TodoManager:
             current_todos = self.get_todos()
             current_map = {t.id: t for t in current_todos}
 
+            new_items = []  # 收集新增项，用于插入到正确位置
             for item_data in new_todos_data:
                 item_id = item_data.get('id')
                 if item_id and item_id in current_map:
@@ -96,6 +97,33 @@ class TodoManager:
                     if 'priority' in item_data:
                         existing.priority = item_data['priority']
                 else:
+                    new_items.append(item_data)
+
+            # 将新增项插入到父任务后面（如 id=3.1 插入到 id=3 后面）
+            for item_data in new_items:
+                item_id = item_data.get('id', '')
+                inserted = False
+                # 尝试找到父任务位置（如 "3.1" 的父任务是 "3"）
+                parent_id = item_id.split('.')[0] if '.' in str(item_id) else None
+                if parent_id and parent_id in current_map:
+                    parent_idx = None
+                    for idx, t in enumerate(current_todos):
+                        if t.id == parent_id:
+                            parent_idx = idx
+                            break
+                    if parent_idx is not None:
+                        # 找到父任务后面所有同级子任务的最后位置
+                        insert_idx = parent_idx + 1
+                        while insert_idx < len(current_todos):
+                            existing_id = current_todos[insert_idx].id
+                            # 同级子任务：父ID相同且是子任务（含.），或者紧跟的兄弟任务
+                            if str(existing_id).startswith(str(parent_id) + '.') or existing_id == parent_id:
+                                insert_idx += 1
+                            else:
+                                break
+                        current_todos.insert(insert_idx, TodoItem.from_dict(item_data))
+                        inserted = True
+                if not inserted:
                     current_todos.append(TodoItem.from_dict(item_data))
 
             final_todos = current_todos
@@ -280,13 +308,18 @@ Args:
     if completed and len(completed) == len(updated_todos):
         summary += '\n\n✅ 所有任务已完成！请向用户汇报最终结果。'
 
-    output = json.dumps([t.to_dict() for t in updated_todos], indent=2, ensure_ascii=False)
-    return _xml_response('TodoWrite', 'done', f'{summary}\n\n详细数据:\n{output}')
+    # 返回紧凑格式的JSON（前端需要解析渲染任务卡片）
+    output = json.dumps([t.to_dict() for t in updated_todos], separators=(',', ':'), ensure_ascii=False)
+    return _xml_response('TodoWrite', 'done', f'{summary}\n{output}')
 
 
 @register_tool(id='request_user_input', category='agent', name_cn='请求用户输入', risk_level='low')
 def request_user_input(title: str = '', fields: list = None, session_id: str = ''):
     """当需要用户提供结构化信息时，必须使用此工具展示表单，禁止用纯文本提问。
+
+## ⛔ 重要：一次收集所有参数
+**禁止多次调用此工具**。必须将所有需要收集的参数放在一次调用中，避免多次弹窗打断用户。
+例如部署应用时，域名、端口、安装方式等所有参数应在一次表单中全部收集完毕。
 
 ## 何时必须使用（强制）
 
@@ -335,7 +368,7 @@ Args:
     if not title:
         title = '请填写以下信息'
     if not fields:
-        fields = []
+        return _xml_response('request_user_input', 'error', 'fields参数不能为空，必须提供至少一个表单字段。请重新调用并传入fields数组，每个字段包含name、label、type等属性。')
 
     return _xml_response('request_user_input', 'done', json.dumps({'title': title, 'fields': fields}, ensure_ascii=False))
 

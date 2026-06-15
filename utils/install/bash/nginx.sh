@@ -12,12 +12,18 @@ action_type=$1
 nginx_version=$2
 #大版本
 nginx_version_2=$3
+install_type=$4  #1=编译安装 2=快速安装（二进制）
 jemallocLD=""
 
-IsCentos7=$(cat /etc/redhat-release | grep ' 7.' | grep -iE 'centos')
-IsCentos8=$(cat /etc/redhat-release | grep ' 8.' | grep -iE 'centos|Red Hat')
+IsCentos7=""
+IsCentos8=""
+if [ -f /etc/redhat-release ]; then
+    IsCentos7=$(cat /etc/redhat-release | grep ' 7.' | grep -iE 'centos')
+    IsCentos8=$(cat /etc/redhat-release | grep ' 8.' | grep -iE 'centos|Red Hat')
+fi
 
 cpu_core=$(cat /proc/cpuinfo|grep processor|wc -l)
+ARCH=$(uname -m)
 
 # 检查是否以 root 用户运行
 if [ "$(id -u)" -ne 0 ]; then
@@ -229,6 +235,275 @@ Install_Jemalloc() {
     fi
 }
 
+Install_Nginx_Binary() {
+    echo "==================================================="
+    echo "正在快速安装${nginx_version_2}-${nginx_version}"
+    echo "==================================================="
+    [ -f "/etc/init.d/nginx" ] && /etc/init.d/nginx stop
+    if [ -f "/etc/systemd/system/nginx.service" ];then
+        systemctl stop nginx > /dev/null
+    fi
+    # 停止已有的nginx/openresty进程
+    if pgrep -x "nginx" > /dev/null; then
+        pkill -9 nginx 2>/dev/null || true
+        sleep 1
+    fi
+
+    if ! getent group www > /dev/null; then
+        groupadd www
+    fi
+    if ! id -u www > /dev/null 2>&1; then
+        useradd -s /sbin/nologin -g www www
+    fi
+
+    # 清理旧安装
+    rm -rf ${NGINX_SETUP_PATH}
+
+    # 通过包管理器从官方仓库安装，复制到 NGINX_SETUP_PATH 后卸载系统包
+    if [ "${nginx_version_2}" == "openresty" ]; then
+        echo "====================================="
+        echo "通过包管理器安装 OpenResty..."
+        echo "====================================="
+        if [ -f "/usr/bin/apt-get" ];then
+            export DEBIAN_FRONTEND=noninteractive
+            # 安装依赖（wget、lsb-release 等）
+            apt-get install -y --no-install-recommends wget gnupg ca-certificates lsb-release > /dev/null 2>&1
+            # 确定仓库 URL 和 codename（支持回退到稳定版本）
+            local repo_url=""
+            local codename=$(lsb_release -sc 2>/dev/null || echo "")
+            if [ -f /etc/debian_version ] && [ ! -f /etc/lsb-release ]; then
+                # 纯 Debian 系统
+                [ -z "${codename}" ] && codename="bookworm"
+                repo_url="http://openresty.org/package/debian"
+            else
+                # Ubuntu 系统
+                [ -z "${codename}" ] && codename="jammy"
+                repo_url="http://openresty.org/package/ubuntu"
+            fi
+            # 写入仓库配置并验证可用性，不可用则回退到稳定版本
+            # 使用 trusted=yes 因为 OpenResty GPG 密钥使用 SHA1，新版 Debian/Ubuntu 已拒绝 SHA1 签名
+            local fallback_codenames=""
+            if echo "${repo_url}" | grep -q "debian"; then
+                fallback_codenames="bookworm bullseye"
+            else
+                fallback_codenames="jammy focal noble"
+            fi
+            echo "deb [trusted=yes] ${repo_url} ${codename} openresty" > /etc/apt/sources.list.d/openresty.list
+            echo "[更新] 正在更新 ${codename} 仓库..."
+            apt-get update -y 2>&1 | tail -3
+            # 检查仓库是否可用（404 表示 codename 不被支持）
+            if ! apt-cache policy openresty 2>/dev/null | grep -q "openresty"; then
+                echo "[提示] OpenResty 仓库不支持 ${codename}，尝试回退..."
+                local fallback_ok=0
+                for fb in ${fallback_codenames}; do
+                    if [ "${fb}" == "${codename}" ]; then continue; fi
+                    rm -f /etc/apt/sources.list.d/openresty.list
+                    echo "deb [trusted=yes] ${repo_url} ${fb} openresty" > /etc/apt/sources.list.d/openresty.list
+                    echo "[尝试] 使用 ${fb} 仓库..."
+                    apt-get update -y 2>&1 | tail -3
+                    if apt-cache policy openresty 2>/dev/null | grep -q "openresty"; then
+                        echo "[成功] 已回退到 ${fb} 仓库"
+                        fallback_ok=1
+                        break
+                    fi
+                done
+                if [ ${fallback_ok} -eq 0 ]; then
+                    echo "[警告] 所有仓库尝试失败，检查网络连接..."
+                    cat /etc/apt/sources.list.d/openresty.list 2>/dev/null || echo "[错误] 仓库配置文件不存在"
+                fi
+            fi
+            # 尝试安装指定版本，失败则安装最新版
+            local install_output=""
+            if [ -n "${nginx_version}" ] && [ "${nginx_version}" != "0.0.0" ]; then
+                local pkg_version=$(echo "${nginx_version}" | sed 's/-/./g')
+                install_output=$(apt-get install -y --allow-unauthenticated openresty=${pkg_version}* 2>&1) || \
+                install_output=$(apt-get install -y --allow-unauthenticated openresty 2>&1)
+            else
+                install_output=$(apt-get install -y --allow-unauthenticated openresty 2>&1)
+            fi
+            if [ $? -ne 0 ]; then
+                echo "[错误] apt-get install 输出:"
+                echo "${install_output}" | tail -10
+                Return_Error "OpenResty 安装失败: ${install_output##*$'\n'}"
+            fi
+        elif [ -f "/usr/bin/yum" ];then
+            if [ ! -f /etc/yum.repos.d/openresty.repo ]; then
+                yum install -y yum-utils > /dev/null 2>&1
+                local os_ver=$(rpm -q --qf "%{VERSION}" $(rpm -qf /etc/redhat-release 2>/dev/null || echo "centos-release") 2>/dev/null | cut -d. -f1)
+                cat > /etc/yum.repos.d/openresty.repo <<YUMEOF
+[openresty]
+name=Official OpenResty Open Source Repository for CentOS
+baseurl=https://openresty.org/package/centos/${os_ver}/\$basearch
+skip_if_unavailable=True
+gpgcheck=1
+repo_gpgcheck=0
+gpgkey=https://openresty.org/package/pubkey.gpg
+enabled=1
+enabled_metadata=1
+YUMEOF
+            fi
+            # 尝试安装指定版本，失败则安装最新版
+            if [ -n "${nginx_version}" ] && [ "${nginx_version}" != "0.0.0" ]; then
+                local pkg_version=$(echo "${nginx_version}" | sed 's/-/./g')
+                yum install -y openresty-${pkg_version} > /dev/null 2>&1 || \
+                yum install -y openresty > /dev/null 2>&1
+            else
+                yum install -y openresty > /dev/null 2>&1
+            fi
+            if [ $? -ne 0 ]; then
+                Return_Error "OpenResty 安装失败，请检查网络连接"
+            fi
+        else
+            Return_Error "不支持的包管理器，无法快速安装"
+        fi
+        # OpenResty 通过包管理器安装到 /usr/local/openresty
+        local or_install_path="/usr/local/openresty"
+        if [ ! -d "${or_install_path}" ]; then
+            Return_Error "OpenResty 安装目录不存在: ${or_install_path}"
+        fi
+        # 通过符号链接映射到如意面板标准路径（无需复制，包管理器可正常升级）
+        # OpenResty 目录结构: /usr/local/openresty/nginx/{sbin,conf,logs,html}
+        # 面板期望结构: /ruyi/server/nginx/{sbin,conf,logs,html}
+        mkdir -p ${NGINX_SETUP_PATH}
+        ln -sf ${or_install_path}/nginx/sbin ${NGINX_SETUP_PATH}/sbin
+        ln -sf ${or_install_path}/nginx/conf ${NGINX_SETUP_PATH}/conf
+        ln -sf ${or_install_path}/nginx/logs ${NGINX_SETUP_PATH}/logs
+        ln -sf ${or_install_path}/nginx/html ${NGINX_SETUP_PATH}/html
+        ln -sf ${or_install_path}/luajit ${NGINX_SETUP_PATH}/luajit
+        ln -sf ${or_install_path}/bin ${NGINX_SETUP_PATH}/bin
+        # pod目录不一定存在，仅在存在时创建链接
+        [ -d "${or_install_path}/pod" ] && ln -sf ${or_install_path}/pod ${NGINX_SETUP_PATH}/pod
+        # OpenResty 内置 LuaJIT，设置库路径供 lua-cjson 编译使用
+        if [ -f "${or_install_path}/luajit/lib/libluajit-5.1.so.2" ]; then
+            ln -sf ${or_install_path}/luajit/lib/libluajit-5.1.so.2 /usr/local/lib/libluajit-5.1.so.2
+            ln -sf ${or_install_path}/luajit/lib/libluajit-5.1.so.2 /usr/local/lib64/libluajit-5.1.so.2
+            export LUAJIT_LIB=${or_install_path}/luajit/lib
+            export LUAJIT_INC=${or_install_path}/luajit/include/luajit-2.1
+            ldconfig
+        fi
+        # 安装 lua-cjson（WAF功能依赖）
+        Install_Lua_cjson
+        local installed_ver=$(${NGINX_SETUP_PATH}/sbin/nginx -v 2>&1 | grep -oP '[\d.]+' | head -1)
+        echo "OpenResty ${installed_ver} 安装完成（支持 WAF/Lua），路径: ${NGINX_SETUP_PATH}"
+    else
+        echo "====================================="
+        echo "通过包管理器安装 Nginx..."
+        echo "====================================="
+        if [ -f "/usr/bin/apt-get" ];then
+            export DEBIAN_FRONTEND=noninteractive
+            # 安装依赖
+            apt-get install -y --no-install-recommends wget gnupg ca-certificates lsb-release > /dev/null 2>&1
+            # 确定仓库 URL 和 codename（支持回退到稳定版本）
+            local repo_url=""
+            local codename=$(lsb_release -sc 2>/dev/null || echo "")
+            if [ -f /etc/debian_version ] && [ ! -f /etc/lsb-release ]; then
+                [ -z "${codename}" ] && codename="bookworm"
+                repo_url="https://nginx.org/packages/mainline/debian"
+            else
+                [ -z "${codename}" ] && codename="jammy"
+                repo_url="https://nginx.org/packages/mainline/ubuntu"
+            fi
+            # 写入仓库配置并验证可用性（使用 trusted=yes 避免 GPG SHA1 签名问题）
+            local fallback_codenames=""
+            if echo "${repo_url}" | grep -q "debian"; then
+                fallback_codenames="bookworm bullseye"
+            else
+                fallback_codenames="jammy focal noble"
+            fi
+            echo "deb [trusted=yes] ${repo_url} ${codename} nginx" > /etc/apt/sources.list.d/nginx.list
+            echo "[更新] 正在更新 ${codename} 仓库..."
+            apt-get update -y 2>&1 | tail -3
+            if ! apt-cache policy nginx 2>/dev/null | grep -q "nginx"; then
+                echo "[提示] Nginx 仓库不支持 ${codename}，尝试回退..."
+                local fallback_ok=0
+                for fb in ${fallback_codenames}; do
+                    if [ "${fb}" == "${codename}" ]; then continue; fi
+                    rm -f /etc/apt/sources.list.d/nginx.list
+                    echo "deb [trusted=yes] ${repo_url} ${fb} nginx" > /etc/apt/sources.list.d/nginx.list
+                    echo "[尝试] 使用 ${fb} 仓库..."
+                    apt-get update -y 2>&1 | tail -3
+                    if apt-cache policy nginx 2>/dev/null | grep -q "nginx"; then
+                        echo "[成功] 已回退到 ${fb} 仓库"
+                        fallback_ok=1
+                        break
+                    fi
+                done
+                if [ ${fallback_ok} -eq 0 ]; then
+                    echo "[警告] 所有仓库尝试失败，检查网络连接..."
+                    cat /etc/apt/sources.list.d/nginx.list 2>/dev/null || echo "[错误] 仓库配置文件不存在"
+                fi
+            fi
+            # 尝试安装指定版本，失败则安装最新版
+            local install_output=""
+            if [ -n "${nginx_version}" ] && [ "${nginx_version}" != "0.0.0" ]; then
+                install_output=$(apt-get install -y --allow-unauthenticated nginx=${nginx_version}* 2>&1) || \
+                install_output=$(apt-get install -y --allow-unauthenticated nginx 2>&1)
+            else
+                install_output=$(apt-get install -y --allow-unauthenticated nginx 2>&1)
+            fi
+            if [ $? -ne 0 ]; then
+                echo "[错误] apt-get install 输出:"
+                echo "${install_output}" | tail -10
+                Return_Error "Nginx 安装失败: ${install_output##*$'\n'}"
+            fi
+        elif [ -f "/usr/bin/yum" ];then
+            if [ ! -f /etc/yum.repos.d/nginx.repo ]; then
+                local os_ver=$(rpm -q --qf "%{VERSION}" $(rpm -qf /etc/redhat-release 2>/dev/null || echo "centos-release") 2>/dev/null | cut -d. -f1)
+                cat > /etc/yum.repos.d/nginx.repo <<YUMEOF
+[nginx-mainline]
+name=nginx mainline repo
+baseurl=http://nginx.org/packages/mainline/centos/${os_ver}/\$basearch/
+gpgcheck=1
+enabled=1
+gpgkey=https://nginx.org/keys/nginx_signing.key
+module_hotfixes=true
+YUMEOF
+            fi
+            # 尝试安装指定版本，失败则安装最新版
+            if [ -n "${nginx_version}" ] && [ "${nginx_version}" != "0.0.0" ]; then
+                yum install -y nginx-${nginx_version} > /dev/null 2>&1 || \
+                yum install -y nginx > /dev/null 2>&1
+            else
+                yum install -y nginx > /dev/null 2>&1
+            fi
+            if [ $? -ne 0 ]; then
+                Return_Error "Nginx 安装失败，请检查网络连接"
+            fi
+        else
+            Return_Error "不支持的包管理器，无法快速安装"
+        fi
+        # Nginx 包管理器安装到分散路径，通过符号链接映射到 NGINX_SETUP_PATH
+        # 注意：标准 Nginx 包不包含 lua-nginx-module，不支持 WAF/Lua 功能
+        # 如需 WAF 功能，请选择 OpenResty 或使用编译安装方式
+        echo "[提示] 标准 Nginx 快速安装不支持 WAF/Lua，如需 WAF 请选择 OpenResty"
+        # 通过符号链接映射到如意面板标准路径（无需复制，包管理器可正常升级）
+        # conf -> /etc/nginx, logs -> /var/log/nginx, html -> /usr/share/nginx/html
+        # nginx.conf 中的路径无需修改，符号链接已正确映射
+        mkdir -p ${NGINX_SETUP_PATH}
+        mkdir -p ${NGINX_SETUP_PATH}/sbin
+        ln -sf /usr/sbin/nginx ${NGINX_SETUP_PATH}/sbin/nginx
+        ln -sf /etc/nginx ${NGINX_SETUP_PATH}/conf
+        ln -sf /var/log/nginx ${NGINX_SETUP_PATH}/logs
+        ln -sf /usr/share/nginx/html ${NGINX_SETUP_PATH}/html
+        local installed_ver=$(${NGINX_SETUP_PATH}/sbin/nginx -v 2>&1 | grep -oP '[\d.]+' | head -1)
+        echo "Nginx ${installed_ver} 安装完成（不支持 WAF/Lua），路径: ${NGINX_SETUP_PATH}"
+    fi
+
+    # 确保sbin/nginx可执行
+    if [ -f "${NGINX_SETUP_PATH}/sbin/nginx" ]; then
+        chmod +x ${NGINX_SETUP_PATH}/sbin/nginx
+    fi
+
+    mkdir -p ${NGINX_SETUP_PATH}/temp/proxy_cache_dir
+    chown -R www:www ${NGINX_SETUP_PATH}/temp
+    chmod 755 ${NGINX_SETUP_PATH}/temp
+    echo "==================================================="
+    echo "正在配置${nginx_version_2}..."
+    echo "==================================================="
+    Service_Add
+    ldconfig
+}
+
 Install_Soft() {
     echo "==================================================="
     echo "正在安装nginx-$nginx_version"
@@ -438,7 +713,11 @@ if [ "$action_type" == 'install' ];then
         echo "参数错误" >&2
         exit 1
     fi
-	Install_Soft
+    if [ "$install_type" == '2' ];then
+        Install_Nginx_Binary
+    else
+        Install_Soft
+    fi
 elif [ "$action_type" == 'uninstall' ];then
 	Uninstall_soft
 fi

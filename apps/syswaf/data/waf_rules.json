@@ -412,10 +412,11 @@
       "name": "命令注入 - 反引号执行",
       "category_id": 3,
       "severity": "high",
-      "pattern": "(?:`[^`]*(?:cat|ls|id|whoami|wget|curl|nc|rm|chmod|bash|sh|python|perl|php)[^`]*`)",
+      "pattern": "(?:`[\\s]*(?:cat|ls|id|whoami|wget|curl|nc|rm|chmod|bash|sh|python|perl|php)\\b[^`]*`)",
       "targets": "[\"url\", \"post\"]",
-      "description": "检测反引号执行类型的命令注入攻击（需反引号内包含命令）",
-      "is_builtin": true
+      "description": "检测反引号执行类型的命令注入攻击（需反引号内以命令开头，含单词边界）",
+      "is_builtin": true,
+      "exclude_urls": ["/v1/chat/completions", "/v1/completions", "/v1/embeddings", "/v1/images/generations", "/v1/audio/transcriptions", "/v1/audio/translations"]
     },
     {
       "rule_id": "cmd-004",

@@ -235,6 +235,7 @@ def init_waf_data(force=False):
             if created:
                 categories_created += 1
         
+        rules_updated = 0
         for rule_data in rules_data:
             # 内置规则使用 update_or_create，确保升级时 pattern 等字段也能更新
             # 用户自定义的内置规则（is_builtin=True）也会被更新，保持与官方规则一致
@@ -244,6 +245,8 @@ def init_waf_data(force=False):
             )
             if created:
                 rules_created += 1
+            else:
+                rules_updated += 1
         
         china_ip_group, ip_group_created = init_china_ip_group()
         
@@ -264,7 +267,7 @@ def init_waf_data(force=False):
         post_save.connect(waf_signals.on_global_config_save, sender='syswaf.WafGlobalConfig')
         
         # 强制更新后手动触发配置同步，使规则立即生效
-        if force and (categories_created > 0 or rules_created > 0):
+        if force and (categories_created > 0 or rules_created > 0 or rules_updated > 0):
             try:
                 from apps.syswaf.services import WafConfigSync
                 syncer = WafConfigSync()
@@ -279,7 +282,7 @@ def init_waf_data(force=False):
             except Exception as e:
                 logger.error(f"WAF规则同步失败: {e}")
     
-    return categories_created, rules_created, config_created, ip_group_created, from_remote
+    return categories_created, rules_created, config_created, ip_group_created, from_remote, rules_updated
 
 
 def get_china_ip_ranges():

@@ -1,19 +1,9 @@
 import platform
 from apps.sysai.tools.base import register_tool
-from utils.common import RunCommand
+from apps.sysai.tools.common import run_cmd
 from utils.server.system import system
 from utils.ruyiclass.mysqlClass import MysqlClient
 from utils.ruyiclass.redisClass import RedisClient
-
-
-def _run_db_command(cmd: str, timeout: int = 15) -> dict:
-    try:
-        stdout, stderr = RunCommand(cmd, timeout=timeout)
-        if stderr:
-            return {'error': stderr.strip()[:2000]}
-        return {'output': stdout.strip()[:15000]}
-    except Exception as e:
-        return {'error': str(e)}
 
 
 def _get_mysql_client(db_name: str = ''):
@@ -68,7 +58,7 @@ def mysql_status():
         status_info['service_active'] = False
         status_info['message'] = '未检测到 MySQL/MariaDB 服务'
 
-    metrics_result = _run_db_command(
+    metrics_result = run_cmd(
         'mysqladmin status 2>/dev/null || echo "需要MySQL root密码才能获取详细状态"'
     )
     if 'output' in metrics_result:
@@ -91,7 +81,7 @@ def mysql_execute(query: str, database: str = ''):
     db_arg = f'-D {database}' if database else ''
     cmd = f'mysql {db_arg} -e "{query}" 2>&1'
 
-    result = _run_db_command(cmd)
+    result = run_cmd(cmd)
     if 'error' in result:
         return result
 
@@ -120,7 +110,7 @@ def mysql_list_databases():
         except Exception:
             pass
 
-    result = _run_db_command('mysql -e "SHOW DATABASES;" 2>&1')
+    result = run_cmd('mysql -e "SHOW DATABASES;" 2>&1')
     if 'error' in result:
         return result
 
@@ -166,7 +156,7 @@ def redis_status():
         except Exception:
             pass
 
-    info_result = _run_db_command('redis-cli info 2>/dev/null | head -n 50')
+    info_result = run_cmd('redis-cli info 2>/dev/null | head -n 50')
     if 'output' in info_result:
         status_info['redis_info'] = info_result['output']
 
@@ -183,7 +173,7 @@ def redis_execute(command: str):
     if any(cmd in command.upper() for cmd in ['FLUSHALL', 'FLUSHDB', 'SHUTDOWN', 'DEBUG']):
         return {'warning': '检测到危险Redis操作，请确认是否真的要执行此操作', 'command': command}
 
-    result = _run_db_command(f'redis-cli {command} 2>&1')
+    result = run_cmd(f'redis-cli {command} 2>&1')
     if 'error' in result:
         return result
 

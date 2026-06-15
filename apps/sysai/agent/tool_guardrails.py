@@ -32,6 +32,18 @@ MUTATING_TOOL_NAMES = frozenset({
     'panel_cron_create', 'panel_cron_manage',
 })
 
+# execute_command 命令重定向规则：检测到这些命令模式时，提示AI使用专用工具
+_EXECUTE_COMMAND_REDIRECTS = [
+    # (pattern, recommended_tool, description, action)
+    # action: 'warn' = 提示但不阻止, 'block' = 直接阻止执行
+    (r'\bdocker\s+logs\b', 'docker_container_logs', '查看容器日志', 'warn'),
+    (r'\bdocker\s+inspect\b', 'docker_container_info', '查看容器详情', 'warn'),
+    (r'\bdocker\s+ps\b', 'panel_docker_square_list 或 docker_list_containers', '查看容器列表', 'warn'),
+    (r'\bdocker\s+exec\b.*mysql\s+-u', 'panel_database_create 或 panel_database_root_pass', '操作MySQL数据库', 'block'),
+    (r'\bmysql\s+-u.*-e\s+"?(SHOW|CREATE|DROP|ALTER|GRANT)', 'panel_database_create / panel_database_list / panel_database_root_pass', '操作MySQL数据库', 'block'),
+    (r'\bdocker\s+exec\b.*env', 'docker_container_info', '查看容器环境变量', 'warn'),
+]
+
 
 @dataclass(frozen=True)
 class ToolGuardrailConfig:
@@ -91,6 +103,12 @@ class ToolCallGuardrailController:
 
     def before_call(self, tool_name: str, args: Dict[str, Any]) -> GuardrailDecision:
         signature = ToolCallSignature.from_call(tool_name, args or {})
+
+        # 检查execute_command是否应该重定向到专用工具
+        if tool_name == 'execute_command':
+            redirect_decision = self._check_command_redirect(args)
+            if redirect_decision is not None:
+                return redirect_decision
 
         exact_count = self._exact_failure_counts.get(signature, 0)
         if exact_count >= self.config.exact_failure_block_after:
@@ -239,6 +257,48 @@ class ToolCallGuardrailController:
         if tool_name in self.config.mutating_tools:
             return False
         return tool_name in self.config.idempotent_tools
+
+    def _check_command_redirect(self, args: Dict[str, Any]) -> Optional[GuardrailDecision]:
+        """检查execute_command是否应该重定向到面板专用工具。
+        对于高危操作（如docker exec mysql）返回block决策，阻止执行并强制使用专用工具。
+        对于低危操作返回warn决策，提示AI使用正确的工具但不阻止。
+        """
+        import re as _re
+        command = str(args.get('command', ''))
+        if not command:
+            return None
+
+        for pattern, recommended_tool, description, action in _EXECUTE_COMMAND_REDIRECTS:
+            if _re.search(pattern, command, _re.IGNORECASE):
+                if action == 'block':
+                    msg = (
+                        f'⛔ 禁止使用execute_command{description}！'
+                        f'请使用面板专用工具: {recommended_tool}。'
+                        f'专用工具已支持Docker容器中的数据库操作，无需手动执行命令。'
+                    )
+                    logger.info(f'execute_command重定向阻止: {description} → {recommended_tool}')
+                    return GuardrailDecision(
+                        action='block',
+                        code='command_redirect_blocked',
+                        message=msg,
+                        tool_name='execute_command',
+                    )
+                else:
+                    msg = (
+                        f'⚠️ 检测到您正在使用execute_command{description}，'
+                        f'这会弹出用户确认对话框且效率低下。'
+                        f'请使用面板专用工具: {recommended_tool}。'
+                        f'如果专用工具无法满足需求，再使用execute_command。'
+                    )
+                    logger.info(f'execute_command重定向提示: {description} → {recommended_tool}')
+                    return GuardrailDecision(
+                        action='warn',
+                        code='command_redirect',
+                        message=msg,
+                        tool_name='execute_command',
+                    )
+
+        return None
 
 
 def append_guardrail_guidance(result: str, decision: GuardrailDecision) -> str:

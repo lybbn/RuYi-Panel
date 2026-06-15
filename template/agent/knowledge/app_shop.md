@@ -1,6 +1,6 @@
 # 应用商店
 
-tags: 应用商店,软件安装,Nginx,MySQL,PHP,Redis,Docker,Python,Go,Supervisor,Fail2Ban,安装,卸载
+tags: 应用商店,软件安装,Nginx,MySQL,PHP,Redis,Docker,Python,Go,Node.js,Supervisor,Fail2Ban,安装,卸载
 
 ## 安装应用
 
@@ -13,17 +13,21 @@ tags: 应用商店,软件安装,Nginx,MySQL,PHP,Redis,Docker,Python,Go,Superviso
 ## 应用分类
 
 ### Web服务器
-- **Nginx**：轻量级Web服务器，支持OpenResty版本（推荐）和原生Nginx版本
+- **Nginx**：轻量级Web服务器，支持OpenResty版本（推荐，内置Lua/WAF支持）
+- **安装方式**（Linux）：编译安装（支持任意版本+WAF模块）和快速安装（通过系统包管理器apt/yum，秒级完成，OpenResty自带WAF/Lua支持）
 
 ### 数据库
 - **MySQL**：5.7和8.0版本可选
 - **Redis**：3.0和5.0版本（Windows），7.2和7.4版本（Linux）
+- **PostgreSQL**：开源关系型数据库
+- **MongoDB**：NoSQL文档数据库
 
 ### 运行环境
 - **Docker**：Linux支持27.5/28.0/29.0版本，Windows为Docker Desktop
 - **Python**：支持3.12、3.13、3.14多个版本，可同时安装
 - **Go**：支持1.23和1.26版本，可同时安装
 - **PHP**：支持7.4、8.1、8.2、8.3、8.4版本，可同时安装
+- **Node.js**：支持多个版本，可同时安装
 
 ### 安全防护
 - **Supervisor**：进程守护管理工具，可重启崩溃或退出的进程和设置开机启动
@@ -48,6 +52,7 @@ tags: 应用商店,软件安装,Nginx,MySQL,PHP,Redis,Docker,Python,Go,Superviso
 ### 日志查看
 - 支持查看错误日志、访问日志、慢查询日志
 - 默认显示最近2000行
+- 支持日志下载
 
 ## PHP专项管理
 
@@ -57,3 +62,78 @@ tags: 应用商店,软件安装,Nginx,MySQL,PHP,Redis,Docker,Python,Go,Superviso
 - 支持查看phpinfo信息
 - 支持PECL扩展安装
 - 支持OPcache清理
+
+## Python项目管理
+
+- 支持多Python版本共存
+- 创建Python虚拟环境
+- 配置项目启动命令
+- 支持Django/Flask/FastAPI等框架
+- 自动配置Nginx反向代理
+
+## Go项目管理
+
+- 支持多Go版本共存
+- 创建Go项目
+- 配置项目启动命令
+- 支持编译和运行
+- 自动配置Nginx反向代理
+
+## Node.js项目管理
+
+- 支持多Node.js版本共存
+- 创建Node.js项目
+- 配置项目启动命令
+- 支持npm/yarn/pnpm包管理
+- 自动配置Nginx反向代理
+
+## 安装任务
+
+### 任务管理
+- 「任务管理器」页面查看安装进度
+- 显示安装状态：等待中/安装中/成功/失败
+- 支持查看安装日志
+- 失败时显示错误信息
+
+### 任务操作
+- 支持取消安装任务
+- 支持重试失败任务
+- 支持清除完成任务
+
+## 应用版本
+
+### 版本管理
+- 支持查看应用可用版本
+- 支持多版本共存（Python/Go/PHP/Node.js）
+- 支持版本切换
+- 支持版本升级
+
+### 版本选择
+- 安装时选择版本
+- 创建项目时选择版本
+- 建议使用稳定版本
+
+## 使用场景
+
+### 建站环境
+- 安装Nginx + MySQL + PHP
+- 创建PHP网站
+- 配置SSL证书
+
+### 开发环境
+- 安装Python/Go/Node.js
+- 创建开发项目
+- 配置数据库
+
+### 运维环境
+- 安装Docker
+- 安装Supervisor进程守护
+- 安装Fail2Ban安全防护
+
+## 注意事项
+
+- 安装应用需要root权限
+- 安装过程可能需要下载依赖
+- 修改配置前建议备份
+- 多版本共存需注意端口冲突
+- 卸载应用前请备份数据

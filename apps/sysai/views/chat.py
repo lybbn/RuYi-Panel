@@ -120,6 +120,7 @@ def _get_or_create_agent(session_id, model, config=None, user_input='', agent_id
             agent.web_search = agent_config.get('web_search', False)
             agent.enable_memory = agent_config.get('enable_memory', False)
             agent.memory_recall_threshold = agent_config.get('memory_recall_threshold', 10)
+            logger.info(f'[Agent重用] max_tool_iterations={agent.max_tool_iterations}, config中的值={agent_config.get("max_tool_iterations", "未设置")}')
 
             smart_mode = agent_config.get('smart_mode', False)
             manual_enabled_tools = agent_config.get('enabled_tools', [])
@@ -146,6 +147,18 @@ def _get_or_create_agent(session_id, model, config=None, user_input='', agent_id
                     ]
                     logger.info(f'[Agent重用] AI路由生效: Toolset={ts_names}, task={need_task}, doc={need_doc}, 加载{len(agent.enabled_tools)}个工具')
                     agent._pending_ai_route = None
+                else:
+                    # AI路由返回空/降级时，使用关键词匹配更新工具，避免工具丢失
+                    ts_names = match_toolsets_by_keywords(resolve_input)
+                    if ts_names:
+                        smart_tools = resolve_tools_by_toolsets(ts_names)
+                        agent.enabled_tools = [
+                            t for t in smart_tools
+                            if t in all_tool_names and t not in disabled_tool_names
+                        ]
+                        logger.info(f'[Agent重用] AI路由降级, 关键词匹配Toolset={ts_names}, 加载{len(agent.enabled_tools)}个工具')
+                    else:
+                        logger.info(f'[Agent重用] AI路由降级且无关键词匹配, 保持当前{len(agent.enabled_tools)}个工具')
 
                 ai_model = agent.model if hasattr(agent, 'model') else None
                 _start_async_routing(agent, resolve_input, ai_model, all_tool_names, disabled_tool_names)
@@ -629,20 +642,23 @@ class AIChatStreamView(CustomAPIView):
         agent_config = {}
         try:
             from apps.sysai.models import AIModel
-            sys_config = AIModel.objects_all.filter(name='__sys_config__').first()
-            if sys_config and sys_config.extra_params:
+            sys_config = AIModel.get_sys_config()
+            if sys_config.extra_params:
                 global_cfg = sys_config.extra_params
                 agent_config['max_tool_iterations'] = global_cfg.get('max_turns', 100)
                 agent_config['require_command_confirm'] = global_cfg.get('require_command_confirm', 'medium_high')
                 agent_config['max_context_messages'] = global_cfg.get('max_context_messages', 30)
                 agent_config['web_search'] = global_cfg.get('enable_web_search', False)
+                logger.info(f'[AI配置] 读取全局配置成功: max_turns={global_cfg.get("max_turns")}, max_tool_iterations={agent_config["max_tool_iterations"]}')
             else:
-                agent_config['max_tool_iterations'] = 20
+                logger.warning(f'[AI配置] 全局配置extra_params为空: sys_config={sys_config}')
+                agent_config['max_tool_iterations'] = 100
                 agent_config['require_command_confirm'] = 'medium_high'
                 agent_config['max_context_messages'] = 30
                 agent_config['web_search'] = False
-        except Exception:
-            agent_config['max_tool_iterations'] = 20
+        except Exception as e:
+            logger.warning(f'读取AI全局配置失败，使用默认值: {e}')
+            agent_config['max_tool_iterations'] = 100
             agent_config['require_command_confirm'] = 'medium_high'
             agent_config['max_context_messages'] = 30
             agent_config['web_search'] = False
@@ -726,8 +742,8 @@ class AIChatStreamView(CustomAPIView):
 
     def _get_sysai_config(self):
         try:
-            config_obj = AIModel.objects_all.filter(name='__sys_config__').first()
-            if config_obj and config_obj.extra_params:
+            config_obj = AIModel.get_sys_config()
+            if config_obj.extra_params:
                 return config_obj.extra_params
         except Exception:
             pass
@@ -2075,8 +2091,8 @@ class AICompactChatView(CustomAPIView):
 
             llm_model = get_model_from_db(model)
             sys_config = {}
-            config_obj = AIModel.objects_all.filter(name='__sys_config__').first()
-            if config_obj and config_obj.extra_params:
+            config_obj = AIModel.get_sys_config()
+            if config_obj.extra_params:
                 sys_config = config_obj.extra_params
 
             compressor = ContextCompressor(sys_config)

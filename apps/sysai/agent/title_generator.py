@@ -6,11 +6,14 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _TITLE_PROMPT = (
-    "根据用户的消息，生成一个简短准确的会话标题（3-10个字）。\n"
+    "根据用户的消息，生成一个简短准确的会话标题（5-20个字）。\n"
     "要求：\n"
     "1. 标题应概括用户消息的核心话题或意图\n"
     "2. 只返回标题文本，不要重复、不要加引号、标点或前缀\n"
-    "3. 不要输出多余的解释"
+    "3. 不要输出多余的解释\n"
+    "4. 专业术语、漏洞名称、CVE编号、英文技术名词必须原样保留，禁止翻译或意译（如 Copy Fail、Dirty Pipe、CVE-2024-1234 等）\n"
+    "5. 编程语言名称、框架名称、工具名称保持原文（如 Python、Nginx、Docker 等）\n"
+    "6. 文件路径、命令等技术内容保持原文"
 )
 
 _THINKING_DISABLED_V1 = {"thinking": {"type": "disabled"}}

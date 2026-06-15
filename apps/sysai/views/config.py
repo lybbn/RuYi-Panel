@@ -38,8 +38,8 @@ class AIConfigView(CustomAPIView):
     def get(self, request):
         from apps.sysai.models import AIModel
         try:
-            config_obj = AIModel.objects_all.filter(name='__sys_config__').first()
-            if config_obj and config_obj.extra_params:
+            config_obj = AIModel.get_sys_config()
+            if config_obj.extra_params:
                 config = {**_DEFAULT_CONFIG, **config_obj.extra_params}
             else:
                 config = {**_DEFAULT_CONFIG}
@@ -50,14 +50,8 @@ class AIConfigView(CustomAPIView):
     def post(self, request):
         req_data = get_parameter_dic(request)
         try:
-            config_obj, _ = AIModel.objects_all.get_or_create(
-                name='__sys_config__',
-                defaults={
-                    'model_name': '__sys_config__',
-                    'provider': 'custom',
-                    'extra_params': {},
-                }
-            )
+            from apps.sysai.models import AIModel
+            config_obj = AIModel.get_sys_config()
             config_obj.extra_params = req_data
             config_obj.save()
             return DetailResponse(msg='配置保存成功')

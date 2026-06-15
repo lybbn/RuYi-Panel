@@ -512,12 +512,12 @@ def crontab_run(task_id: int):
             return '<toolcall_status>error</toolcall_status>任务不存在'
 
         registry = AIToolRegistry()
-        registry.emit_progress('crontab_run', 'tool.progress', 20, f'Triggering task: {task.name}')
+        registry.emit_progress('crontab_run', 'tool.log', 0, f'Triggering task: {task.name}')
 
         serializer = CrontabTasksSerializer(instance=task)
         run_task(serializer.data, task.job_id)
 
-        registry.emit_progress('crontab_run', 'tool.progress', 90, 'Task triggered successfully')
+        registry.emit_progress('crontab_run', 'tool.log', 0, 'Task triggered successfully')
 
         return json.dumps({
             'task_id': task_id,

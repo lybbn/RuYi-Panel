@@ -54,7 +54,7 @@ def select_github_mirror():
     
     for mirror in MIRROR_GITHUB_LIST:
         try:
-            response = requests.get(mirror, timeout=5)
+            response = requests.get(mirror, timeout=5, verify=False)
             if response.status_code == 200:
                 return mirror
         except requests.RequestException as e:
@@ -68,7 +68,7 @@ def get_github_quick_downloadurl(url):
         return None
     return f"${baseurl}/{url}"
 
-def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8192,max_retries=6):
+def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8192,max_retries=6,verify_ssl=False):
     """
     @name 下载网络文件
     @save_path 下载本地路径名称（包含文件名），为空则默认存储在tmp中
@@ -76,6 +76,7 @@ def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8
     @process 是否显示进度
     @log_path 记录日志路径(包含文件名),process True时有效
     @max_retries 最大重试次数
+    @verify_ssl 是否验证SSL证书，默认False（避免下载软件时SSL证书验证失败）
     """
     if not save_path:
         save_directory = GetTmpPath()
@@ -115,7 +116,7 @@ def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8
             
             with requests.Session() as session:
                 session.headers.update(request_headers)
-                r = session.get(url, stream=True, timeout=(30, 120))
+                r = session.get(url, stream=True, timeout=(30, 120), verify=verify_ssl)
                 
                 if r.status_code == 416:
                     if use_range and downloaded_size > 0:
@@ -184,14 +185,17 @@ def download_url_file(url, save_path="",process=False,log_path=None,chunk_size=8
     
     return False, f"网络文件错误: {str(last_error)}"
 
-def download_url_file_wget(url, save_path="", process=False, log_path=None,chunk_size=32768):
+def download_url_file_wget(url, save_path="", process=False, log_path=None,chunk_size=32768,verify_ssl=False):
     """
     @name 下载网络文件wget
     @save_path 下载本地路径名称（包含文件名），为空则默认存储在tmp中
     @author lybbn<2024-02-22>
     @process 是否显示进度
     @log_path 记录日志路径(包含文件名), process True时有效
+    @verify_ssl 是否验证SSL证书，默认False（避免下载软件时SSL证书验证失败）
     """
+    import ssl
+    original_default_context = None
     try:
         if not save_path:
             save_directory = GetTmpPath()
@@ -209,6 +213,11 @@ def download_url_file_wget(url, save_path="", process=False, log_path=None,chunk
             WriteFile(log_path, f"检测到已下载的文件，已跳过\n", mode='a', write=True)
             return True, "下载成功"
         buffered_logs = []
+
+        # 设置SSL验证选项 - 使用ssl._create_unverified_context()禁用urllib的SSL验证
+        if not verify_ssl:
+            original_default_context = ssl._create_default_https_context
+            ssl._create_default_https_context = ssl._create_unverified_context
 
         # 使用 wget 下载文件
         def log_progress(current, total, width=80):
@@ -230,14 +239,22 @@ def download_url_file_wget(url, save_path="", process=False, log_path=None,chunk
         if buffered_logs:
             WriteFile(log_path, buffered_logs[-1], mode='a', write=True)
 
+        # 恢复SSL验证设置
+        if original_default_context:
+            ssl._create_default_https_context = original_default_context
+
         return True, "下载成功"
     except Exception as e:
+        # 恢复SSL验证设置
+        if original_default_context:
+            ssl._create_default_https_context = original_default_context
         WriteFile(log_path, f"下载失败: {str(e)}\n", mode='a', write=True)
         return False, f"网络文件错误: {str(e)}"
 
-def _download_chunk(url, start_byte, end_byte, save_path, chunk_id, max_retries=3, headers=None,process=True, log_path=None, failed_flag=None):
+def _download_chunk(url, start_byte, end_byte, save_path, chunk_id, max_retries=3, headers=None,process=True, log_path=None, failed_flag=None, verify_ssl=False):
     """
     下载文件的指定部分
+    @param verify_ssl: 是否验证SSL证书，默认False
     """
     headers = headers or {}
     headers['Range'] = f'bytes={start_byte}-{end_byte}'
@@ -249,7 +266,7 @@ def _download_chunk(url, start_byte, end_byte, save_path, chunk_id, max_retries=
             return False
         try:
             with requests.Session() as session:
-                response = session.get(url, headers=headers, stream=True, timeout=10)
+                response = session.get(url, headers=headers, stream=True, timeout=10, verify=verify_ssl)
                 response.raise_for_status()
                 chunk_path = f"{save_path}.part{chunk_id}"
                 buffered_logs = []
@@ -323,7 +340,7 @@ def _cleanup_temp_files(save_path, num_chunks, log_path=None):
             except Exception as e:
                 WriteFile(log_path, f"清理临时文件 {chunk_file} 失败: {e}\n", mode='a', write=True)
 
-def download_url_file_m(url, save_path="", process=False, log_path=None, num_threads=4, max_retries=3):
+def download_url_file_m(url, save_path="", process=False, log_path=None, num_threads=4, max_retries=3, verify_ssl=False):
     """
     @name 多线程下载网络文件
     @param url: 下载链接
@@ -332,6 +349,7 @@ def download_url_file_m(url, save_path="", process=False, log_path=None, num_thr
     @param log_path: 日志文件路径
     @param num_threads: 下载线程数
     @param max_retries: 最大重试次数
+    @param verify_ssl: 是否验证SSL证书，默认False（避免下载软件时SSL证书验证失败）
     @author lybbn<2025-03-22>
     """
     try:
@@ -354,7 +372,7 @@ def download_url_file_m(url, save_path="", process=False, log_path=None, num_thr
         }
 
         # 获取文件总大小
-        response = requests.head(url,headers=headers)
+        response = requests.head(url,headers=headers,verify=verify_ssl)
         total_size = int(response.headers.get('content-length', 0))
         if total_size == 0:
             WriteFile(log_path, "无法获取文件大小，无法进行多线程下载\n", mode='a', write=True)
@@ -378,7 +396,7 @@ def download_url_file_m(url, save_path="", process=False, log_path=None, num_thr
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = []
             for i, (start_byte, end_byte) in enumerate(ranges):
-                futures.append(executor.submit(_download_chunk, url, start_byte, end_byte, save_path, i, max_retries,headers,process,log_path, failed_flag))
+                futures.append(executor.submit(_download_chunk, url, start_byte, end_byte, save_path, i, max_retries,headers,process,log_path, failed_flag, verify_ssl))
 
             # 检查所有分块是否下载成功
             for future in as_completed(futures):
@@ -596,7 +614,11 @@ def list_files_in_directory(dst_path,sort="name",is_reverse=False,is_windows=Fal
             return None
         if isDir and not entry.is_dir():
             return None
-        return get_file_info(entry)
+        try:
+            return get_file_info(entry)
+        except (FileNotFoundError, PermissionError, OSError):
+            # 断链符号链接或无权限文件，跳过
+            return None
 
     # 处理Windows磁盘根目录情况
     if is_windows and not dst_path:

@@ -70,6 +70,25 @@ class AIModel(BaseModel):
     def __str__(self):
         return f'{self.name} ({self.provider})'
 
+    @staticmethod
+    def get_sys_config():
+        """获取AI全局系统配置，不存在则自动创建"""
+        config_obj, _ = AIModel.objects_all.get_or_create(
+            name='__sys_config__',
+            defaults={
+                'model_name': '__sys_config__',
+                'provider': 'custom',
+                'extra_params': {
+                    'max_turns': 100,
+                    'max_context_messages': 20,
+                    'enable_web_search': False,
+                    'require_command_confirm': 'medium_high',
+                    'show_assistant': True,
+                },
+            }
+        )
+        return config_obj
+
 
 class AIChatSession(BaseModel):
     id = models.CharField(max_length=64, primary_key=True, default=make_uuid, verbose_name='会话ID')

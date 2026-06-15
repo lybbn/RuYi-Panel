@@ -79,9 +79,14 @@ def _reload_nginx():
 @receiver(post_save, sender='syswaf.WafGlobalConfig')
 def on_global_config_save(sender, instance, created, **kwargs):
     """
-    全局配置保存后自动同步
+    全局配置保存后自动同步，并动态管理日志同步定时任务
     """
     _async_sync_waf_config(sync_type='global')
+    try:
+        from apps.syswaf.services import manage_waf_log_sync_job
+        manage_waf_log_sync_job()
+    except Exception as e:
+        logger.error(f"WAF日志同步任务动态管理失败: {e}")
 
 
 @receiver(post_save, sender='syswaf.WafSiteConfig')

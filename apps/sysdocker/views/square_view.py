@@ -27,6 +27,54 @@ from apps.syslogs.logutil import RuyiAddOpLog
 from utils.ruyiclass.dockerInclude.ry_dk_square import main as dksquare
 from apps.sysdocker.models import RyDockerApps
 
+
+def _build_softlist_dict(softlist):
+    """构建 softlist 字典，用于快速查找"""
+    return {item['appname']: item for item in softlist}
+
+
+def _parse_compose_json(stdout):
+    """解析 docker-compose ls 的 JSON 输出，兼容 JSON 数组和 JSONL 格式"""
+    if not stdout or not stdout.strip():
+        return []
+    try:
+        result = json.loads(stdout)
+        if isinstance(result, list):
+            return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # 兼容 JSONL 格式（每行一个 JSON 对象）
+    compose_list = []
+    for line in stdout.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict):
+                compose_list.append(obj)
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return compose_list
+
+
+def _build_compose_dict(compose_json):
+    """构建 compose 字典，用于快速查找（key 为小写名称）"""
+    return {c['Name'].lower(): c for c in compose_json}
+
+
+def _get_compose_status(name, compose_dict):
+    """从字典中获取 compose 状态"""
+    compose_info = compose_dict.get(name.lower())
+    if not compose_info:
+        return None, None
+    compose_status = compose_info.get('Status', '')
+    status = re.sub(r'[\d()]+', '', compose_status).strip() or compose_status
+    if not status:
+        return None, None
+    path = os.path.dirname(compose_info.get('ConfigFiles', ''))
+    return status, path
+
 class RYDockerSquareAppTagsListManageView(CustomAPIView):
     """
     get:
@@ -65,52 +113,56 @@ class RYGetDockerSquareAppsListManageView(CustomAPIView):
         type = str(reqData.get("type","0"))
         searchContent = reqData.get("searchContent","")
         newsq = dksquare()
+        
+        # 获取 softlist 并构建字典
         softlist = newsq.get_apps_list()
-        soft_names = list(RyDockerApps.objects.all().values_list("appname",flat=True).order_by('id'))
+        softlist_dict = _build_softlist_dict(softlist)
+        
+        # 使用集合存储已安装的应用名，用于快速判断
+        soft_names_set = set(RyDockerApps.objects.all().values_list("appname", flat=True))
+        
         if type == "1":
-                # softlist = [item for item in softlist if item.get("appname") in soft_names]
                 queryset = RyDockerApps.objects.all().order_by('-id')
                 if searchContent:
                     queryset = queryset.filter(name__icontains=searchContent)
-                # # 1. 实例化分页器对象
                 page_obj = CustomPagination()
-                # # 2. 使用自己配置的分页器调用分页方法进行分页
                 page_data = page_obj.paginate_queryset(queryset, request)
                 data = []
+                
+                # 获取 compose 列表并构建字典
                 stdout, stderr = RunCommand("docker-compose ls --format json")
-                compose_json = []
-                try:
-                    compose_json = json.loads(stdout)
-                except:
-                    pass
+                compose_json = _parse_compose_json(stdout)
+                compose_dict = _build_compose_dict(compose_json)
+                
                 for m in page_data:
-                    newsq.sync_app_install_status(m)
+                    # 只对安装中的应用调用 sync_app_install_status
+                    if m.status in ("install", "install_failed"):
+                        newsq.sync_app_install_status(m)
+                    
                     appid = m.appid
                     name = m.name
                     appname = m.appname
-                    icon=f"{appname}.png"
+                    icon = f"{appname}.png"
                     status = m.status
                     path = ""
-                    has_name_ps = False
-                    for c in compose_json:
-                        if c['Name'] == name.lower():
-                            has_name_ps = True
-                            compose_status = c.get('Status', '')
-                            status = re.sub(r'[\d()]+', '', compose_status).strip() or compose_status
-                            path = os.path.dirname(c['ConfigFiles'])
-                    if not has_name_ps and status not in ["install", "install_failed"]:
+                    
+                    # 使用字典查找替代循环
+                    compose_status, compose_path = _get_compose_status(name, compose_dict)
+                    if compose_status is not None:
+                        status = compose_status
+                        path = compose_path or ""
+                    elif status not in ["install", "install_failed"]:
                         status = "exited"
-                    if not path:path=newsq.get_dkapp_path({"appname":appname,"name":name})
+                    
+                    if not path:
+                        path = newsq.get_dkapp_path({"appname":appname,"name":name})
+                    
                     params = ast_convert(m.params)
-                    ports= [] 
-                    for key, value in params.items():
-                        if "_port" in key.lower():
-                            ports.append(value)
-                    appinfo={}
-                    for s in softlist:
-                        if s['appname'] == appname:
-                            appinfo = s
-                            break 
+                    ports = [value for key, value in params.items() if "_port" in key.lower()]
+                    
+                    # 使用字典查找替代循环
+                    appinfo = softlist_dict.get(appname, {})
+                    
                     data.append({
                         'id':m.id,
                         'name':name,
@@ -128,25 +180,31 @@ class RYGetDockerSquareAppsListManageView(CustomAPIView):
                     })
                 return page_obj.get_paginated_response(data=data)
         else:
+            # 使用集合判断，替代列表遍历
             for st in softlist:
-                if st.get("appname") in soft_names:
+                if st.get("appname") in soft_names_set:
                     st["installed"] = 1
-                    st["installedCount"] = int(st["installedCount"]) + 1
+                    st["installedCount"] = int(st.get("installedCount", 0)) + 1
+            
             softlist = [item for item in softlist if item.get("show", 1) != 0]
             softlist = sorted(softlist, key=lambda x: x.get("sort", 0))
+            
             if searchContent:
-                softlist = [item for item in softlist if (searchContent.lower() in item.get("appname").lower()) or (searchContent.lower() in item.get("desc").lower())]
-            if type == "0":
-                pass
-            else:
+                search_lower = searchContent.lower()
+                softlist = [item for item in softlist 
+                           if search_lower in item.get("appname", "").lower() 
+                           or search_lower in item.get("desc", "").lower()]
+            
+            if type != "0":
                 softlist = [item for item in softlist if str(item.get("type")) == type]
             
-            #一次最大条数限制
-            limit = 99 if limit > 99 else limit
+            # 一次最大条数限制
+            limit = min(limit, 99)
             total_nums = len(softlist)
-            total_pages = ceil(total_nums / limit)
+            total_pages = ceil(total_nums / limit) if total_nums > 0 else 1
             if page > total_pages:
                 page = total_pages
+            
             # 根据分页参数对结果进行切片
             start_idx = (page - 1) * limit
             end_idx = start_idx + limit

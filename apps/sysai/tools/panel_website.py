@@ -5,7 +5,7 @@ from apps.sysai.tools.base import register_tool
 from apps.system.models import Sites, SiteDomains
 from apps.sysshop.models import RySoftShop
 from utils.ruyiclass.webClass import WebClient
-from utils.common import current_os
+from utils.common import current_os, GetWebRootPath
 from apps.system.views.site_manage import ruyiPathDirHandle, ruyiCheckPortInBlack
 
 
@@ -92,11 +92,8 @@ def panel_site_create(name: str, domains: list, path: str = '', remark: str = ''
             domain_list.append({'domain': domain, 'port': port})
 
         if not path:
-            is_windows = current_os == 'windows'
-            if is_windows:
-                path = f'C:/wwwroot/{name}'
-            else:
-                path = f'/wwwroot/{name}'
+            wwwroot = GetWebRootPath()
+            path = f'{wwwroot}/{name}'
 
         isok, msg = WebClient.create_site(
             webserver=webserver,
@@ -115,6 +112,13 @@ def panel_site_create(name: str, domains: list, path: str = '', remark: str = ''
             SiteDomains.objects.create(
                 name=dm['domain'], port=int(dm['port']), site=s_ins,
             )
+
+        # 自动创建WAF站点配置（与前端API保持一致）
+        from apps.syswaf.models import WafSiteConfig
+        WafSiteConfig.objects.get_or_create(
+            site_id=s_ins.id,
+            defaults={'site_name': s_ins.name, 'waf_status': 'off'}
+        )
 
         WebClient.reload_service(webserver=webserver)
 
@@ -389,11 +393,8 @@ def panel_runtime_site_create(
                 return {'error': 'PHP项目需要填写php_version'}
 
         if not path:
-            is_windows = current_os == 'windows'
-            if is_windows:
-                path = f'C:/wwwroot/{name}'
-            else:
-                path = f'/wwwroot/{name}'
+            wwwroot = GetWebRootPath()
+            path = f'{wwwroot}/{name}'
 
         isok, msg = ruyiPathDirHandle(path, is_windows=(current_os == 'windows'))
         if not isok:
@@ -757,11 +758,13 @@ def panel_deploy_project(
 ):
     """一键部署项目到如意面板，自动完成：创建运行时站点 → 创建Nginx静态站点绑定域名 → 配置反向代理 → 可选配置SSL。
 
-    这是部署项目的推荐工具，会自动完成所有步骤。典型场景：
+    这是部署代码项目（Git仓库/本地代码）的推荐工具，会自动完成所有步骤。典型场景：
     - 部署Django/Flask/FastAPI项目：project_type="python"，framework填对应框架
     - 部署Express/Next.js项目：project_type="node"
     - 部署Go项目：project_type="go"
     - 部署PHP项目：project_type="php"
+
+    ⚠️ 重要：部署前应先调用 panel_detect_project 检测项目类型，获取 project_cfg 所需参数。不要凭猜测填写 project_cfg。
 
     部署原理：
     1. 创建运行时站点（Python/Node/Go/PHP），项目运行在本地端口（如127.0.0.1:8000）
@@ -781,9 +784,11 @@ def panel_deploy_project(
     - Go: {"version":"1.21","start_method":"command","start_command":"./main","port":8080,"bin":"main"}
     - PHP: {"php_version":"8.1","port":9000,"start_method":"php-fpm"}
 
+    ⚠️ 部署成品应用（WordPress/Discuz/GitLab等）请使用 panel_docker_square_install，不要用此工具。
+
     Args:
         name: 项目名称，如 myblog、api-server（同时作为运行时站点和Nginx站点的名称）
-        project_type: 项目类型：python/node/go/php
+        project_type: 项目类型：python/node/go/php/static/ruby（static为纯静态站点，ruby复用Python运行时）
         project_cfg: 项目配置字典，格式见上方说明
         domains: 域名列表，每个元素格式为 "域名:端口"，如 ["example.com:80", "www.example.com:80"]
         path: 项目根目录，为空则自动生成默认路径
@@ -794,11 +799,11 @@ def panel_deploy_project(
         remark: 备注信息
     """
     try:
-        type_map = {'python': 1, 'node': 2, 'php': 3, 'go': 4}
-        webserver_map = {'python': 'python', 'node': 'node', 'php': 'php', 'go': 'go'}
+        type_map = {'python': 1, 'node': 2, 'php': 3, 'go': 4, 'static': 0, 'ruby': 1}
+        webserver_map = {'python': 'python', 'node': 'node', 'php': 'php', 'go': 'go', 'static': 'static', 'ruby': 'python'}
 
         if project_type not in type_map:
-            return {'error': f'不支持的项目类型: {project_type}，可用: python, node, go, php'}
+            return {'error': f'不支持的项目类型: {project_type}，可用: python, node, go, php, static, ruby'}
 
         if not domains:
             return {'error': '域名列表不能为空，部署项目需要绑定域名'}
@@ -847,11 +852,8 @@ def panel_deploy_project(
                 return {'error': 'PHP项目需要填写php_version'}
 
         if not path:
-            is_windows = current_os == 'windows'
-            if is_windows:
-                path = f'C:/wwwroot/{name}'
-            else:
-                path = f'/wwwroot/{name}'
+            wwwroot = GetWebRootPath()
+            path = f'{wwwroot}/{name}'
 
         isok, msg = ruyiPathDirHandle(path, is_windows=(current_os == 'windows'))
         if not isok:
@@ -873,6 +875,85 @@ def panel_deploy_project(
 
         steps_completed = []
         errors = []
+
+        # 静态站点特殊处理：只需创建Nginx站点，无需运行时站点和反向代理
+        if project_type == 'static':
+            nginx_site_name = name
+            nginx_site = Sites.objects.create(
+                name=nginx_site_name,
+                remark=remark or '静态站点',
+                path=path,
+                type=0,
+            )
+            for dm in domain_list:
+                SiteDomains.objects.create(
+                    name=dm['domain'], port=int(dm['port']), site=nginx_site,
+                )
+            isok2, msg2 = WebClient.create_site(
+                webserver=nginx_webserver,
+                domainList=domain_list,
+                siteName=nginx_site_name,
+                sitePath=path,
+            )
+            if not isok2:
+                errors.append(f'创建Nginx站点失败: {msg2}')
+            else:
+                steps_completed.append(f'1. 创建Nginx静态站点，绑定域名: {", ".join(d["domain"] for d in domain_list)}')
+                steps_completed.append(f'2. 静态站点无需运行时进程，Nginx直接托管目录: {path}')
+
+            # 静态站点也可配SSL
+            if enable_ssl and isok2 and not errors:
+                from utils.ruyiclass.nginxClass import NginxClient
+                nc = NginxClient(siteName=nginx_site_name, sitePath=path)
+                if ssl_type == 'selfsigned':
+                    domain_names = [d['domain'] for d in domain_list]
+                    try:
+                        from apps.system.views.site_manage import normalize_selfsigned_hosts, ensure_ruyi_root_certificate, create_signed_certificate
+                        ok, hosts_or_msg = normalize_selfsigned_hosts(domain_names)
+                        if ok:
+                            root_ok, root_data = ensure_ruyi_root_certificate()
+                            if root_ok:
+                                cert_pem, key_pem = create_signed_certificate(
+                                    root_cert=root_data['root_cert'],
+                                    root_key=root_data['root_key'],
+                                    hosts=hosts_or_msg,
+                                )
+                                isok4, msg4 = WebClient.save_site_ssl_cert(
+                                    webserver=nginx_webserver,
+                                    siteName=nginx_site_name,
+                                    sitePath=path,
+                                    cont={
+                                        "cert": cert_pem.decode("utf-8"),
+                                        "key": key_pem.decode("utf-8"),
+                                        "root_password": root_data['root_password'],
+                                    }
+                                )
+                                if isok4:
+                                    nc.set_site_ssl_status({'status': True})
+                                    if force_https:
+                                        nc.set_site_ssl_forcehttps({'status': True})
+                                    steps_completed.append('3. 生成自建SSL证书并启用' + ('，强制HTTPS' if force_https else ''))
+                                else:
+                                    errors.append(f'保存SSL证书失败: {msg4}')
+                            else:
+                                errors.append(f'创建根证书失败: {root_data}')
+                        else:
+                            errors.append(f'域名格式错误: {hosts_or_msg}')
+                    except Exception as e:
+                        errors.append(f'生成自建证书失败: {str(e)}')
+
+            result_data = {
+                'name': name,
+                'project_type': project_type,
+                'path': path,
+                'domains': [d['domain'] for d in domain_list],
+                'steps_completed': steps_completed,
+                'errors': errors,
+                'access_url': f'http://{domain_list[0]["domain"]}:{domain_list[0]["port"]}' if domain_list else '',
+            }
+            if errors:
+                result_data['warning'] = '部分步骤失败，请检查错误信息'
+            return result_data
 
         # Step 1: 创建运行时站点
         runtime_site_name = name

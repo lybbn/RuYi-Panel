@@ -95,7 +95,7 @@ class Command(BaseCommand):
         print("\n 正在检查WAF数据...")
         try:
             from apps.syswaf.init_data import init_waf_data
-            categories, rules, config, ip_group, from_remote = init_waf_data(force=True)
+            categories, rules, config, ip_group, from_remote, rules_updated = init_waf_data(force=True)
             print(f"初始化完成【WAF数据】: 分类{categories}个, 规则{rules}条, 配置{config}, IP组{ip_group}")
             
         except Exception as e:

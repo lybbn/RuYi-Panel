@@ -42,12 +42,14 @@ from django.conf import settings
 from utils.common import GetPanelPort,isSSLEnable,GetPanelBindAddress,current_os,initWindowsEnv
 from daphne.server import Server as DaphneServer
 from daphne.endpoints import build_endpoint_description_strings
+from daphne.http_protocol import WebRequest, HTTPFactory
 
 from django.core.exceptions import ImproperlyConfigured
 from django.contrib.staticfiles.handlers import ASGIStaticFilesHandler
 from twisted.internet import reactor
 
 import logging
+import time as _time
 logger = logging.getLogger("django.channels.server")
 
 def get_default_application():
@@ -84,6 +86,59 @@ def get_application(options):
     else:
         return get_default_application()
 
+class RuyiWebRequest(WebRequest):
+    """
+    自定义WebRequest，将http_timeout从总超时改为空闲超时。
+    原版Daphne的check_timeouts使用duration()（请求总时间）判断超时，
+    导致SSE长连接即使持续发送heartbeat也会被强制断开。
+    修改后：响应已开始时，从最后一次发送数据的时间算起，SSE有heartbeat不会超时。
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_body_time = None
+
+    def handle_reply(self, message):
+        """重写handle_reply，在发送响应体时更新_last_body_time"""
+        result = super().handle_reply(message)
+        # 每次发送响应体时更新时间戳
+        if message.get("type") == "http.response.body":
+            self._last_body_time = _time.time()
+        elif message.get("type") == "http.response.start":
+            self._last_body_time = _time.time()
+        return result
+
+    def check_timeouts(self):
+        if self.server.http_timeout:
+            if self._response_started and self._last_body_time is not None:
+                # 响应已开始发送数据，使用空闲超时
+                idle_time = _time.time() - self._last_body_time
+                if idle_time > self.server.http_timeout:
+                    logger.warning("Application timed out while sending response (idle %.0fs)", idle_time)
+                    self.finish()
+            else:
+                # 响应未开始，使用总超时
+                if self.duration() > self.server.http_timeout:
+                    self.basic_error(
+                        503,
+                        b"Service Unavailable",
+                        "Application failed to respond within time limit.",
+                    )
+
+
+class RuyiHTTPFactory(HTTPFactory):
+    """使用自定义的RuyiWebRequest替代默认的WebRequest"""
+
+    def buildProtocol(self, addr):
+        try:
+            protocol = super().buildProtocol(addr)
+            protocol.requestFactory = RuyiWebRequest
+            return protocol
+        except Exception:
+            logger.error("Cannot build protocol: %s" % __import__('traceback').format_exc())
+            raise
+
+
 class Server(DaphneServer):
     def log_action(self, protocol, action, details):
         """
@@ -91,6 +146,53 @@ class Server(DaphneServer):
         """
         if self.action_logger:
             self.action_logger(protocol, action, details)
+
+    def run(self):
+        """重写run，使用RuyiHTTPFactory替代默认HTTPFactory"""
+        # 以下代码来自DaphneServer.run()，仅替换HTTPFactory为RuyiHTTPFactory
+        from daphne.ws_protocol import WebSocketFactory
+        from twisted.logger import globalLogBeginner, STDLibLogObserver
+        from twisted.web import http
+
+        self.connections = {}
+        self.http_factory = RuyiHTTPFactory(self)
+        self.ws_factory = WebSocketFactory(self, server=self.server_name)
+        self.ws_factory.setProtocolOptions(
+            autoPingTimeout=self.ping_timeout,
+            allowNullOrigin=True,
+            openHandshakeTimeout=self.websocket_handshake_timeout,
+        )
+        if self.verbosity <= 1:
+            globalLogBeginner.beginLoggingTo(
+                [lambda _: None], redirectStandardIO=False, discardBuffer=True
+            )
+        else:
+            globalLogBeginner.beginLoggingTo([STDLibLogObserver(__name__)])
+
+        if http.H2_ENABLED:
+            logger.info("HTTP/2 support enabled")
+        else:
+            logger.info("HTTP/2 support not enabled")
+
+        reactor.callLater(1, self.application_checker)
+        reactor.callLater(2, self.timeout_checker)
+
+        from twisted.internet.endpoints import serverFromString
+        for socket_description in self.endpoints:
+            logger.info("Configuring endpoint %s", socket_description)
+            ep = serverFromString(reactor, str(socket_description))
+            listener = ep.listen(self.http_factory)
+            listener.addCallback(self.listen_success)
+            listener.addErrback(self.listen_error)
+            self.listeners.append(listener)
+
+        import asyncio
+        asyncio.set_event_loop(reactor._asyncioEventloop)
+
+        if self.ready_callable:
+            self.ready_callable()
+
+        reactor.run(installSignalHandlers=self.signal_handlers)
 
 class AccessLogGenerator:
     """
@@ -214,7 +316,7 @@ def main():
     
     options = {}
     server_name = "ruyi"
-    http_timeout = 300
+    http_timeout = 300  # HTTP空闲超时时间5分钟（响应开始后按空闲时间计算，SSE有heartbeat不会超时）
     application_close_timeout = 30 #应用超时时间
     websocket_timeout= 86400  # WebSocket 超时时间，默认1天
     ping_timeout = 40

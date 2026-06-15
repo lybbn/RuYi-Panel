@@ -1,17 +1,7 @@
 import platform
 from apps.sysai.tools.base import register_tool
-from utils.common import RunCommand
+from apps.sysai.tools.common import run_cmd
 from utils.server.system import system
-
-
-def _run_cmd(cmd: str, timeout: int = 15) -> dict:
-    try:
-        stdout, stderr = RunCommand(cmd, timeout=timeout)
-        if stderr:
-            return {'error': stderr.strip()[:2000]}
-        return {'output': stdout.strip()[:15000]}
-    except Exception as e:
-        return {'error': str(e)}
 
 
 @register_tool(id='get_firewall_status', category='security', name_cn='防火墙状态', risk_level='low')
@@ -36,11 +26,11 @@ def get_ssh_config():
     is_windows = platform.system().lower() == 'windows'
 
     if is_windows:
-        result = _run_cmd('where sshd 2>nul')
+        result = run_cmd('where sshd 2>nul')
         if 'error' in result or not result.get('output', '').strip():
             return {'message': 'Windows 系统未安装 OpenSSH Server'}
 
-        config_result = _run_cmd('type "%ProgramData%\\ssh\\sshd_config" 2>nul')
+        config_result = run_cmd('type "%ProgramData%\\ssh\\sshd_config" 2>nul')
         if 'error' in config_result:
             return {'error': '无法读取 SSH 配置文件'}
 
@@ -48,7 +38,7 @@ def get_ssh_config():
         config_path = '%ProgramData%\\ssh\\sshd_config'
     else:
         sshd_config_path = '/etc/ssh/sshd_config'
-        result = _run_cmd(f'cat {sshd_config_path} 2>/dev/null')
+        result = run_cmd(f'cat {sshd_config_path} 2>/dev/null')
 
         if 'error' in result:
             return {'error': '无法读取SSH配置文件'}
@@ -86,10 +76,10 @@ def get_login_history(lines: int = 20):
     is_windows = platform.system().lower() == 'windows'
 
     if is_windows:
-        success_result = _run_cmd(
+        success_result = run_cmd(
             f'wevtutil qe Security /c:{lines} /rd:true /f:text /q:"*[System[EventID=4624]]" 2>nul'
         )
-        fail_result = _run_cmd(
+        fail_result = run_cmd(
             f'wevtutil qe Security /c:{lines} /rd:true /f:text /q:"*[System[EventID=4625]]" 2>nul'
         )
 
@@ -101,8 +91,8 @@ def get_login_history(lines: int = 20):
             'failed_logins': fail_result.get('output', '无法获取失败登录记录') if 'error' not in fail_result else '无法获取失败登录记录',
         }
     else:
-        last_result = _run_cmd(f'last -n {lines} 2>/dev/null')
-        lastb_result = _run_cmd(f'lastb -n {lines} 2>/dev/null')
+        last_result = run_cmd(f'last -n {lines} 2>/dev/null')
+        lastb_result = run_cmd(f'lastb -n {lines} 2>/dev/null')
 
         return {
             'successful_logins': last_result.get('output', ''),
@@ -116,9 +106,9 @@ def get_open_ports():
     is_windows = platform.system().lower() == 'windows'
 
     if is_windows:
-        result = _run_cmd('netstat -ano | findstr LISTENING')
+        result = run_cmd('netstat -ano | findstr LISTENING')
     else:
-        result = _run_cmd('ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null')
+        result = run_cmd('ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null')
 
     if 'error' in result:
         return result
@@ -164,7 +154,7 @@ def get_security_updates():
     is_windows = platform.system().lower() == 'windows'
 
     if is_windows:
-        result = _run_cmd('wmic qfe list brief 2>nul | more +1')
+        result = run_cmd('wmic qfe list brief 2>nul | more +1')
         if 'error' in result:
             return {'message': '无法检查 Windows 更新，可能需要管理员权限'}
         return {
@@ -172,9 +162,9 @@ def get_security_updates():
             'note': '以上为已安装的更新列表，建议定期检查 Windows Update',
         }
     else:
-        result = _run_cmd('apt list --upgradable 2>/dev/null | head -n 30')
+        result = run_cmd('apt list --upgradable 2>/dev/null | head -n 30')
         if 'error' in result:
-            result = _run_cmd('yum check-update --security 2>/dev/null | head -n 30')
+            result = run_cmd('yum check-update --security 2>/dev/null | head -n 30')
         if 'error' in result:
             return {'message': '无法检查安全更新，可能不是Debian/RedHat系系统'}
         return {
@@ -235,10 +225,10 @@ def manage_firewall_rule(action: str, port: str = '', protocol: str = 'tcp', sou
         else:
             source_arg = f'from {source}' if source else ''
             cmd = f'ufw {action} {source_arg} {port}/{protocol} 2>&1'
-            result = _run_cmd(cmd)
+            result = run_cmd(cmd)
             if 'error' in result:
                 iptables_cmd = f'iptables -{"A" if action == "allow" else "D"} INPUT -p {protocol} --dport {port} -j {"ACCEPT" if action == "allow" else "DROP"} 2>&1'
-                result = _run_cmd(iptables_cmd)
+                result = run_cmd(iptables_cmd)
 
             return {
                 'action': action,

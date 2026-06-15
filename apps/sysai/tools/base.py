@@ -26,6 +26,7 @@ _PARAM_ALIASES = {
     'site_id': {'website_id', 'web_id', 'domain_id'},
     'database_name': {'db_name', 'dbname', 'db'},
     'container_id': {'container', 'container_name', 'docker_id'},
+    'container': {'container_name', 'container_id', 'docker_id', 'name'},
     'image': {'image_name', 'docker_image', 'image_id'},
     'todos': {'tasks', 'items', 'task_list', 'todo_list'},
     'soft_name': {'name', 'app_name', 'service_name', 'software_name'},

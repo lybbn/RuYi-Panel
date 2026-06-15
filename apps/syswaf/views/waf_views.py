@@ -515,7 +515,7 @@ class WafRuleViewSet(CustomModelViewSet):
         try:
             # 调用init_waf_data强制更新规则
             from apps.syswaf.init_data import init_waf_data
-            categories, rules, config, ip_group, from_remote = init_waf_data(force=True)
+            categories, rules, config, ip_group, from_remote, rules_updated = init_waf_data(force=True)
             
             source_text = "云端" if from_remote else "本地"
             
@@ -1514,7 +1514,7 @@ class WafDashboardView(CustomAPIView):
 
 class WafInternalApiView(CustomAPIView):
     """
-    WAF 内部接口：处理日志和 IP 黑名单等
+    WAF 内部接口：处理日志记录和 CC 攻击自动封禁
     仅供 Lua 脚本调用，需要验证 IP 和 Token
     """
     permission_classes = []
@@ -1555,7 +1555,6 @@ class WafInternalApiView(CustomAPIView):
         if not self._verify_token(request):
             return ErrorResponse(msg="Invalid token", status=403)
         
-        # 通过 action 参数判断请求类型
         action = request.query_params.get('action', 'log')
         
         if action == 'ip_blacklist':

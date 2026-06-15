@@ -78,25 +78,38 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
             log_path = os.path.join(os.path.abspath(GetLogsPath()),name,log)
         WriteFile(log_path,"-------------------安装任务已开始-------------------\n",mode='a',write=is_write_log)
         #检测系统是否已安装过nginx（主要检测80和443端口是否被占用）
-        if is_service_running(80) or is_service_running(443):
+        #快速安装(type=2)为重装场景，先停止已有服务再跳过端口检查（shell脚本也会先停止服务）
+        if type == 2:
+            if not is_windows:
+                try:
+                    subprocess.run(['bash','-c','nginx -s stop 2>/dev/null || true'],timeout=10)
+                    time.sleep(1)
+                except:
+                    pass
+        elif is_service_running(80) or is_service_running(443):
             error_msg = "[error]检测到本机已安装并开启了http(s)服务，请关闭后再试!!!"
             WriteFile(log_path,error_msg+'\n',mode='a',write=is_write_log)
             raise ValueError(error_msg)
         download_url = version.get('url',None)
-        WriteFile(log_path,"开始下载【%s】安装文件,文件地址：%s\n"%(name,download_url),mode='a',write=is_write_log)
-        filename = get_file_name_from_url(download_url)
-        save_directory = os.path.abspath(GetTmpPath())
         soft_paths = get_nginx_path_info()
         install_base_directory = soft_paths['root_abspath_path']
         install_directory = soft_paths['install_abspath_path']
-        if not os.path.exists(save_directory):
-            os.makedirs(save_directory)
-        save_path = os.path.join(save_directory, filename)
-        #开始下载
-        ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
-        if not ok:
-            WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
-            raise ValueError(msg)
+        save_path = None
+        if is_windows or type != 2:
+            # Windows 或编译安装时需要下载源码包，快速安装(type=2)跳过下载
+            WriteFile(log_path,"开始下载【%s】安装文件,文件地址：%s\n"%(name,download_url),mode='a',write=is_write_log)
+            filename = get_file_name_from_url(download_url)
+            save_directory = os.path.abspath(GetTmpPath())
+            if not os.path.exists(save_directory):
+                os.makedirs(save_directory)
+            save_path = os.path.join(save_directory, filename)
+            #开始下载
+            ok,msg = download_url_file(url=download_url,save_path=save_path,process=True,log_path=log_path,chunk_size=32768)
+            if not ok:
+                WriteFile(log_path,"[error]【%s】下载失败，原因：%s\n"%(filename,msg),mode='a',write=is_write_log)
+                raise ValueError(msg)
+        else:
+            WriteFile(log_path,"快速安装模式，通过系统包管理器安装，无需下载源码包\n",mode='a',write=is_write_log)
         if is_windows:
             WriteFile(log_path,"【%s】下载完成\n"%filename,mode='a',write=is_write_log)
             src_folder = os.path.join(install_base_directory,Path(filename).stem)
@@ -119,7 +132,7 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
             script_path = os.path.join(settings.BASE_DIR,"utils","install","bash","nginx.sh")
             ConvertToUnixLineEndings(script_path)
             #r_process = subprocess.Popen(['bash', script_path,'install',version['c_version'],version['version']], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,bufsize=1, preexec_fn=os.setsid)
-            r_process = CreateInstallProcess(['bash', script_path,'install',version['c_version'],version['version']])
+            r_process = CreateInstallProcess(['bash', script_path,'install',version['c_version'],version['version'],str(type)])
             job_subprocess_add(version['job_id'],r_process)
             try:
                 while True:
@@ -142,9 +155,10 @@ def Install_Nginx(type=2,version={},is_windows=True,call_back=None):
             WriteFile(soft_paths['abspath_conf_path'],RY_GET_NGINX_CONFIG(is_windows=False))
             WriteFile(soft_paths['install_path']+'/html/index.html',RY_GET_NGINX_INDEX_HTML())
         
-        # 删除下载的文件
-        DeleteFile(save_path,empty_tips=False)
-        WriteFile(log_path,"已删除下载的临时安装文件，并回调\n",mode='a',write=is_write_log)
+        # 删除下载的文件（快速安装无下载文件，跳过）
+        if save_path:
+            DeleteFile(save_path,empty_tips=False)
+            WriteFile(log_path,"已删除下载的临时安装文件\n",mode='a',write=is_write_log)
         if is_windows:
             #安装服务
             WriteFile(log_path,"正在安装nginx为系统服务...\n",mode='a',write=is_write_log)

@@ -494,6 +494,12 @@ def start_scheduler():
         register_monitor_task()
     except Exception as e:
         logger.error(f"恢复监控采集任务失败: {e}")
+    try:
+        # 根据WAF当前状态动态启停日志同步任务
+        from apps.syswaf.services import manage_waf_log_sync_job
+        manage_waf_log_sync_job()
+    except Exception as e:
+        logger.error(f"注册WAF日志同步任务失败: {e}")
     scheduler.add_job(
         executeNextTask,
         trigger=DateTrigger(run_date=datetime.datetime.now() + datetime.timedelta(seconds=1)),  # 1 秒后执行

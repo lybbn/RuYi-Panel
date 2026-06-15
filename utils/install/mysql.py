@@ -535,6 +535,8 @@ def RY_GET_MYSQL_CONF(is_windows=True):
 
 def RY_GET_MYSQL_PORT(is_windows=True):
     conf = RY_GET_MYSQL_CONF(is_windows=is_windows)
+    if not conf:
+        return 3306
     port_rep = r"port\s*=\s*([0-9]+)"
     match = re.search(port_rep, conf)
     if match:
@@ -555,6 +557,9 @@ def RY_GET_MYSQL_INFO(is_windows=True):
     conf = RY_GET_MYSQL_CONF(is_windows=is_windows)
     port = 3306
     datadir = ""
+    if not conf:
+        soft_paths = get_mysql_path_info()
+        return {"port": port, "datadir": soft_paths.get('data_abspath_path', '')}
     port_rep = r"port\s*=\s*([0-9]+)"
     port_match = re.search(port_rep, conf)
     if port_match:

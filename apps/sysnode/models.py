@@ -136,7 +136,7 @@ class LoadBalanceSite(BaseModel):
         ("regex_nocase", "不区分大小写正则(~*)"),
     )
 
-    site = models.ForeignKey('system.Sites', on_delete=models.CASCADE, verbose_name='关联站点', db_constraint=False, related_name='lb_sites')
+    site = models.ForeignKey('system.Sites', on_delete=models.DO_NOTHING, verbose_name='关联站点', db_constraint=False, related_name='lb_sites')
     upstream = models.ForeignKey(UpstreamResource, on_delete=models.CASCADE, verbose_name='Upstream资源', db_constraint=False, related_name='lb_sites')
     location_path = models.CharField(max_length=255, verbose_name='匹配路径', default='/')
     location_match = models.CharField(max_length=16, choices=LOCATION_MATCH_CHOICES, default='prefix', verbose_name='匹配方式')

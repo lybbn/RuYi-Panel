@@ -12,6 +12,8 @@ from . import panel_shop
 from . import panel_docker
 from . import panel_website
 from . import panel_database
+from . import panel_env
+from . import panel_detect
 from . import web_search
 from . import knowledge
 from . import crontab

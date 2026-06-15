@@ -580,6 +580,46 @@ AI_TOOL_CONFIGS = [
         'sort_order': 91,
     },
     {
+        'name': 'panel_environment_probe',
+        'display_name': '环境探测',
+        'tool_type': 'panel',
+        'description': '探测服务器当前环境状态，包括Docker、Web服务器、数据库、运行环境、端口占用、磁盘空间等。部署应用前必须先调用。',
+        'is_enabled': True,
+        'is_dangerous': False,
+        'require_confirm': False,
+        'sort_order': 92,
+    },
+    {
+        'name': 'panel_detect_project',
+        'display_name': '项目类型检测',
+        'tool_type': 'panel',
+        'description': '检测指定目录下的项目类型，自动识别语言、框架、入口文件、启动命令等部署信息。支持Python/Node/Go/PHP/Ruby/Docker/静态站项目，自动读取README/DEPLOY部署文档。',
+        'is_enabled': True,
+        'is_dangerous': False,
+        'require_confirm': False,
+        'sort_order': 93,
+    },
+    {
+        'name': 'panel_find_free_port',
+        'display_name': '查找可用端口',
+        'tool_type': 'panel',
+        'description': '查找服务器上可用的端口号。部署项目时如果默认端口被占用，调用此工具寻找可用端口。',
+        'is_enabled': True,
+        'is_dangerous': False,
+        'require_confirm': False,
+        'sort_order': 94,
+    },
+    {
+        'name': 'panel_deploy_verify',
+        'display_name': '部署验证',
+        'tool_type': 'panel',
+        'description': '验证部署的服务是否正常运行。部署完成后必须调用此工具确认服务可访问，支持URL和端口验证，带重试机制。',
+        'is_enabled': True,
+        'is_dangerous': False,
+        'require_confirm': False,
+        'sort_order': 95,
+    },
+    {
         'name': 'panel_database_list',
         'display_name': '数据库列表',
         'tool_type': 'panel',
@@ -1064,21 +1104,14 @@ def init_ai_tool_config(force=False):
 def init_ai_sys_config(force=False):
     from apps.sysai.models import AIModel
 
-    config_obj, created = AIModel.objects_all.get_or_create(
-        name='__sys_config__',
-        defaults={
-            'model_name': '__sys_config__',
-            'provider': 'custom',
-            'extra_params': AI_SYS_CONFIG,
-        },
-    )
+    config_obj = AIModel.get_sys_config()
 
-    if not created and force:
+    if force or not config_obj.extra_params:
         config_obj.extra_params = AI_SYS_CONFIG
         config_obj.save(update_fields=['extra_params'])
         return True
 
-    return created
+    return False
 
 
 def init_ai_data(force=False):

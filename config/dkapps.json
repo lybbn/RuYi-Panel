@@ -19,13 +19,14 @@
         "ignoreUpgrade":false,
         "type": "10",
         "typename": "建站",
-        "versions":["6.7.2","7.0.0"],
+        "version":"latest",
+        "versions":["6.8","6.7.2","7.0.0"],
         "downloadUrl:":"http://download.lybbn.cn/ruyi/dkapps/wordpress.zip",
         "formFields":[
             {"label":"端口","required":true,"random":false,"outport":true,"rule":"ryportrule","type":"number","envkey":"wordpress_port","default":18080,"tips":""},
             {"label":"数据库名","required":true,"random":true,"rule":"rycommonrule","type":"text","envkey":"mysql_database","default":"ry","tips":""},
             {"label":"数据库用户","required":true,"random":true,"rule":"rycommonrule","type":"text","envkey":"mysql_user","default":"ry","tips":""},
-            {"label":"数据库密码","required":true,"random":true,"rule":"rypasswordrule","type":"password","envkey":"mysql_password","default":"ry","tips":""},
+            {"label":"数据库密码","required":true,"random":true,"rule":"rypasswordrule","type":"password","envkey":"mysql_password","default":"Ruyi@Db2026#Pwd","tips":""},
             {"label":"数据库服务","required":true,"random":false,"rule":"","type":"selectapps","envkey":"panel_service_type","default":"mysql","tips":"需安装MySQL应用",
             "values":[{"label":"MySQL","value":"mysql"}],"child":{"envkey":"wordpress_db_host","default":"","required":true,"type":"service","label":""}
             }
@@ -51,11 +52,12 @@
         "ignoreUpgrade":false,
         "type": "2",
         "typename": "数据库",
-        "versions":["9.0.1","8.4.9","8.4.4","8.0.46","5.7.44","5.6.51"],
+        "version":"8.0",
+        "versions":["8.0.46","8.4.9","5.7.44","9.0.1","8.4.4","5.6.51"],
         "downloadUrl:":"http://download.lybbn.cn/ruyi/dkapps/mysql.zip",
         "formFields":[
             {"label":"端口","required":true,"random":false,"outport":true,"rule":"ryportrule","type":"number","envkey":"mysql_port","default":13306,"tips":""},
-            {"label":"root密码","required":true,"random":true,"rule":"rypasswordrule","type":"password","envkey":"mysql_root_password","default":"mysql","tips":""}
+            {"label":"root密码","required":true,"random":true,"rule":"rypasswordrule","type":"password","envkey":"mysql_root_password","default":"Ruyi@Mysql2026#Db","tips":""}
         ]
     },
     {
@@ -82,7 +84,7 @@
         "downloadUrl:":"http://download.lybbn.cn/ruyi/dkapps/mongodb.zip",
         "formFields":[
             {"label":"端口","required":true,"random":false,"outport":true,"rule":"ryportrule","type":"number","envkey":"mongo_port","default":27017,"tips":""},
-            {"label":"root密码","required":true,"random":true,"rule":"rypasswordrule","type":"password","envkey":"mongo_root_password","default":"mongodb","tips":""}
+            {"label":"root密码","required":true,"random":true,"rule":"rypasswordrule","type":"password","envkey":"mongo_root_password","default":"Ruyi@Mongo2026#Db","tips":""}
         ]
     },
     {
@@ -110,7 +112,7 @@
         "formFields":[
             {"label":"端口","required":true,"random":false,"outport":true,"rule":"ryportrule","type":"number","envkey":"postgres_port","default":15432,"tips":""},
             {"label":"用户","required":true,"random":false,"rule":"rycommonrule","type":"text","envkey":"postgres_user","default":"postgres","tips":""},
-            {"label":"密码","required":true,"random":true,"rule":"rypasswordrule","type":"password","envkey":"postgres_password","default":"postgres","tips":""}
+            {"label":"密码","required":true,"random":true,"rule":"rypasswordrule","type":"password","envkey":"postgres_password","default":"Ruyi@Pg2026#Db","tips":""}
         ]
     },
     {
@@ -165,7 +167,7 @@
         "formFields":[
             {"label":"Web端口","required":true,"random":false,"outport":true,"rule":"ryportrule","type":"number","envkey":"webui_port","default":3000,"tips":""},
             {"label":"Ollama地址","required":true,"random":false,"rule":"ryurlrule","type":"text","envkey":"ollama_base_url","default":"ollama服务地址如: http://x.x.x.x:11434","tips":""},
-            {"label":"SecretKey","required":true,"random":true,"rule":"rycommonrule","type":"password","envkey":"webui_secret_key","default":"ollama","tips":""}
+            {"label":"SecretKey","required":true,"random":true,"rule":"rypasswordrule","type":"password","envkey":"webui_secret_key","default":"Ruyi@Ollama2026#","tips":""}
         ]
     },
     {
@@ -450,10 +452,10 @@
                 "label": "访问 Token",
                 "required": true,
                 "random": true,
-                "rule": "rycommonrule",
+                "rule": "rypasswordrule",
                 "type": "password",
                 "envkey": "openclaw_gateway_token",
-                "default": "openclaw-token-",
+                "default": "Ruyi@OpenClaw2026#",
                 "tips": "首次登录 OpenClaw 控制台时需要使用这个 Token"
             },
             {
@@ -596,7 +598,7 @@
                 "rule": "rypasswordrule",
                 "type": "password",
                 "envkey": "rabbitmq_password",
-                "default": "rabbitmq",
+                "default": "Ruyi@RabbitMQ2026#",
                 "tips": "管理界面登录密码"
             },
             {
@@ -666,7 +668,7 @@
             {"label": "Gateway端口", "required": true, "random": false, "outport": true, "rule": "ryportrule", "type": "number", "envkey": "hermes_gateway_port", "default": 8642, "tips": "API服务与Gateway主入口端口"},
             {"label": "Dashboard端口", "required": true, "random": false, "outport": true, "rule": "ryportrule", "type": "number", "envkey": "hermes_dashboard_port", "default": 9119, "tips": "Web控制台端口"},
             {"label": "API访问范围", "required": true, "random": false, "rule": "", "type": "select", "envkey": "api_server_host", "default": "0.0.0.0", "tips": "0.0.0.0 允许外网访问，127.0.0.1 仅本机访问", "values": [{"label": "允许外网访问", "value": "0.0.0.0"}, {"label": "仅本机访问", "value": "127.0.0.1"}]},
-            {"label": "API密钥", "required": true, "random": true, "rule": "rycommonrule", "type": "password", "envkey": "api_server_key", "default": "hermes", "tips": "API Server访问密钥，至少8位字符"},
+            {"label": "API密钥", "required": true, "random": true, "rule": "rypasswordrule", "type": "password", "envkey": "api_server_key", "default": "Ruyi@Hermes2026#", "tips": "API Server访问密钥，至少8位字符"},
             {"label": "启用Dashboard", "required": true, "random": false, "rule": "", "type": "checkbox", "envkey": "hermes_dashboard", "default": true, "tips": "启用Web控制台界面"},
             {"label": "时区", "required": true, "random": false, "rule": "", "type": "text", "envkey": "timezone", "default": "Asia/Shanghai", "tips": "容器时区配置"}
         ]
@@ -750,7 +752,7 @@
         "formFields": [
             {"label": "Web端口", "required": true, "random": false, "outport": true, "rule": "ryportrule", "type": "number", "envkey": "allinssl_port", "default": 7979, "tips": "ALLinSSL Web访问端口"},
             {"label": "管理用户名", "required": true, "random": false, "rule": "rycommonrule", "type": "text", "envkey": "allinssl_user", "default": "allinssl", "tips": "登录用户名"},
-            {"label": "管理密码", "required": true, "random": true, "rule": "rypasswordrule", "type": "password", "envkey": "allinssl_pwd", "default": "allinssl", "tips": "登录密码"},
+            {"label": "管理密码", "required": true, "random": true, "rule": "rypasswordrule", "type": "password", "envkey": "allinssl_pwd", "default": "Ruyi@AllinSSL2026#", "tips": "登录密码"},
             {"label": "安全入口", "required": true, "random": false, "rule": "rycommonrule", "type": "text", "envkey": "allinssl_url", "default": "allinssl", "tips": "访问路径，如 http://IP:端口/安全入口"}
         ]
     },
@@ -886,7 +888,7 @@
             {"label": "Web端口", "required": true, "random": false, "outport": true, "rule": "ryportrule", "type": "number", "envkey": "me_port", "default": 18081, "tips": "Mongo-Express Web管理界面端口"},
             {"label": "MongoDB连接地址", "required": true, "random": false, "rule": "", "type": "text", "envkey": "me_config_mongodb_url", "default": "mongodb://admin:admin@127.0.0.1:27017", "tips": "MongoDB连接URL，如 mongodb://user:pass@host:port"},
             {"label": "管理用户名", "required": true, "random": false, "rule": "", "type": "text", "envkey": "me_config_basicauth_username", "default": "admin", "tips": "Mongo-Express登录用户名"},
-            {"label": "管理密码", "required": true, "random": true, "rule": "rypasswordrule", "type": "password", "envkey": "me_config_basicauth_password", "default": "admin", "tips": "Mongo-Express登录密码"}
+            {"label": "管理密码", "required": true, "random": true, "rule": "rypasswordrule", "type": "password", "envkey": "me_config_basicauth_password", "default": "Ruyi@MongoEx2026#", "tips": "Mongo-Express登录密码"}
         ]
     },
     {
@@ -914,7 +916,7 @@
         "formFields": [
             {"label": "Web端口", "required": true, "random": false, "outport": true, "rule": "ryportrule", "type": "number", "envkey": "pgadmin_port", "default": 18050, "tips": "pgAdmin Web管理界面端口"},
             {"label": "登录邮箱", "required": true, "random": false, "rule": "", "type": "text", "envkey": "pgadmin_default_email", "default": "admin@admin.com", "tips": "pgAdmin登录邮箱"},
-            {"label": "登录密码", "required": true, "random": true, "rule": "rypasswordrule", "type": "password", "envkey": "pgadmin_default_password", "default": "admin", "tips": "pgAdmin登录密码"}
+            {"label": "登录密码", "required": true, "random": true, "rule": "rypasswordrule", "type": "password", "envkey": "pgadmin_default_password", "default": "Ruyi@PgAdmin2026#", "tips": "pgAdmin登录密码"}
         ]
     },
     {
@@ -968,7 +970,7 @@
         "downloadUrl:": "http://download.lybbn.cn/ruyi/dkapps/redis.zip",
         "formFields": [
             {"label": "端口", "required": true, "random": false, "outport": true, "rule": "ryportrule", "type": "number", "envkey": "redis_port", "default": 16379, "tips": "Redis服务端口"},
-            {"label": "密码", "required": true, "random": true, "rule": "rypasswordrule", "type": "password", "envkey": "redis_password", "default": "redis", "tips": "Redis访问密码"}
+            {"label": "密码", "required": true, "random": true, "rule": "rypasswordrule", "type": "password", "envkey": "redis_password", "default": "Ruyi@Redis2026#", "tips": "Redis访问密码"}
         ]
     }
 ]

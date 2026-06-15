@@ -60,6 +60,87 @@ Return_Error() {
 	exit 1
 }
 
+# 检查编译 MySQL 所需的内存
+# MySQL 5.7 编译每个核心约需 1.5GB 内存，MySQL 8.0 约需 2GB
+Check_Memory_For_Compile() {
+    local mysql_major_version=$1
+    local compile_cores=$2
+    
+    # 获取系统可用内存（MB）
+    local total_mem_mb=$(free -m | awk '/^Mem:/ {print $2}')
+    local available_mem_mb=$(free -m | awk '/^Mem:/ {print $7}')
+    # 如果 available 字段不存在（旧版 free），使用 free 字段
+    if [ -z "$available_mem_mb" ] || [ "$available_mem_mb" -eq 0 ]; then
+        available_mem_mb=$(free -m | awk '/^Mem:/ {print $4}')
+    fi
+    local total_mem_gb=$((total_mem_mb / 1024))
+    local available_mem_gb=$((available_mem_mb / 1024))
+    
+    # 每核心所需内存（MB）
+    local mem_per_core_mb=0
+    local min_total_mem_gb=0
+    local recommend_total_mem_gb=0
+    
+    if [[ "$mysql_major_version" == "8.0" ]]; then
+        mem_per_core_mb=2048  # 2GB per core
+        min_total_mem_gb=4
+        recommend_total_mem_gb=8
+    else
+        mem_per_core_mb=1536  # 1.5GB per core
+        min_total_mem_gb=2
+        recommend_total_mem_gb=4
+    fi
+    
+    # 计算编译所需内存
+    local required_mem_mb=$((mem_per_core_mb * compile_cores))
+    local required_mem_gb=$(((required_mem_mb + 1023) / 1024))
+    
+    echo "============================================="
+    echo "MySQL ${mysql_major_version} 编译内存检查"
+    echo "============================================="
+    echo "系统总内存: ${total_mem_gb} GB"
+    echo "系统可用内存: ${available_mem_gb} GB"
+    echo "编译并行核心数: ${compile_cores}"
+    echo "预估编译所需内存: ${required_mem_gb} GB"
+    echo "============================================="
+    
+    # 检查内存是否足够
+    if [ "$available_mem_mb" -lt "$required_mem_mb" ]; then
+        echo ""
+        echo "❌ 警告: 可用内存不足！"
+        echo "   当前可用内存: ${available_mem_gb} GB"
+        echo "   编译所需内存: ${required_mem_gb} GB"
+        echo "   内存不足可能导致编译卡住或失败（如卡在 47%-49%）"
+        echo ""
+        echo "建议方案:"
+        echo "   1. 增加服务器内存至 ${recommend_total_mem_gb} GB 或以上"
+        echo "   2. 减少并行编译核心数（当前: ${compile_cores}）"
+        echo "   3. 关闭其他占用内存的进程"
+        echo "   4. 添加 Swap 分区作为虚拟内存"
+        echo ""
+        
+        # 尝试自动调整核心数
+        local safe_cores=$((available_mem_mb / mem_per_core_mb))
+        if [ "$safe_cores" -lt 1 ]; then
+            safe_cores=1
+        fi
+        
+        if [ "$safe_cores" -lt "$compile_cores" ]; then
+            echo "自动调整: 将并行核心数从 ${compile_cores} 减少到 ${safe_cores}"
+            echo "============================================="
+            cpu_core=$safe_cores
+            return 0
+        fi
+        
+        echo "是否继续编译？(继续可能导致编译失败)"
+        echo "按 Enter 继续，按 Ctrl+C 取消..."
+        read -t 30
+    else
+        echo "✅ 内存检查通过，可以开始编译"
+        echo "============================================="
+    fi
+}
+
 # 检查是否以 root 用户运行
 if [ "$(id -u)" -ne 0 ]; then
     echo "请以 root 用户运行此脚本" >&2
@@ -189,6 +270,8 @@ Install_Package() {
         # 根据不同的包管理器安装包
         if command -v apt-get &> /dev/null; then
             # 适用于基于 Debian/Ubuntu 的系统
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -y > /dev/null 2>&1
             apt-get install -y "$package_name"
         elif command -v yum &> /dev/null; then
             # 适用于基于 CentOS/RHEL 的系统
@@ -240,10 +323,34 @@ Install_MySQL_Binary() {
         yum install libtirpc libtirpc-devel -y
         yum install libaio -y
     elif [ -f "/usr/bin/apt-get" ];then
-        apt-get install libncurses5 -y
-        apt-get install patchelf -y > /dev/null
-        apt-get install libtirpc-dev -y > /dev/null
-        apt-get install libaio1 -y > /dev/null
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -y > /dev/null 2>&1
+        # 获取 Debian 主版本号
+        debian_ver=0
+        if [ -f /etc/debian_version ]; then
+            debian_ver=$(cut -d. -f1 /etc/debian_version)
+        fi
+        # Debian 13+ 将 libaio1 重命名为 libaio1t64，libncurses5 重命名为 libncurses6（64位 time_t 过渡）
+        if [ "$debian_ver" -ge 13 ] 2>/dev/null; then
+            apt-get install -y libncurses6 patchelf libtirpc-dev libaio1t64 > /dev/null
+            LIB_DIR="/usr/lib/x86_64-linux-gnu"
+            # 创建 libncurses.so.5 兼容链接（MySQL 5.7 二进制包依赖）
+            if [ ! -f ${LIB_DIR}/libncurses.so.5 ] && [ -f ${LIB_DIR}/libncurses.so.6 ]; then
+                ln -sf ${LIB_DIR}/libncurses.so.6 ${LIB_DIR}/libncurses.so.5
+                ln -sf ${LIB_DIR}/libtinfo.so.6 ${LIB_DIR}/libtinfo.so.5
+            fi
+            # 创建 libaio.so.1 兼容链接（libaio1t64 的 soname 为 libaio.so.1t64）
+            if [ ! -f ${LIB_DIR}/libaio.so.1 ]; then
+                if [ -f ${LIB_DIR}/libaio.so.1t64 ]; then
+                    ln -sf ${LIB_DIR}/libaio.so.1t64 ${LIB_DIR}/libaio.so.1
+                elif [ -f ${LIB_DIR}/libaio.so.1.0.2 ]; then
+                    ln -sf ${LIB_DIR}/libaio.so.1.0.2 ${LIB_DIR}/libaio.so.1
+                fi
+            fi
+        else
+            apt-get install -y libncurses5 patchelf libtirpc-dev libaio1 > /dev/null
+        fi
+        ldconfig
     fi
     Install_rpcgen
 
@@ -346,8 +453,9 @@ Install_Soft() {
         yum install libtirpc-devel* -y
         yum install patchelf -y  > /dev/null
     elif [ -f "/usr/bin/apt-get" ];then
-        apt-get cmake install libtirpc-dev -y
-        apt-get install patchelf -y > /dev/null
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -y > /dev/null 2>&1
+        apt-get install -y cmake libtirpc-dev rpcbind patchelf > /dev/null
     fi
     if [ "${IsAliYunOS}" ];then
         yum install bison libaio-devel libtirpc-devel -y
@@ -371,12 +479,19 @@ Install_Soft() {
     echo -e 当前系统 gcc:${GCC_VERSION} cmake:${CMAKE_VERSION}
     if [[ $mysql_version_2 == "5.7" ]]; then
         Install_Package "cmake"
+        # 编译前检查内存
+        Check_Memory_For_Compile "5.7" "${cpu_core}"
         echo "====================================="
-        echo "开始编译"
+        echo "开始编译 (使用 ${cpu_core} 个核心)"
         echo "====================================="
         # cmake -DCMAKE_INSTALL_PREFIX=${MYSQL_SETUP_PATH} -DWITHOUT_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DMYSQL_UNIX_ADDR=/tmp/mysql.sock -DMYSQL_DATADIR=${MYSQL_DATA_PATH} -DMYSQL_USER=mysql -DSYSCONFDIR=/etc -DWITH_MYISAM_STORAGE_ENGINE=1 -DWITH_INNOBASE_STORAGE_ENGINE=1 -DWITH_PARTITION_STORAGE_ENGINE=1 -DWITH_FEDERATED_STORAGE_ENGINE=1 -DEXTRA_CHARSETS=all -DDEFAULT_CHARSET=utf8mb4 -DDEFAULT_COLLATION=utf8mb4_general_ci -DWITH_EMBEDDED_SERVER=1 -DENABLED_LOCAL_INFILE=1 -DWITH_BOOST=./boost -DWITH_SSL=${OPENSSL_PATH} -DWITH_TOKUDB=OFF
         cmake -DCMAKE_INSTALL_PREFIX=${MYSQL_SETUP_PATH} -DWITH_DEBUG=OFF  -DWITH_DOCS=OFF -DWITH_TESTS=OFF -DWITH_EXAMPLES=OFF -DWITHOUT_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DMYSQL_UNIX_ADDR=/tmp/mysql.sock -DMYSQL_DATADIR=${MYSQL_DATA_PATH} -DMYSQL_USER=mysql -DSYSCONFDIR=/etc -DWITH_MYISAM_STORAGE_ENGINE=1 -DWITH_INNOBASE_STORAGE_ENGINE=1 -DWITH_PARTITION_STORAGE_ENGINE=1 -DWITH_FEDERATED_STORAGE_ENGINE=1 -DEXTRA_CHARSETS=all -DDEFAULT_CHARSET=utf8mb4 -DDEFAULT_COLLATION=utf8mb4_general_ci -DWITH_EMBEDDED_SERVER=1 -DENABLED_LOCAL_INFILE=1 -DWITH_BOOST=./boost ${DWITH_SSL} -DWITH_TOKUDB=OFF
     elif [[ $mysql_version_2 == "8.0" ]]; then
+        # 编译前检查内存
+        Check_Memory_For_Compile "8.0" "${cpu_core}"
+        echo "====================================="
+        echo "开始编译 MySQL 8.0 (使用 ${cpu_core} 个核心)"
+        echo "====================================="
         mkdir rybuild
         cd rybuild
         cmakeCV="cmake"

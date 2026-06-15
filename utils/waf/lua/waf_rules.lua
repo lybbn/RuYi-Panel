@@ -50,7 +50,8 @@ local JSON_SKIP_FIELDS = {
 }
 
 -- 长文本字段值超过此长度时跳过检测（字节）
-local JSON_VALUE_MAX_LENGTH = 512
+-- 设为2048以兼容AI聊天等场景中的较长内容字段
+local JSON_VALUE_MAX_LENGTH = 2048
 
 local function match_patterns(content, patterns, options)
     if not content or content == "" then

@@ -386,11 +386,30 @@ class DatabaseBackupModule(BaseBackupModule):
 
     def _build_db_info(self, db):
         """构建数据库信息字典"""
+        db_user = db.db_user or ''
+        db_pass = db.db_pass or ''
+        if db.is_remote and not db_user:
+            from apps.system.models import RemoteMysql, RemoteMongodb, RemotePgsql
+            if db.db_type == 0:
+                remote = RemoteMysql.objects.filter(db_host=db.db_host, db_port=int(db.db_port)).first()
+                if remote:
+                    db_user = remote.db_user or 'root'
+                    db_pass = remote.db_password or ''
+            elif db.db_type == 2:
+                remote = RemoteMongodb.objects.filter(db_host=db.db_host, db_port=int(db.db_port)).first()
+                if remote:
+                    db_user = remote.db_user or ''
+                    db_pass = remote.db_password or ''
+            elif db.db_type == 3:
+                remote = RemotePgsql.objects.filter(db_host=db.db_host, db_port=int(db.db_port)).first()
+                if remote:
+                    db_user = remote.db_user or ''
+                    db_pass = remote.db_password or ''
         return {
             'db_host': db.db_host or '127.0.0.1',
             'db_port': db.db_port or 3306,
-            'db_user': db.db_user or '',
-            'db_pass': db.db_pass or '',
+            'db_user': db_user,
+            'db_pass': db_pass,
             'db_name': db.db_name,
             'format': db.format or 'utf8mb4',
         }

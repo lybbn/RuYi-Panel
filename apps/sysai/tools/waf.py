@@ -460,10 +460,41 @@ def waf_set_site_status(site_id: int, status: str):
 
     try:
         from apps.syswaf.models import WafSiteConfig
+        from apps.system.models import Sites
 
         config = WafSiteConfig.objects.filter(site_id=site_id).first()
+        
+        # 如果配置不存在，自动创建
         if not config:
-            return {'error': f'站点ID {site_id} 的WAF配置不存在'}
+            site = Sites.objects.filter(id=site_id).first()
+            if not site:
+                return {'error': f'站点ID {site_id} 不存在'}
+            
+            config = WafSiteConfig.objects.create(
+                site_id=site_id,
+                site_name=site.name,
+                waf_status=status
+            )
+            
+            # 如果启用WAF，需要配置Nginx
+            if status != 'off':
+                from utils.ruyiclass.nginxClass import NginxClient
+                nginx = NginxClient(siteName=site.name)
+                ok, msg = nginx.set_site_waf(enabled=True, site_id=site_id)
+                if not ok:
+                    config.waf_status = 'off'
+                    config.save()
+                    return {'error': f'Nginx配置失败: {msg}'}
+            
+            status_map = {'off': '关闭', 'observe': '观察模式', 'protect': '防护模式'}
+            return {
+                'success': True,
+                'site_id': site_id,
+                'site_name': site.name,
+                'old_status': '关闭',
+                'new_status': status_map.get(status, status),
+                'message': f'站点 {site.name} WAF配置已创建并设置为{status_map.get(status, status)}',
+            }
 
         old_status = config.waf_status
         config.waf_status = status

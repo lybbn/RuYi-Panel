@@ -352,6 +352,56 @@ class main:
             return self.set_openclaw_conf(cont=cont)
         elif appname == "redis":
             return self.set_redis_conf(cont=cont)
+        elif appname == "mysql":
+            return self.set_mysql_conf(cont=cont)
+        return True,"ok"
+
+    def set_mysql_conf(self,cont={}):
+        """根据MySQL版本自动配置启动参数COMMAND
+        MySQL 5.7: --default-authentication-plugin=mysql_native_password
+        MySQL 8.0: --default-authentication-plugin=mysql_native_password（8.0.34已废弃但仍可用）
+        MySQL 8.4+: 不支持该参数，使用caching_sha2_password作为默认认证
+        MySQL 9.0+: 已完全移除该参数
+        """
+        app_path = self.get_dkapp_path(cont=cont)
+        version = cont.get("version","8.0")
+        app_env_path = f"{app_path}/.env"
+        if not os.path.exists(app_env_path):
+            return True,"ok"
+
+        # 解析版本号主版本
+        try:
+            major_version = int(version.split('.')[0])
+        except (ValueError, IndexError):
+            major_version = 8
+
+        # MySQL 5.7 和 8.0 使用 mysql_native_password，8.4+ 不使用
+        if major_version <= 8:
+            major_minor = version.split('.')
+            minor_version = int(major_minor[1]) if len(major_minor) > 1 else 0
+            if major_version < 8 or (major_version == 8 and minor_version == 0):
+                command = "--default-authentication-plugin=mysql_native_password"
+            else:
+                # 8.4+ 不再支持该参数
+                command = ""
+        else:
+            # 9.0+
+            command = ""
+
+        # 更新.env中的COMMAND和VERSION
+        with open(app_env_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        new_lines = []
+        for line in lines:
+            if line.startswith("COMMAND="):
+                new_lines.append(f"COMMAND={command}\n")
+            else:
+                new_lines.append(line)
+
+        with open(app_env_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+
         return True,"ok"
 
     def set_redis_conf(self,cont={}):
@@ -538,6 +588,9 @@ class main:
         else:
             self.replace_in_file(app_compose_path, "RUYI_DKAPP", name)
 
+        # 自动注入 extra_hosts 支持 host.docker.internal，使容器能访问宿主机服务
+        self._inject_extra_hosts(app_compose_path)
+
         with open(app_env_path) as f:
             lines = f.readlines()
         
@@ -588,7 +641,25 @@ class main:
         elif status == "rebuild":
             isok,msg = self.rebuild_app(compose_conf_path)
         return isok,msg
-    
+
+    def _inject_extra_hosts(self, compose_path):
+        """自动注入 extra_hosts 到 docker-compose.yml，使容器能通过 host.docker.internal 访问宿主机"""
+        try:
+            with open(compose_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            if 'host.docker.internal' in content:
+                return  # 已存在，无需注入
+            if 'extra_hosts:' in content:
+                return  # 已有 extra_hosts 配置，不覆盖
+            # 在 networks: 行之前插入 extra_hosts
+            import re
+            extra_hosts_block = '    extra_hosts:\n      - "host.docker.internal:host-gateway"\n'
+            content = re.sub(r'(\n    networks:)', extra_hosts_block + r'\1', content, count=1)
+            with open(compose_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except Exception:
+            pass
+
     def up_app_remove_orphans(self,compose_conf_path):
         if not compose_conf_path:return False,"无配置文件"
         if not os.path.exists(compose_conf_path): return False,"应用配置文件不存在"

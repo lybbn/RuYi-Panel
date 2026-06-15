@@ -1,19 +1,9 @@
 import os
 import platform
 from apps.sysai.tools.base import register_tool
-from utils.common import RunCommand
+from apps.sysai.tools.common import run_cmd
 from utils.server.system import system
 from utils.ruyiclass.webClass import WebClient
-
-
-def _run_cmd(cmd: str, timeout: int = 15) -> dict:
-    try:
-        stdout, stderr = RunCommand(cmd, timeout=timeout)
-        if stderr:
-            return {'error': stderr.strip()[:2000]}
-        return {'output': stdout.strip()[:15000]}
-    except Exception as e:
-        return {'error': str(e)}
 
 
 def _parse_nginx_config(content: str) -> dict:
@@ -104,7 +94,7 @@ def list_websites():
                             continue
 
     if is_windows and not websites:
-        iis_result = _run_cmd('%systemroot%\\system32\\inetsrv\\appcmd list sites 2>nul')
+        iis_result = run_cmd('%systemroot%\\system32\\inetsrv\\appcmd list sites 2>nul')
         if 'output' in iis_result and iis_result['output'].strip():
             websites.append({
                 'name': 'IIS Sites',
@@ -155,14 +145,14 @@ def check_website_status(domain: str, port: int = 80, path: str = '/'):
     """
     url = f'http://{domain}:{port}{path}'
 
-    result = _run_cmd(
+    result = run_cmd(
         f'curl -o /dev/null -s -w "%{{http_code}}|%{{time_total}}|%{{size_download}}|%{{redirect_url}}" '
         f'--max-time 10 {url} 2>&1'
     )
 
     if 'error' in result:
         https_url = f'https://{domain}:{port}{path}'
-        result = _run_cmd(
+        result = run_cmd(
             f'curl -o /dev/null -s -k -w "%{{http_code}}|%{{time_total}}|%{{size_download}}|%{{redirect_url}}" '
             f'--max-time 10 {https_url} 2>&1'
         )
@@ -195,10 +185,10 @@ def get_nginx_status():
     svc_status = system.GetServiceStatus('nginx')
     is_active = svc_status.get('is_active', False)
 
-    version_result = _run_cmd('nginx -v 2>&1')
+    version_result = run_cmd('nginx -v 2>&1')
     version = version_result.get('output', '').replace('nginx version: ', '').strip()
 
-    test_result = _run_cmd('nginx -t 2>&1')
+    test_result = run_cmd('nginx -t 2>&1')
 
     return {
         'is_active': is_active,

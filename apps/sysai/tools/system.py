@@ -350,14 +350,19 @@ def execute_command(command: str, timeout: int = 30):
     - 不确定操作系统时，先用 get_system_info 工具查询
 
     **路径规则：命令中涉及文件或目录路径时，必须使用绝对路径，禁止使用相对路径！**
-    - 正确：ls /var/log/nginx/access.log、type C:\Windows\System32\drivers\etc\hosts
+    - 正确：ls /var/log/nginx/access.log、type C:\\Windows\\System32\\drivers\\etc\\hosts
     - 错误：ls ./nginx/access.log、type hosts
+
+    **禁止使用此工具写入文件内容！写入文件必须使用 write_file 工具。**
+    - 禁止：cat > file << 'EOF'、echo "content" > file、tee file
+    - 正确：使用 write_file 工具
 
     禁止执行的危险操作：
     - 删除系统文件或目录（如 rm -rf、del /f /s）
     - 修改系统关键配置
     - 格式化磁盘、修改分区表
     - 安装或卸载系统级软件包（除非用户明确要求）
+    - 写入文件内容（必须使用 write_file 工具）
 
     Args:
         command: 要执行的命令（必须适配当前操作系统，路径必须使用绝对路径）
@@ -369,11 +374,11 @@ def execute_command(command: str, timeout: int = 30):
         return {'command': command, 'error': denied}
 
     registry = AIToolRegistry()
-    registry.emit_progress('execute_command', 'tool.progress', 10, 'Executing command...')
+    registry.emit_progress('execute_command', 'tool.log', 0, 'Executing command...')
 
     try:
         out, err = RunCommand(command, timeout=timeout)
-        registry.emit_progress('execute_command', 'tool.progress', 80, 'Command completed, processing output...')
+        registry.emit_progress('execute_command', 'tool.log', 0, 'Command completed, processing output...')
         output = out
         if err:
             output += f'\n[STDERR]: {err}'

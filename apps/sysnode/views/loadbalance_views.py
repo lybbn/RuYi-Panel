@@ -177,6 +177,9 @@ class UpstreamResourceViewSet(CustomModelViewSet):
 
         serializer = self.get_serializer(data=reqData, request=request)
         serializer.is_valid(raise_exception=True)
+        if not servers_data:
+            return ErrorResponse(msg="至少需要添加一个后端服务器")
+
         self.perform_create(serializer)
 
         resource = UpstreamResource.objects.get(id=serializer.data.get("id"))
@@ -196,6 +199,9 @@ class UpstreamResourceViewSet(CustomModelViewSet):
         _notify_lb_progress("正在验证Nginx配置...", 60)
         if not _check_nginx_config_safe():
             self._delete_upstream_config(resource)
+            UpstreamServer.objects.filter(resource=resource).delete()
+            LoadBalanceSite.objects.filter(upstream=resource).delete()
+            resource.delete()
             _notify_lb_progress("Nginx配置验证失败", 0, {"error": True})
             return ErrorResponse(msg="Nginx配置验证失败，请检查Upstream配置是否正确")
         _notify_lb_progress("正在重载Nginx...", 80)
@@ -406,6 +412,8 @@ class UpstreamResourceViewSet(CustomModelViewSet):
             config_path = os.path.join(base_path, "stream.conf")
             if os.path.exists(config_path):
                 os.remove(config_path)
+            # 清理nginx.conf中的stream include指令
+            self._remove_nginx_include_stream()
             return
         lines = ["stream {"]
         for resource in stream_resources:
@@ -416,7 +424,7 @@ class UpstreamResourceViewSet(CustomModelViewSet):
         WriteFile(config_path, config_content + "\n")
 
     def _write_upstream_config(self, resource):
-        self._notify_lb_progress("正在生成Upstream配置...", 20)
+        _notify_lb_progress("正在生成Upstream配置...", 20)
         base_path = _get_upstream_base_path()
         config_name = resource.name.replace(' ', '_').replace('.', '_')
         if resource.load_type == "http":
@@ -490,11 +498,8 @@ class UpstreamResourceViewSet(CustomModelViewSet):
         content = content.rstrip() + "\n\n" + stream_include + "\n"
         WriteFile(nginx_conf_path, content)
 
-    def _ensure_nginx_cache_zone(self):
-        """确保Nginx主配置中定义了负载均衡缓存区域"""
-        has_cache_enabled = LoadBalanceSite.objects.filter(enable_cache=True, status=True).exists()
-        if not has_cache_enabled:
-            return
+    def _remove_nginx_include_stream(self):
+        """从nginx.conf中移除stream include指令"""
         from utils.install.nginx import get_nginx_path_info
         nginx_info = get_nginx_path_info()
         nginx_conf_path = nginx_info.get('abspath_conf_path', '')
@@ -503,6 +508,41 @@ class UpstreamResourceViewSet(CustomModelViewSet):
         content = ReadFile(nginx_conf_path)
         if not content:
             return
+        base_path = _get_upstream_basestream_path()
+        stream_include = f"include {base_path}/*.conf;"
+        if stream_include not in content:
+            return
+        content = content.replace(stream_include, "")
+        # 清理多余空行
+        while "\n\n\n" in content:
+            content = content.replace("\n\n\n", "\n\n")
+        WriteFile(nginx_conf_path, content.strip() + "\n")
+
+    def _ensure_nginx_cache_zone(self):
+        """确保Nginx主配置中定义了负载均衡缓存区域，无缓存需求时清理"""
+        has_cache_enabled = LoadBalanceSite.objects.filter(enable_cache=True, status=True).exists()
+        from utils.install.nginx import get_nginx_path_info
+        nginx_info = get_nginx_path_info()
+        nginx_conf_path = nginx_info.get('abspath_conf_path', '')
+        if not nginx_conf_path or not os.path.exists(nginx_conf_path):
+            return
+        content = ReadFile(nginx_conf_path)
+        if not content:
+            return
+
+        if not has_cache_enabled:
+            # 无缓存需求时，清理已有的缓存区域定义
+            if 'RUYI-LB-CACHE-START' in content:
+                import re
+                content = re.sub(
+                    r'\n\s*# RUYI-LB-CACHE-START.*?# RUYI-LB-CACHE-END\n',
+                    '\n',
+                    content,
+                    flags=re.DOTALL
+                )
+                WriteFile(nginx_conf_path, content)
+            return
+
         if 'proxy_cache_path' in content and 'cache_one' in content:
             return  # 已定义
         # 确定缓存目录（跨平台）
@@ -563,6 +603,10 @@ class LoadBalanceSiteViewSet(CustomModelViewSet):
         except UpstreamResource.DoesNotExist:
             return ErrorResponse(msg="Upstream资源不存在")
 
+        # stream类型的upstream不能关联到lb_site（http location无法引用stream upstream）
+        if upstream.load_type != "http":
+            return ErrorResponse(msg="TCP/UDP类型的Upstream资源不支持创建负载均衡站点代理，仅支持HTTP类型")
+
         serializer = self.get_serializer(data=reqData, request=request)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -620,6 +664,13 @@ class LoadBalanceSiteViewSet(CustomModelViewSet):
             proxy_conf = os.path.join(proxy_dir, f"{config_name}.conf")
             if os.path.exists(proxy_conf):
                 shutil.copy2(proxy_conf, os.path.join(backup_dir, "proxy.conf"))
+            # 保存元信息用于恢复
+            meta = {
+                "site_name": lb_site.site.name,
+                "proxy_dir": proxy_dir,
+                "config_name": config_name,
+            }
+            WriteFile(os.path.join(backup_dir, "meta.json"), json.dumps(meta))
         except Exception:
             pass
         return backup_dir
@@ -629,30 +680,36 @@ class LoadBalanceSiteViewSet(CustomModelViewSet):
         if not backup_dir or not os.path.exists(backup_dir):
             return
         try:
-            for fname in os.listdir(backup_dir):
-                src = os.path.join(backup_dir, fname)
-                if fname == "site.conf":
-                    # 需要知道站点名才能恢复，从备份文件内容推断
-                    pass
-                elif fname == "proxy.conf":
-                    # proxy.conf恢复需要知道目标路径，暂时跳过
-                    pass
-            # 简单恢复：重新读取备份的site.conf写回
+            # 读取元信息
+            meta_path = os.path.join(backup_dir, "meta.json")
+            meta = {}
+            if os.path.exists(meta_path):
+                meta_content = ReadFile(meta_path)
+                if meta_content:
+                    meta = json.loads(meta_content)
+
+            site_name = meta.get("site_name", "")
+            proxy_dir = meta.get("proxy_dir", "")
+            config_name = meta.get("config_name", "")
+
+            # 恢复站点配置
             site_conf_backup = os.path.join(backup_dir, "site.conf")
-            if os.path.exists(site_conf_backup):
-                # 查找当前所有站点配置，用备份内容覆盖
+            if os.path.exists(site_conf_backup) and site_name:
                 content = ReadFile(site_conf_backup)
                 if content:
-                    # 尝试从备份内容中找到站点名（通过server_name行）
-                    import re
-                    match = re.search(r'server_name\s+(\S+);', content)
-                    if match:
-                        site_name = match.group(1)
-                        try:
-                            ng = NginxClient(siteName=site_name)
-                            WriteFile(ng.confPath, content)
-                        except Exception:
-                            pass
+                    try:
+                        ng = NginxClient(siteName=site_name)
+                        WriteFile(ng.confPath, content)
+                    except Exception:
+                        pass
+
+            # 恢复proxy配置
+            proxy_conf_backup = os.path.join(backup_dir, "proxy.conf")
+            if os.path.exists(proxy_conf_backup) and proxy_dir and config_name:
+                content = ReadFile(proxy_conf_backup)
+                if content:
+                    target_path = os.path.join(proxy_dir, f"{config_name}.conf")
+                    WriteFile(target_path, content)
         except Exception:
             pass
         try:
@@ -690,13 +747,14 @@ class LoadBalanceSiteViewSet(CustomModelViewSet):
         if lb_site.enable_websocket:
             lines.append("        proxy_http_version 1.1;")
             lines.append("        proxy_set_header Upgrade $http_upgrade;")
-            lines.append("        proxy_set_header Connection $proxy_connection;")
+            lines.append('        proxy_set_header Connection "upgrade";')
             lines.append("        proxy_read_timeout 3600s;")
             lines.append("        proxy_send_timeout 3600s;")
 
         if lb_site.enable_cache:
             suffixes = lb_site.cache_suffix.replace(",", "|")
             lines.append(f"        location ~ .*\\.({suffixes})$ {{")
+            lines.append(f"            proxy_pass http://{upstream_name};")
             lines.append(f"            proxy_cache_valid 200 304 {lb_site.cache_time};")
             lines.append("            proxy_cache cache_one;")
             lines.append("            proxy_cache_key $host$uri$is_args$args;")
@@ -809,9 +867,16 @@ class LoadBalanceManageView(CustomAPIView):
             resource.status = not resource.status
             resource.save(update_fields=["status"])
             viewset = UpstreamResourceViewSet()
+            lb_viewset = LoadBalanceSiteViewSet()
             if resource.status:
                 viewset._write_upstream_config(resource)
+                # 重新启用时恢复关联的lb_site proxy配置
+                for lb_site in LoadBalanceSite.objects.filter(upstream=resource, status=True):
+                    lb_viewset._write_lb_proxy_config(lb_site)
             else:
+                # 停用时先删除关联的lb_site proxy配置，避免引用不存在的upstream
+                for lb_site in LoadBalanceSite.objects.filter(upstream=resource, status=True):
+                    lb_viewset._delete_lb_proxy_config(lb_site)
                 viewset._delete_upstream_config(resource)
             WebClient.reload_service(webserver='nginx')
             status_text = "启用" if resource.status else "停用"
@@ -877,12 +942,28 @@ class LoadBalanceManageView(CustomAPIView):
             import socket
             import time
             for s in servers:
-                host_port = s.server.split(":")
-                host = host_port[0] if len(host_port) >= 1 else ""
-                port = int(host_port[1]) if len(host_port) >= 2 else 80
+                # 解析地址，支持IPv6格式如 [::1]:8080
+                server_str = s.server.strip()
+                if server_str.startswith("["):
+                    # IPv6格式 [host]:port
+                    bracket_end = server_str.find("]")
+                    if bracket_end != -1:
+                        host = server_str[1:bracket_end]
+                        port_part = server_str[bracket_end + 1:]
+                        port = int(port_part.lstrip(":")) if port_part.startswith(":") else 80
+                    else:
+                        host = server_str
+                        port = 80
+                else:
+                    host_port = server_str.split(":")
+                    host = host_port[0] if len(host_port) >= 1 else ""
+                    port = int(host_port[1]) if len(host_port) >= 2 else 80
+                # 根据地址类型选择socket族
+                is_ipv6 = ":" in host
+                sock_family = socket.AF_INET6 if is_ipv6 else socket.AF_INET
                 start_time = time.time()
                 try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock = socket.socket(sock_family, socket.SOCK_STREAM)
                     sock.settimeout(3)
                     result = sock.connect_ex((host, port))
                     elapsed = round((time.time() - start_time) * 1000, 1)
@@ -897,7 +978,8 @@ class LoadBalanceManageView(CustomAPIView):
                     if resource.load_type == "http" and result == 0:
                         try:
                             import requests as req_lib
-                            url = f"http://{host}:{port}/"
+                            url_host = f"[{host}]" if is_ipv6 else host
+                            url = f"http://{url_host}:{port}/"
                             resp = req_lib.get(url, timeout=5, allow_redirects=False, verify=False)
                             item["http_status"] = resp.status_code
                             item["http_reachable"] = resp.status_code < 500

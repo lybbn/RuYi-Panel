@@ -882,7 +882,15 @@ def RunCommand(cmdstr,cwd=None,shell=True,bufsize=4096,returncode=False,timeout=
     @param returncode 是否需要返回returncode 0 成功、 1 失败
     @timeout 命令超时时间 单位s秒
     """
-    if platform.system() == 'Windows':
+    # 检测是否包含 heredoc 语法（<< 或 <<-），如果是则直接传递给 shell 执行
+    # heredoc 语法需要多行输入，不能按换行符分割
+    import re
+    has_heredoc = bool(re.search(r'<<-?\s*[\'"]?\w+[\'"]?', cmdstr))
+    
+    if has_heredoc:
+        # heredoc 命令直接传递，不分割
+        commands = cmdstr
+    elif platform.system() == 'Windows':
         commands_list = cmdstr.split("\n")
         commands = '&'.join(commands_list)
     else:

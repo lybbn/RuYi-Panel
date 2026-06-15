@@ -1,10 +1,11 @@
 -- =====================================================
--- WAF 日志记录模块
--- 通过HTTP API将攻击日志写入Django后端数据库
+-- WAF 日志记录模块 (JSONL 文件模式)
+-- 将攻击日志追加写入 JSONL 文件，由 Django 后台任务异步同步到数据库
+-- 优点：面板重启/Worker崩溃不丢日志，支持断点续传
 -- =====================================================
 
 local _M = {
-    _VERSION = '2.0.0'
+    _VERSION = '3.0.0'
 }
 
 local ngx = ngx
@@ -13,205 +14,190 @@ local ngx_ERR = ngx.ERR
 local ngx_INFO = ngx.INFO
 local json = require("cjson.safe")
 
-local API_HOST = "127.0.0.1"
-local API_PORT = nil
-local API_PATH = "/api/waf/internal/?action=log"
-local API_TOKEN = nil
+-- 文件轮转间隔（秒），默认300=5分钟
+local ROTATE_INTERVAL = 300
 
-local LOG_BUFFER = {}
-local LOG_BUFFER_SIZE = 10
-local LOG_BUFFER_TIMEOUT = 5
-local last_flush_time = 0
+-- 当前日志文件句柄及相关状态
+local current_file = nil
+local current_file_path = nil
+local current_file_hour = nil
 
-local function get_api_port()
-    if API_PORT then
-        return API_PORT
-    end
-    
+local function get_waf_data_path()
     local waf_data_path = package.loaded.waf_data_path
     if not waf_data_path or waf_data_path == "" then
         waf_data_path = os.getenv("RUYI_WAF_DATA_PATH")
     end
-    
     if not waf_data_path or waf_data_path == "" then
-        API_PORT = 6789
-        return API_PORT
+        return nil
     end
-    
-    local port_file = waf_data_path .. "/port.ry"
-    local file = io.open(port_file, "r")
-    if file then
-        local port_str = file:read("*a"):gsub("%s+$", "")
-        file:close()
-        local port = tonumber(port_str)
-        if port and port > 0 and port < 65536 then
-            API_PORT = port
-            return API_PORT
-        end
-    end
-    
-    API_PORT = 6789
-    return API_PORT
+    return waf_data_path
 end
 
-local function get_api_token()
-    if API_TOKEN then
-        return API_TOKEN
+local function get_log_dir()
+    local base = get_waf_data_path()
+    if not base then
+        return nil
     end
-    
-    local waf_data_path = package.loaded.waf_data_path
-    if not waf_data_path or waf_data_path == "" then
-        waf_data_path = os.getenv("RUYI_WAF_DATA_PATH")
-    end
-    
-    if not waf_data_path or waf_data_path == "" then
-        return ""
-    end
-    
-    local token_file = waf_data_path .. "/internal_token.ry"
-    local file = io.open(token_file, "r")
-    if file then
-        API_TOKEN = file:read("*a"):gsub("%s+$", "")
-        file:close()
-        return API_TOKEN
-    end
-    
-    return ""
+    return base .. "/logs"
 end
 
-local function send_http_request(body)
-    local sock = ngx.socket.tcp()
-    sock:settimeout(3000)
-    
-    local port = get_api_port()
-    local ok, err = sock:connect(API_HOST, port)
-    if not ok then
-        ngx_log(ngx_ERR, "Failed to connect to API server: ", err)
-        return false, err
+local function ensure_log_dir(log_dir)
+    if not log_dir then
+        return false
     end
-    
-    local token = get_api_token()
-    local content_length = #body
-    
-    local request = string.format(
-        "POST %s HTTP/1.1\r\n" ..
-        "Host: %s:%d\r\n" ..
-        "Content-Type: application/json\r\n" ..
-        "Content-Length: %d\r\n" ..
-        "X-WAF-Token: %s\r\n" ..
-        "Connection: close\r\n" ..
-        "\r\n" ..
-        "%s",
-        API_PATH, API_HOST, port, content_length, token, body
-    )
-    
-    local bytes, err = sock:send(request)
-    if not bytes then
-        ngx_log(ngx_ERR, "Failed to send request: ", err)
-        sock:close()
-        return false, err
-    end
-    
-    local response, err = sock:receive("*a")
-    sock:close()
-    
-    if not response then
-        ngx_log(ngx_ERR, "Failed to receive response: ", err)
-        return false, err
-    end
-    
-    local status = response:match("HTTP/%d%.%d%s+(%d+)")
-    if status and tonumber(status) >= 400 then
-        ngx_log(ngx_ERR, "API returned error status: ", status)
-        return false, "HTTP " .. status
-    end
-    
-    return true, nil
-end
-
-local function send_logs_to_api(logs)
-    if not logs or #logs == 0 then
+    -- 尝试创建目录并设置权限（确保www用户可写）
+    local cmd = "mkdir -p \"" .. log_dir .. "\" 2>/dev/null || mkdir \"" .. log_dir .. "\" 2>/dev/null"
+    local ok = os.execute(cmd)
+    if ok then
+        os.execute("chmod 777 \"" .. log_dir .. "\" 2>/dev/null")
         return true
     end
-    
-    local body = json.encode(logs)
-    return send_http_request(body)
-end
-
-local function flush_buffer()
-    if #LOG_BUFFER == 0 then
+    -- 如果 os.execute 不可用，尝试用 io.open 间接验证
+    local test_file = log_dir .. "/.test_write"
+    local f = io.open(test_file, "w")
+    if f then
+        f:close()
+        os.remove(test_file)
         return true
     end
-    
-    local logs_to_send = LOG_BUFFER
-    LOG_BUFFER = {}
-    
-    local ok, err = send_logs_to_api(logs_to_send)
-    if not ok then
-        for _, log in ipairs(logs_to_send) do
-            table.insert(LOG_BUFFER, log)
-        end
-        return false, err
-    end
-    
-    return true, nil
-end
-
-local function should_flush()
-    if #LOG_BUFFER >= LOG_BUFFER_SIZE then
-        return true
-    end
-    
-    local current_time = ngx.now()
-    if current_time - last_flush_time >= LOG_BUFFER_TIMEOUT then
-        return true
-    end
-    
     return false
 end
 
-function _M.insert_attack_log(log_data)
-    table.insert(LOG_BUFFER, log_data)
-    
-    if should_flush() then
-        local ok, err = flush_buffer()
-        if not ok then
-            ngx_log(ngx_ERR, "Failed to flush log buffer: ", err)
-        end
-        last_flush_time = ngx.now()
+local function get_current_hour()
+    return math.floor(ngx.time() / ROTATE_INTERVAL)
+end
+
+local function build_file_path(log_dir)
+    local timestamp = os.date("%Y%m%d%H%M%S", ngx.time())
+    local pid = ngx.worker.pid()
+    return log_dir .. "/waf_log_" .. timestamp .. "_" .. pid .. ".jsonl"
+end
+
+local function open_log_file()
+    local log_dir = get_log_dir()
+    if not log_dir then
+        return nil, nil, "无法获取WAF数据路径"
     end
-    
+
+    if not ensure_log_dir(log_dir) then
+        return nil, nil, "无法创建日志目录: " .. log_dir
+    end
+
+    local hour = get_current_hour()
+
+    -- 如果当前文件句柄有效且未过期，直接复用
+    if current_file and current_file_path and current_file_hour == hour then
+        return current_file, current_file_path, nil
+    end
+
+    -- 需要打开新文件（首次调用或轮转到期）
+    -- 先关闭旧文件
+    if current_file then
+        pcall(function() current_file:close() end)
+        current_file = nil
+        current_file_path = nil
+        current_file_hour = nil
+    end
+
+    local file_path = build_file_path(log_dir)
+    local f, err = io.open(file_path, "a")
+    if not f then
+        return nil, nil, "无法打开日志文件: " .. (err or "unknown")
+    end
+
+    -- 设置无缓冲写入，确保日志立即落盘
+    f:setvbuf("no")
+
+    current_file = f
+    current_file_path = file_path
+    current_file_hour = hour
+
+    ngx_log(ngx_INFO, "[RUYI-WAF] 日志文件已打开: " .. file_path)
+
+    return f, file_path, nil
+end
+
+local function close_log_file()
+    if current_file then
+        local path = current_file_path or "unknown"
+        pcall(function()
+            current_file:flush()
+            current_file:close()
+        end)
+        current_file = nil
+        current_file_path = nil
+        current_file_hour = nil
+        ngx_log(ngx_INFO, "[RUYI-WAF] 日志文件已关闭: " .. path)
+    end
+end
+
+function _M.insert_attack_log(log_data)
+    if not log_data then
+        return false, "log_data is nil"
+    end
+
+    local f, file_path, err = open_log_file()
+    if not f then
+        ngx_log(ngx_ERR, "[RUYI-WAF] " .. err)
+        return false, err
+    end
+
+    -- 序列化为单行 JSON
+    local ok, json_str = pcall(json.encode, log_data)
+    if not ok then
+        ngx_log(ngx_ERR, "[RUYI-WAF] JSON序列化失败: " .. tostring(json_str))
+        return false, "JSON encode failed"
+    end
+
+    -- 追加写入（JSONL格式：一行一个JSON对象 + 换行）
+    local ok_write, err_write = pcall(function()
+        f:write(json_str)
+        f:write("\n")
+        f:flush()  -- 立即刷盘确保不丢
+    end)
+
+    if not ok_write then
+        ngx_log(ngx_ERR, "[RUYI-WAF] 日志写入失败: " .. tostring(err_write))
+        -- 写入失败时关闭当前句柄，下次重试时会重新打开
+        close_log_file()
+        return false, tostring(err_write)
+    end
+
     return true, nil
 end
 
 function _M.flush()
-    return flush_buffer()
+    -- JSONL模式下每条日志都立即刷盘，flush保持兼容
+    if current_file then
+        pcall(function() current_file:flush() end)
+    end
+    return true, nil
 end
 
+-- 兼容旧API（无操作）
 function _M.set_buffer_size(size)
-    LOG_BUFFER_SIZE = size or 10
+    -- JSONL模式不再需要缓冲区大小
 end
 
 function _M.set_buffer_timeout(timeout)
-    LOG_BUFFER_TIMEOUT = timeout or 5
+    -- JSONL模式不再需要缓冲区超时
 end
 
 function _M.set_api_host(host, port)
-    API_HOST = host or "127.0.0.1"
-    API_PORT = port or 6789
+    -- JSONL模式不再需要API配置
 end
 
 function _M.test_connection()
-    local test_log = {
-        {
-            src_ip = "127.0.0.1",
-            attack_type = "test",
-            severity = "low",
-            dst_url = "/test",
-            action_taken = "log",
-        }
-    }
-    return send_logs_to_api(test_log)
+    -- JSONL模式通过检测日志目录是否可写来验证
+    local log_dir = get_log_dir()
+    if not log_dir then
+        return false, "无法获取WAF数据路径"
+    end
+    if not ensure_log_dir(log_dir) then
+        return false, "无法创建日志目录"
+    end
+    return true, nil
 end
 
+-- close_log_file 由 Nginx exit_worker_by_lua_block 回调调用
 return _M

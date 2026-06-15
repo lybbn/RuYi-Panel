@@ -22,6 +22,29 @@ from wsgiref.util import FileWrapper
 from django.http import StreamingHttpResponse
 
 
+# Vite 构建产物的文件名包含 hash，可以设置长期缓存
+# 匹配类似 app.abc123.js、index.def456.css 这种带 hash 的文件名
+_hash_pattern = re.compile(r'\.[0-9a-f]{8,}\.')
+
+def _is_hashed_asset(filename):
+    """判断静态资源文件名是否包含内容 hash（Vite/Rollup 产物特征）"""
+    return bool(_hash_pattern.search(filename))
+
+def _get_cache_control(path_str, is_hashed):
+    """根据文件类型和是否带 hash 返回 Cache-Control 策略"""
+    ext = os.path.splitext(path_str)[1].lower()
+    # 带 hash 的 JS/CSS/SVG/字体文件 → 长期缓存（1年），内容变了 hash 会变
+    if is_hashed and ext in ('.js', '.css', '.svg', '.woff', '.woff2', '.ttf', '.eot'):
+        return 'public, max-age=31536000, immutable'
+    # 图片资源 → 中期缓存（30天）
+    if ext in ('.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.avif'):
+        return 'public, max-age=2592000'
+    # HTML 和其他 → 短期缓存（1小时），确保更新及时生效
+    if ext in ('.html', '.htm'):
+        return 'public, max-age=3600, must-revalidate'
+    # 其他静态资源 → 1天缓存
+    return 'public, max-age=86400'
+
 def streamingmedia_serve(request, path, document_root=None, show_indexes=False):
     """
     Serve static files below a given point in the directory structure.
@@ -62,10 +85,25 @@ def streamingmedia_serve(request, path, document_root=None, show_indexes=False):
         response['Content-Length'] = fullpath.stat().st_size
         return response
     else:
+        # 尝试返回 gzip 预压缩文件（构建时由 vite-plugin-compression 生成）
+        accept_encoding = request.META.get('HTTP_ACCEPT_ENCODING', '')
+        if 'gzip' in accept_encoding and fullpath.suffix in ('.js', '.css', '.svg', '.html', '.json', '.woff2', '.ttf'):
+            gz_path = fullpath.with_suffix(fullpath.suffix + '.gz')
+            if gz_path.exists():
+                response = FileResponse(gz_path.open('rb'), content_type=content_type)
+                response.headers["Content-Encoding"] = 'gzip'
+                response.headers["Content-Length"] = gz_path.stat().st_size
+                response.headers["Vary"] = 'Accept-Encoding'
+                response.headers["Last-Modified"] = http_date(statobj.st_mtime)
+                response.headers["Cache-Control"] = _get_cache_control(path, _is_hashed_asset(fullpath.name))
+                return response
         response = FileResponse(fullpath.open('rb'), content_type=content_type)
         response.headers["Last-Modified"] = http_date(statobj.st_mtime)
         if encoding:
             response.headers["Content-Encoding"] = encoding
+        # 添加缓存控制头
+        response.headers["Cache-Control"] = _get_cache_control(path, _is_hashed_asset(fullpath.name))
+        response.headers["Vary"] = 'Accept-Encoding'
         return response
 
 

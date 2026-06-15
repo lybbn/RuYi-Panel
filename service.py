@@ -95,12 +95,15 @@ class RuyiService(win32serviceutil.ServiceFramework):
         
         self.logger.info("Starting subprocess...")
         try:
+            sub_env = os.environ.copy()
+            sub_env['DJANGO_SETTINGS_MODULE'] = 'ruyi.settings'
             # 使用Popen的上下文管理确保资源释放
             with subprocess.Popen(
                 ['python', 'start.py'],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=sub_env
             ) as self.process:
                 
                 # 启动日志重定向线程

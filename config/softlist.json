@@ -93,11 +93,6 @@
 				"c_version": "5.7.38",
 				"url":"https://mirrors.huaweicloud.com/mysql/Downloads/MySQL-5.7/mysql-boost-5.7.38.tar.gz",
 				"url2": "https://mirrors.aliyun.com/mysql/MySQL-5.7/mysql-boost-5.7.38.tar.gz"
-			}, {
-				"id": 2,
-				"version": "8.0",
-				"c_version": "8.0.28",
-				"url": "https://mirrors.aliyun.com/mysql/MySQL-8.0/mysql-boost-8.0.28.tar.gz"
 			},{
 				"id": 3,
 				"version": "8.0",
